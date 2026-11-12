@@ -44,6 +44,7 @@ struct SearchConfig {
 	int horizon_turns = 1;        // stop when this many new turns have started
 	double exploration = 0.6;
 	double prior_bias = 0.25;     // weight of the playout policy as a fading bonus in UCB
+	double max_blend = 0.5;       // share of the best-line value (vs the average) in UCB
 	int max_rollout_steps = 600;
 	int keep_trajectories = 6;    // best trajectories kept per first move
 	const std::atomic<bool>* cancel = nullptr;  // set to true to stop early (results so far are kept)
@@ -74,7 +75,14 @@ public:
 	                 const std::function<void(int, double)>& progress = {});
 	// Moves `player`'s Set actions in `t` to the end of their Main Phase, if the reordered line
 	// replays and scores at least as well. Returns true when `t` was changed.
+	// Also drops Battle Phases that pass straight to Main Phase 2.
 	bool defer_sets(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
+	// Removes Normal Summons / monster Sets that add nothing (the line scores as well without
+	// them), e.g. summoning a hand trap with no use for the body.
+	bool drop_idle_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
+	// Replays t.steps by their labels from `root`, filling in responses and reward. Fails if a
+	// step is no longer available or the result scores below `min_reward`.
+	bool replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward);
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 

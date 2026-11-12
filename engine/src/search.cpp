@@ -26,6 +26,7 @@ struct Child {
 	std::string label;
 	Node* node = nullptr;
 	double W = 0;
+	double hi = 0, lo = 1;  // best and worst reward seen through this child
 	int N = 0;
 	int avail = 0;
 	bool bad = false;  // the core rejected this answer
@@ -72,7 +73,7 @@ double policy_weight(const Decision& d, const Option& o, uint8_t turn_player, in
 		case OptKind::SSet: return developing ? 0.05 : 2.0;
 		case OptKind::MSet: return developing ? 0.03 : 0.3;
 		case OptKind::Reposition: return 0.05;
-		case OptKind::ToBattle: return 1.0;
+		case OptKind::ToBattle: return developing ? 0.15 : 1.0;  // combo in Main Phase 1, then attack
 		// Before ending the turn, set what can be set (ending is still possible, just tried later).
 		case OptKind::ToEnd: return can_set ? 0.02 : developing ? 0.3 + 0.03 * steps_this_turn : 1.0;
 		default: return 1.0;
@@ -131,6 +132,42 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 		return s.player == player && s.type == DecisionType::Idle &&
 		       (s.label == "Go to End Phase" || s.label == "Go to Battle Phase");
 	};
+	// A Battle Phase that only passes straight to Main Phase 2 (no attack, no effect) is a
+	// detour: drop it so the turn reads Main Phase 1 → plays → end.
+	std::vector<char> drop(t.steps.size(), 0);
+	bool dropped = false;
+	for(size_t i = 0; i < t.steps.size(); ++i) {
+		const Step& s = t.steps[i];
+		if(s.player != player || s.type != DecisionType::Idle || s.label != "Go to Battle Phase")
+			continue;
+		size_t j = i + 1;
+		bool idle = true;
+		while(j < t.steps.size() && !(t.steps[j].player == player && t.steps[j].type == DecisionType::Battle)) {
+			if(t.steps[j].type == DecisionType::Idle || (t.steps[j].label != "Don't respond" && !t.steps[j].minor))
+				idle = false;
+			++j;
+		}
+		if(!idle || j >= t.steps.size() || t.steps[j].label != "Go to Main Phase 2")
+			continue;
+		// Whatever followed in Main Phase 2 now happens in Main Phase 1; anything after
+		// that (End Phase) is unchanged.
+		for(size_t k = i; k <= j; ++k)
+			drop[k] = 1;
+		dropped = true;
+	}
+	if(dropped) {
+		Trajectory shorter = t;
+		shorter.steps.clear();
+		for(size_t k = 0; k < t.steps.size(); ++k)
+			if(!drop[k])
+				shorter.steps.push_back(t.steps[k]);
+		Trajectory saved = t;
+		t = std::move(shorter);
+		if(!defer_sets(root, t, player, horizon_turns) && !replay_labels(root, t, player, horizon_turns, saved.reward))
+			t = std::move(saved);
+		return t.steps.size() != saved.steps.size() || t.responses != saved.responses;
+	}
+
 	// Build the new order: each early Set, together with everything up to the player's next
 	// Main Phase action (zone choice, the chain windows the Set opened), is moved to just
 	// before the player leaves that Main Phase.
@@ -178,8 +215,56 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 		if(dbg) fprintf(stderr, "defer: line cut before phase end\n");
 		return false;  // the line was cut before the phase ended: leave it as it is
 	}
+	Trajectory reordered = t;
+	reordered.steps.clear();
+	for(size_t k : order)
+		reordered.steps.push_back(t.steps[k]);
+	double before = t.reward;
+	Trajectory saved = t;
+	t = std::move(reordered);
+	if(!replay_labels(root, t, player, horizon_turns, before)) {
+		t = std::move(saved);
+		return false;
+	}
+	return true;
+}
 
-	// Replay the new order by labels; every step must still be available.
+bool Searcher::drop_idle_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns) {
+	bool changed = false;
+	for(size_t i = 0; i < t.steps.size(); ++i) {
+		const Step& s = t.steps[i];
+		if(s.player != player || s.type != DecisionType::Idle)
+			continue;
+		bool summon = s.label.rfind("Normal Summon ", 0) == 0;
+		bool mset = s.label.rfind("Set ", 0) == 0 && i + 1 < t.steps.size() && t.steps[i + 1].type == DecisionType::Position;
+		if(!summon && !mset)
+			continue;
+		// The step plus everything up to the player's next Main Phase action.
+		size_t j = i + 1;
+		bool quiet = true;  // nothing but zone/position choices and passes follow
+		while(j < t.steps.size() && t.steps[j].type != DecisionType::Idle) {
+			if(!t.steps[j].minor && t.steps[j].type != DecisionType::Position && t.steps[j].label != "Don't respond")
+				quiet = false;
+			++j;
+		}
+		// If the summon drew a response (a hand trap, a trigger), removing it would also remove
+		// that response and the comparison would be unfair: keep it.
+		if(!quiet)
+			continue;
+		Trajectory candidate = t;
+		candidate.steps.erase(candidate.steps.begin() + static_cast<long>(i), candidate.steps.begin() + static_cast<long>(j));
+		if(replay_labels(root, candidate, player, horizon_turns, t.reward - 0.002)) {
+			t = std::move(candidate);
+			changed = true;
+			--i;  // the next step now sits at index i
+		}
+	}
+	return changed;
+}
+
+bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward) {
+	static const bool dbg = std::getenv("YGOE_DEFER_DEBUG") != nullptr;
+	// Replay the steps by labels; every step must still be available.
 	Duel d(db_, scripts_);
 	d.set_declare_pool(pool_);
 	if(!d.replay(root.setup, root.history))
@@ -187,8 +272,7 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 	const uint32_t root_turn = d.turn();
 	Trajectory out;
 	out.root = t.root;
-	for(size_t k : order) {
-		const Step& s = t.steps[k];
+	for(const Step& s : t.steps) {
 		const Decision& dec = d.decision();
 		if(d.ended() || dec.options.empty() || dec.player != s.player)
 			return false;
@@ -213,9 +297,19 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 	}
 	uint8_t next = d.turn() >= root_turn + static_cast<uint32_t>(horizon_turns) ? d.turn_player()
 	                                                                             : static_cast<uint8_t>(1 - d.turn_player());
-	out.reward = eval_.evaluate(d.board(), player, next, d.ended(), d.winner()).score;
-	if(out.reward + 0.01 < t.reward) {
-		if(dbg) fprintf(stderr, "defer: reward %.3f < %.3f\n", out.reward, t.reward);
+	auto evr = eval_.evaluate(d.board(), player, next, d.ended(), d.winner(), dbg);
+	out.reward = evr.score;
+	if(dbg) {
+		fprintf(stderr, "replay: me %.2f opp %.2f next P%d\n", evr.value[player], evr.value[1 - player], next);
+		auto b = d.board();
+		for(int pl = 0; pl < 2; ++pl) {
+			std::string f;
+			for(auto& c : b.hand[pl]) f += db_.name(c.code) + "; ";
+			fprintf(stderr, "   P%d hand: %s\n", pl, f.c_str());
+		}
+	}
+	if(out.reward + 0.01 < min_reward) {
+		if(dbg) fprintf(stderr, "defer: reward %.3f < %.3f\n", out.reward, min_reward);
 		return false;
 	}
 	if(dbg) fprintf(stderr, "defer: ok\n");
@@ -323,11 +417,24 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				// anything else can be done.
 				if(dec.type == DecisionType::Idle && dec.options.size() > 1) {
 					size_t blocked = 0;
-					for(size_t i = 0; i < dec.options.size(); ++i)
-						if(dec.options[i].kind == OptKind::MSet && eval_.role(dec.player, dec.options[i].code).hand_trap) {
+					for(size_t i = 0; i < dec.options.size(); ++i) {
+						const Option& o = dec.options[i];
+						bool block = o.kind == OptKind::MSet && eval_.role(dec.player, o.code).hand_trap;
+						// Setting a Spell you could activate from the hand right now only delays it
+						// (Quick-Play Spells are the exception: they can wait for the opponent's turn).
+						if(o.kind == OptKind::SSet) {
+							auto c = db_.get(o.code);
+							bool spell = c && (c->type & TYPE_SPELL) && !(c->type & TYPE_QUICKPLAY);
+							if(spell)
+								for(const auto& other : dec.options)
+									if(other.kind == OptKind::Activate && other.code == o.code && other.loc == LOCATION_HAND)
+										block = true;
+						}
+						if(block) {
 							tried[i] = 1;
 							++blocked;
 						}
+					}
 					if(blocked == dec.options.size())
 						std::fill(tried.begin(), tried.end(), 0);
 				}
@@ -378,7 +485,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 								uw.push_back(weight(dec, dec.options[i]));
 								continue;
 							}
-							double q = c.W / c.N;
+							// Blend the average with the best line found (worst, for the opponent):
+							// a turn is mostly our own choices, and random playouts after a strong
+							// starter undersell it.
+							double q = (1 - cfg.max_blend) * (c.W / c.N) + cfg.max_blend * (dec.player == me ? c.hi : c.lo);
 							if(dec.player != me)
 								q = 1.0 - q;
 							double prior = max_prior > 0
@@ -452,8 +562,13 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				root->N++;
 				for(auto& [n, ci] : path) {
 					n->N++;
-					n->children[ci].N++;
-					n->children[ci].W += ev.score;
+					Child& ch = n->children[ci];
+					if(ch.N == 0)
+						ch.hi = ch.lo = ev.score;
+					ch.N++;
+					ch.W += ev.score;
+					ch.hi = std::max(ch.hi, ev.score);
+					ch.lo = std::min(ch.lo, ev.score);
 				}
 				Group& g = groups[first_action(traj, me)];
 				++g.count;

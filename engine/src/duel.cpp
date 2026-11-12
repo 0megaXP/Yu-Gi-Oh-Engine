@@ -1101,7 +1101,7 @@ Board Duel::board(bool include_decks) const {
 	b.turn_player = turn_player_;
 	b.phase = phase_;
 	uint32_t flags = QUERY_CODE | QUERY_POSITION | QUERY_TYPE | QUERY_LEVEL | QUERY_RANK | QUERY_ATTACK |
-	                 QUERY_DEFENSE | QUERY_OVERLAY_CARD | QUERY_STATUS | QUERY_LINK;
+	                 QUERY_DEFENSE | QUERY_OVERLAY_CARD | QUERY_STATUS | QUERY_LINK | QUERY_OWNER;
 	auto query = [&](uint8_t con, uint32_t loc, std::vector<CardView>& out) {
 		OCG_QueryInfo qi{};
 		qi.flags = flags;
@@ -1120,6 +1120,7 @@ Board Duel::board(bool include_decks) const {
 			}
 			CardView cv;
 			cv.con = con;
+			cv.owner = con;
 			cv.loc = static_cast<uint8_t>(loc);
 			cv.seq = seq++;
 			bool done = false;
@@ -1135,6 +1136,7 @@ Board Duel::board(bool include_decks) const {
 				case QUERY_ATTACK: cv.atk = r.get<int32_t>(); break;
 				case QUERY_DEFENSE: cv.def = r.get<int32_t>(); break;
 				case QUERY_STATUS: cv.status = r.get<uint32_t>(); break;
+				case QUERY_OWNER: cv.owner = r.get<uint8_t>(); break;
 				case QUERY_IS_PUBLIC: cv.is_public = r.get<uint8_t>() != 0; break;
 				case QUERY_LINK: cv.link = r.get<uint32_t>(); r.get<uint32_t>(); break;
 				case QUERY_OVERLAY_CARD: {

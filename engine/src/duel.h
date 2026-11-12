@@ -84,6 +84,7 @@ struct CardView {
 	uint32_t level = 0, rank = 0, link = 0;
 	uint32_t status = 0;
 	bool is_public = false;
+	uint8_t owner = 0;
 	std::vector<uint32_t> overlay;
 };
 

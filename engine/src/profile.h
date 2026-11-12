@@ -42,6 +42,13 @@ struct CardRole {
 	std::vector<Interrupt> interrupts;  // quick effects / traps usable on the opponent's turn
 	bool hand_trap = false;
 	bool engine = false;               // part of the deck's own combo (by archetype or role)
+	// Static effects that work while the card sits in a zone (locks, protection, buffs).
+	// Bits: LOCATION_MZONE / LOCATION_SZONE (Spell/Trap, Field and Pendulum Zones all map here).
+	double passive_mzone = 0, passive_szone = 0;
+	// The card has effects its controller can use again from that zone on a later turn.
+	bool reusable_mzone = false, reusable_szone = false;
+	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
+	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };
 
 // Card-level classification from scripts. `deck_sets` are the archetype codes that dominate

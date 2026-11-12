@@ -19,6 +19,17 @@ constexpr uint64_t CAT_DESTROY = 0x1, CAT_RELEASE = 0x2, CAT_REMOVE = 0x4, CAT_T
                    CAT_CONTROL = 0x2000, CAT_DISABLE = 0x4000, CAT_DISABLE_SUMMON = 0x8000, CAT_DRAW = 0x10000,
                    CAT_SEARCH = 0x20000, CAT_NEGATE = 0x10000000;
 
+// The scripts use finer zone constants (LOCATION_STZONE, FZONE, PZONE, MMZONE, EMZONE);
+// fold them into the two the evaluator looks at.
+uint32_t zones(uint32_t range) {
+	uint32_t out = range & (LOCATION_HAND | LOCATION_GRAVE | LOCATION_REMOVED | LOCATION_DECK | LOCATION_EXTRA);
+	if(range & (LOCATION_MZONE | 0x800 | 0x1000))
+		out |= LOCATION_MZONE;
+	if(range & (LOCATION_SZONE | 0x100 | 0x200 | 0x400))
+		out |= LOCATION_SZONE;
+	return out;
+}
+
 bool activated(const EffectInfo& e) {
 	return e.type & (ET_ACTIVATE | ET_IGNITION | ET_TRIGGER_O | ET_TRIGGER_F | ET_QUICK_O | ET_QUICK_F | ET_FLIP);
 }
@@ -49,9 +60,37 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 	const bool is_quickplay = (c->type & TYPE_SPELL) && (c->type & TYPE_QUICKPLAY);
 	const bool is_monster = c->type & TYPE_MONSTER;
 	bool engine_effect = false;
+	const uint32_t home = is_monster ? (uint32_t)LOCATION_MZONE : (uint32_t)LOCATION_SZONE;
 	for(const auto& e : c->effects) {
-		if(!activated(e))
+		// Static effects: FIELD effects with a range, and protection on the card itself.
+		constexpr uint32_t ET_SINGLE = 0x1, ET_FIELD_T = 0x2, ET_CONT = 0x800;
+		constexpr uint32_t EF_IMMUNE = 1, EF_INDES_EFFECT = 41, EF_INDES_BATTLE = 42, EF_CANNOT_BE_TARGET = 71,
+		                   EF_CANNOT_ACTIVATE = 6, EF_DISABLE = 2;
+		if(!activated(e)) {
+			uint32_t where = zones(e.range);
+			double v = 0;
+			if((e.type & ET_FIELD_T) && where)
+				v = (e.code == EF_CANNOT_ACTIVATE || e.code == EF_DISABLE) ? 0.15 : 0.08;  // locks weigh more
+			else if((e.type & ET_SINGLE) && (e.code == EF_IMMUNE || e.code == EF_INDES_EFFECT ||
+			                                  e.code == EF_INDES_BATTLE || e.code == EF_CANNOT_BE_TARGET))
+				v = 0.15, where = where ? where : home;
+			else if((e.type & ET_CONT) && (e.type & ET_FIELD_T) && where)
+				v = 0.1;
+			if(where & LOCATION_MZONE)
+				role.passive_mzone = std::min(0.6, role.passive_mzone + v);
+			if(where & LOCATION_SZONE)
+				role.passive_szone = std::min(0.6, role.passive_szone + v);
 			continue;
+		}
+		{
+			uint32_t where = zones(e.range ? e.range : home);
+			if(e.type & (ET_IGNITION | ET_TRIGGER_O | ET_TRIGGER_F | ET_QUICK_O | ET_QUICK_F)) {
+				if(where & LOCATION_MZONE)
+					role.reusable_mzone = true;
+				if(where & LOCATION_SZONE)
+					role.reusable_szone = true;
+			}
+		}
 		bool quick = e.type & (ET_QUICK_O | ET_QUICK_F);
 		bool set_card = (e.type & ET_ACTIVATE) && (is_trap || is_quickplay);
 		if(!quick && !set_card) {
@@ -60,7 +99,7 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 			continue;
 		}
 		Interrupt in;
-		in.range = set_card ? (uint32_t)LOCATION_SZONE : (e.range ? e.range : (uint32_t)LOCATION_MZONE);
+		in.range = set_card ? (uint32_t)LOCATION_SZONE : zones(e.range ? e.range : home);
 		in.once = e.count_limit > 0;
 		uint64_t cat = e.category;
 		if(cat & CAT_NEGATE)
@@ -90,6 +129,28 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 		if(is_monster && (in.range & LOCATION_HAND))
 			role.hand_trap = true;
 		role.interrupts.push_back(in);
+	}
+	// Some quick effects are registered from inside other functions, so the static pass can't
+	// see them; the card text still says "(Quick Effect)".
+	if(role.interrupts.empty() && !is_trap) {
+		std::string text = db.text(c->code);
+		auto has = [&](const char* w) { return text.find(w) != std::string::npos; };
+		if(has("(Quick Effect)")) {
+			Interrupt in;
+			in.range = is_monster ? (has("discard this card") || has("from your hand") ? (uint32_t)LOCATION_HAND : (uint32_t)LOCATION_MZONE)
+			                      : (uint32_t)LOCATION_SZONE;
+			if(has("negate the activation") || has("negate that activation"))
+				in.kind = Interrupt::NegateActivation, in.base = 1.0;
+			else if(has("negate"))
+				in.kind = Interrupt::NegateEffect, in.base = 0.8;
+			else if(has("banish") || has("destroy") || has("return") || has("send") || has("shuffle"))
+				in.kind = Interrupt::Removal, in.base = 0.65;
+			else
+				in.kind = Interrupt::Other, in.base = 0.2;
+			if(is_monster && (in.range & LOCATION_HAND))
+				role.hand_trap = true;
+			role.interrupts.push_back(in);
+		}
 	}
 	bool archetype = false;
 	for(auto s : deck_sets)

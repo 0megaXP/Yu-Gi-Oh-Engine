@@ -68,15 +68,37 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		for(const auto& cv : b.mzone[p]) {
 			if(!cv.code)
 				continue;
+			// A monster the other player owns (handed over by an effect) is mostly a body that
+			// will go back or be used up; it is not that player's engine.
+			if(cv.owner != p) {
+				v += 0.1;
+				continue;
+			}
+			const bool live = (cv.pos & POS_FACEUP) && !(cv.status & kStatusDisabled);
 			double body = (cv.pos & POS_FACEUP) ? 0.35 + 0.35 * std::min(cv.atk, 4000) / 4000.0 : 0.3;
 			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_MZONE, "field");
-			v += body + iv;
+			double extra = 0;
+			if(live) {
+				const CardRole& r = role(p, cv.code);
+				extra = r.passive(LOCATION_MZONE) * (defending ? 1.0 : 0.6) + (r.reusable(LOCATION_MZONE) ? 0.08 : 0.0);
+			}
+			v += body + iv + extra;
 		}
 		for(const auto& cv : b.szone[p]) {
 			if(!cv.code)
 				continue;
-			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_SZONE, (cv.pos & POS_FACEDOWN) ? "set" : "S/T zone");
-			v += std::max(iv, (cv.pos & POS_FACEDOWN) ? 0.1 : 0.25);
+			const bool facedown = cv.pos & POS_FACEDOWN;
+			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_SZONE, facedown ? "set" : "S/T zone");
+			if(facedown) {
+				v += std::max(iv, 0.1);
+				continue;
+			}
+			// Face-up Spell/Trap Zone cards are worth what they do from there: static effects,
+			// effects you can use again, interruptions. A card with nothing to do there (e.g. a
+			// monster placed as a Continuous Spell that has no Spell-Zone effect) is nearly dead.
+			const CardRole& r = role(p, cv.code);
+			double worth = (cv.status & kStatusDisabled) ? 0 : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 : 0.0);
+			v += std::max(0.05, iv + worth);
 		}
 		for(const auto& cv : b.grave[p])
 			v += 0.03 + interrupts_from(cv, LOCATION_GRAVE, "GY");

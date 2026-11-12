@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <sstream>
 
 #include "json.h"
@@ -155,23 +156,118 @@ int LiveDuel::choose(BotLevel level) {
 	}
 	// Plan the rest of this turn from the exact current state.
 	SearchConfig cfg;
-	cfg.iterations = level == BotLevel::Strong ? 1200 : 350;
-	cfg.seconds = level == BotLevel::Strong ? 20 : 8;
+	cfg.iterations = level == BotLevel::Strong ? 2500 : 800;
+	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
 	cfg.horizon_turns = 1;
 	cfg.cancel = &cancel_;
 	std::vector<RootState> roots{{setup_, history_}};
 	auto out = searcher_->run(roots, d.player, cfg);
 	if(out.moves.empty())
 		return 0;
-	const MoveStats& best = out.moves.front();
+	// Combo turns are long, and random playouts after a strong first card are noisy, so the
+	// average alone undersells good starters. Rank well-explored moves by a blend of their
+	// average and the best complete line found through them.
+	const MoveStats* pick = &out.moves.front();
+	{
+		int most = out.moves.front().visits;
+		double best_score = -1;
+		for(const auto& m : out.moves) {
+			if(m.visits < std::max(8, most / 6) || m.best.empty())
+				continue;
+			double score = 0.4 * m.mean + 0.6 * m.best.front().reward;
+			if(score > best_score) {
+				best_score = score;
+				pick = &m;
+			}
+		}
+	}
+	// Strong, at the start of its own Main Phase: play the opponent's next turn against the
+	// end board of each of the best few candidates and keep the one that holds up best.
+	std::vector<std::pair<const MoveStats*, Trajectory>> repaired;
+	auto repair = [&](const MoveStats& m) {
+		Trajectory t = m.best.front();
+		searcher_->defer_sets(roots[0], t, d.player, cfg.horizon_turns);
+		searcher_->drop_idle_summons(roots[0], t, d.player, cfg.horizon_turns);
+		return t;
+	};
+	const bool check_boards = level == BotLevel::Strong && d.type == DecisionType::Idle &&
+	                          d.player == duel_->turn_player() && duel_->phase() == PHASE_MAIN1;
+	if(check_boards && !cancel_) {
+		std::vector<std::pair<double, const MoveStats*>> ranked;
+		int most = out.moves.front().visits;
+		for(const auto& m : out.moves)
+			if(!m.best.empty() && m.visits >= std::min(2, most))
+				ranked.push_back({0.4 * m.mean + 0.6 * m.best.front().reward, &m});
+		std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) { return a.first > b.first; });
+		if(ranked.size() > 3)
+			ranked.resize(3);
+		double best_total = -1;
+		for(auto& [own, m] : ranked) {
+			Trajectory t = repair(*m);
+			RootState after{setup_, history_};
+			after.history.insert(after.history.end(), t.responses.begin(), t.responses.end());
+			SearchConfig vc;
+			vc.iterations = 250;
+			vc.seconds = 6;
+			vc.horizon_turns = 1;
+			vc.cancel = &cancel_;
+			auto vo = searcher_->run({after}, d.player, vc);
+			if(vo.moves.empty())
+				continue;
+			const MoveStats* reply = &vo.moves.front();
+			if(vo.root_player != d.player)
+				for(const auto& r : vo.moves)
+					if(r.visits >= std::max(10, vo.moves.front().visits / 4) && r.mean < reply->mean)
+						reply = &r;
+			double total = 0.35 * t.reward + 0.65 * reply->mean;
+			if(std::getenv("YGOE_BOT_DEBUG"))
+				fprintf(stderr, "   board check: own %.3f, after their turn %.3f  (%s)\n", t.reward, reply->mean,
+				        m->label.substr(0, 60).c_str());
+			if(total > best_total) {
+				best_total = total;
+				pick = m;
+				repaired.clear();
+				repaired.push_back({m, std::move(t)});
+			}
+		}
+	}
+	const MoveStats& best = *pick;
 	std::string want = best.label;
+	if(std::getenv("YGOE_BOT_DEBUG")) {
+		fprintf(stderr, "bot P%d turn %u, %d iterations:\n", d.player, duel_->turn(), out.iterations);
+		for(size_t i = 0; i < out.moves.size() && i < 8; ++i)
+			fprintf(stderr, "   %5d  %.3f  %s\n", out.moves[i].visits, out.moves[i].mean, out.moves[i].label.substr(0, 90).c_str());
+		for(size_t i = 0; i < out.moves.size() && i < 3; ++i) {
+			if(out.moves[i].best.empty())
+				continue;
+			const Trajectory& t = out.moves[i].best.front();
+			fprintf(stderr, "   best for #%zu: reward %.3f\n", i + 1, t.reward);
+			for(auto& l : describe(t, d.player, true))
+				fprintf(stderr, "      %s\n", l.substr(0, 140).c_str());
+			Board fb;
+			if(searcher_->final_board(roots[0], t, fb)) {
+				auto ev = eval_->evaluate(fb, d.player, 1 - d.player, false, -1, true);
+				fprintf(stderr, "      values me %.2f opp %.2f\n", ev.value[d.player], ev.value[1 - d.player]);
+				for(int pl = 0; pl < 2; ++pl) {
+					std::string f;
+					for(auto& c : fb.mzone[pl]) f += db_.name(c.code) + (c.owner != pl ? "(*)" : "") + ", ";
+					for(auto& c : fb.szone[pl]) f += "[" + db_.name(c.code) + "], ";
+					fprintf(stderr, "      P%d field: %s hand %zu\n", pl, f.c_str(), fb.hand[pl].size());
+				}
+			}
+		}
+		auto b = duel_->board();
+		std::string hand;
+		for(auto& c : b.hand[d.player])
+			hand += db_.name(c.code) + "; ";
+		fprintf(stderr, "   hand: %s\n", hand.c_str());
+	}
 	plan_.clear();
 	plan_pos_ = 0;
 	if(!best.best.empty()) {
-		Trajectory t = best.best.front();
 		// Develop first, set last: the same end board with fewer chances for the opponent
 		// to hit set cards, and no Spell/Trap Zone blocked mid-combo.
-		searcher_->defer_sets(roots[0], t, d.player, cfg.horizon_turns);
+		Trajectory t = !repaired.empty() && repaired.front().first == &best ? repaired.front().second : repair(best);
 		plan_ = t.steps;
 		if(!plan_.empty() && plan_.front().player == d.player)
 			want = plan_.front().label;
