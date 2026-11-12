@@ -32,6 +32,8 @@ public:
 	std::string analyze(const std::string& request);
 	std::string profile(const std::string& request);
 	std::string side(const std::string& request);
+	// {"deck": deck, "hands": 20, "iterations": 1500, "seed": n} -> reference boards (docs/api.md)
+	std::string reference(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
 	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and

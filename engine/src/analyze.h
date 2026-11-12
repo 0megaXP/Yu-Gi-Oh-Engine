@@ -35,6 +35,7 @@ struct LineReport {
 	double own_turn_score = 0;           // phase A: static score of the end board
 	double after_opponent = -1;          // phase B: score after the opponent's best turn (-1 = not run)
 	double combined = 0;
+	double board_value = 0;              // deck-neutral value, comparable with reference boards
 	int visits = 0;
 	std::vector<CardSummary> end_board;  // the player's cards on field / set / in hand
 	std::vector<CardSummary> interrupts; // what the board can stop, valued against this opponent

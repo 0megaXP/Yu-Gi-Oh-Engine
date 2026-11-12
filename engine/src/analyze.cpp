@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "ocgapi_constants.h"
+#include "reference.h"
 
 namespace ygoe {
 
@@ -177,6 +178,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 			uint8_t next = 1 - sc.me;
 			auto ev = eval.evaluate(end, sc.me, next, false, -1, true);
 			line.own_turn_score = 0.5 * mv.mean + 0.5 * ev.score;
+			line.board_value = board_value(db, sc.decks[sc.me], end, sc.me);
 			line.end_board = summarize_cards(db, end, sc.me);
 			line.interrupts = notes_to_cards(db, ev.notes, sc.me);
 		}
@@ -262,7 +264,8 @@ std::string AnalysisResult::to_json() const {
 		const auto& l = lines[i];
 		o << (i ? "," : "") << "{\"first_move\":" << json_str(l.first_move) << ",\"moves\":" << json_strings(l.moves)
 		  << ",\"own_turn_score\":" << fmt(l.own_turn_score, 3) << ",\"after_opponent\":" << fmt(l.after_opponent, 3)
-		  << ",\"combined\":" << fmt(l.combined, 3) << ",\"visits\":" << l.visits
+		  << ",\"combined\":" << fmt(l.combined, 3) << ",\"board_value\":" << fmt(l.board_value, 3)
+		  << ",\"visits\":" << l.visits
 		  << ",\"end_board\":" << json_cards(l.end_board) << ",\"interrupts\":" << json_cards(l.interrupts)
 		  << ",\"opponent_reply\":" << json_strings(l.opponent_reply) << ",\"board_after\":" << json_cards(l.board_after)
 		  << "}";

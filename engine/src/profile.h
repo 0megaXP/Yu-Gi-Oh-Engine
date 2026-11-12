@@ -57,6 +57,9 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 std::vector<uint16_t> dominant_setcodes(const CardDB& db, const Deck& deck);
 DeckProfile profile_deck(const CardDB& db, const Deck& deck);
 
+// An average competitive deck, for scores that should not depend on one opponent.
+DeckProfile generic_profile();
+
 // How much an interrupt is worth against this specific opponent (≈0..1.2).
 double interrupt_value(const Interrupt& in, const DeckProfile& opp);
 

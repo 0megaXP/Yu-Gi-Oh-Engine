@@ -247,6 +247,7 @@ int main(int argc, char** argv) {
 		std::string out = what == "analyze" ? engine.analyze(ss.str())
 		                  : what == "profile" ? engine.profile(ss.str())
 		                  : what == "side" ? engine.side(ss.str())
+		                  : what == "reference" ? engine.reference(ss.str())
 		                  : std::string("{\"error\":\"unknown call\"}");
 		std::printf("%s\n", out.c_str());
 		return out.rfind("{\"error\"", 0) == 0 ? 1 : 0;

@@ -245,6 +245,18 @@ std::string DeckProfile::summary() const {
 	return o.str();
 }
 
+DeckProfile generic_profile() {
+	DeckProfile g;
+	g.name = "generic";
+	g.monster_effects = 0.5;
+	g.hand_effects = 0.12;
+	g.gy_effects = 0.15;
+	g.spell_trap = 0.23;
+	g.searches = 0.35;
+	g.special_summons = 0.45;
+	return g;
+}
+
 double interrupt_value(const Interrupt& in, const DeckProfile& o) {
 	double f = 1.0;
 	switch(in.kind) {

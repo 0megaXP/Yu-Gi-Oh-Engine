@@ -8,6 +8,7 @@
 #include "analyze.h"
 #include "json.h"
 #include "live.h"
+#include "reference.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
 #include "side.h"
@@ -319,6 +320,28 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 		return nullptr;
 	}
 	return live;
+}
+
+std::string Engine::reference(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	std::lock_guard<std::mutex> run(run_mu_);
+	cancel_ = false;
+	std::string err;
+	Value req = Value::parse(request, &err);
+	Deck d;
+	if(!read_deck(req["deck"], d, err))
+		return error_json(err);
+	int hands = static_cast<int>(req["hands"].integer(20));
+	int iterations = static_cast<int>(req["iterations"].integer(1500));
+	set_progress("reference", 0, hands);
+	auto res = build_reference(db_, *scripts_, d, hands, iterations, static_cast<uint64_t>(req["seed"].integer(1)), &cancel_,
+	                           [&](int done, int total) { set_progress("reference", done, total); });
+	set_progress("idle", 0, 0);
+	std::string out = res.to_json(db_);
+	out.pop_back();
+	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + ",\"missing_cards\":" + missing_json({&d}) + "}";
+	return out;
 }
 
 std::string Engine::card_names(const std::string& request) {

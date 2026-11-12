@@ -32,6 +32,8 @@ public:
 	Evaluation evaluate(const Board& b, uint8_t me, uint8_t next_player, bool ended = false, int winner = -1,
 	                    bool want_notes = false) const;
 	const DeckProfile& profile(uint8_t p) const { return profile_[p]; }
+	// Replaces what a side is assumed to rely on (e.g. generic_profile() for deck-neutral scores).
+	void set_profile(uint8_t p, const DeckProfile& prof) { profile_[p] = prof; }
 	const CardRole& role(uint8_t owner, uint32_t code) const;
 
 private:
