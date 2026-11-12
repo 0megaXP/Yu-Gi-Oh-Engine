@@ -339,6 +339,12 @@ data class VideoLineCheck(
     val stepsMatched: Int,
     /** Per input step: 1 played, 0 not played, -1 not checkable (unknown card, phase, attack...). */
     val stepMatch: List<Int>,
+    /**
+     * Checked steps played by the rules from the start: all of them when verified; the first ones
+     * when only the start of the line could be played (its pieces are then in [pieces] and the
+     * library); 0 otherwise.
+     */
+    val verifiedSteps: Int = 0,
     /** Share of the video's end-board cards on the replayed board. */
     val boardMatch: Double,
     /** Why it didn't verify; "" when it did. */
@@ -489,6 +495,7 @@ internal object Parse {
                     stepsChecked = l.optInt("steps_checked"),
                     stepsMatched = l.optInt("steps_matched"),
                     stepMatch = l.optJSONArray("step_match").let { a -> if (a == null) emptyList() else (0 until a.length()).map { a.getInt(it) } },
+                    verifiedSteps = l.optInt("verified_steps"),
                     boardMatch = l.optDouble("board_match", 0.0),
                     problem = l.optString("problem"),
                     value = l.optDouble("value", 0.0),
