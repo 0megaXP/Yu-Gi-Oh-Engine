@@ -58,6 +58,54 @@ The output folder contains:
 
 An interrupted run resumes: the frame batches already read are cached in `work/events.jsonl`. Delete that file to read the frames again.
 
+## Archetype libraries
+
+`harvest` does the whole thing for one archetype: it searches YouTube, extracts each video, and merges the results into a library the engine and YGO Sandbox can ship.
+
+```sh
+# see which videos it would pick (no downloads, no API cost)
+python3 tools/video_combo/video_combo.py harvest Angelechy --since 2026-10-01 --list-only
+
+# extract 5 of them and write data/combos/angelechy.json
+python3 tools/video_combo/video_combo.py harvest Angelechy \
+    --deck decks/angelechy_luna_mardelplata_2026-11.ydk --count 5 --since 2026-10-01
+```
+
+How it picks and handles videos:
+- **Titles** must contain the archetype name. Pack openings, tier lists, banlist talk and similar videos are skipped, and titles with "combo", "line" or "end board" rank first.
+- **`--since`** drops videos older than a date. Set it to the last banlist or support set, because older lines are often illegal or outdated.
+- **Re-runs skip videos already extracted.** Downloaded videos are deleted after reading, and the frames are kept.
+- **One failed video doesn't stop the rest.**
+
+To rebuild the library from existing folders without new downloads:
+
+```sh
+python3 tools/video_combo/video_combo.py library combos/angelechy --name Angelechy
+```
+
+### Library format (`data/combos/<archetype>.json`)
+
+All cards are `{code, name}`, where `code` is the official passcode.
+
+| Field | Meaning |
+|---|---|
+| `videos` | How many videos went into the library |
+| `key_cards` | Cards the lines use, with `share` = fraction of videos |
+| `starters` | Cards the combos open with |
+| `end_board_cards` | Cards found on end boards, with their share |
+| `lines[]` | Distinct lines, most-seen first (see below) |
+
+Videos whose end boards share at least 60% of their field cards count as the same line. Each entry in `lines[]` has:
+
+| Field | Meaning |
+|---|---|
+| `support` | How many videos show this line |
+| `end_board_core` | Field cards at least half of those videos end on |
+| `end_board`, `hand`, `steps` | From the most typical video, with timestamps |
+| `hand_cards_seen` | Opening-hand cards across all of the line's videos |
+| `interruptions`, `choke_points` | What the creators say the board stops and where hand traps hit |
+| `sources` | The videos, with links and upload dates |
+
 ## Cost and accuracy
 
 - **Cost.** A 10-minute video is typically 150–300 kept frames, roughly 1,500 input tokens each. Run `--frames-only` first to see the count, and use `--start`/`--end` to skip parts you don't need.

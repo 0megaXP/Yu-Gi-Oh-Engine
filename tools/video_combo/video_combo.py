@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Turn a Yu-Gi-Oh! combo video into a combo the engine can check.
+r"""Turn a Yu-Gi-Oh! combo video into a combo the engine can check.
 
   extract  a YouTube link or a local video -> combo.json, combo.md and a state file
   compare  the combo's end board vs. the board the engine found from the same hand
+  harvest  search YouTube for an archetype's combo videos, extract each, build its library
+  library  merge extracted combos into data/combos/<archetype>.json (harvest does this too)
 
 Examples:
   python3 tools/video_combo/video_combo.py extract "https://youtu.be/..." \
       --deck decks/angelechy_luna_mardelplata_2026-11.ydk --out combos/angelechy_otk
   build/ygoe-cli analyze combos/angelechy_otk/state.txt --json --out combos/angelechy_otk/engine.json
   python3 tools/video_combo/video_combo.py compare combos/angelechy_otk
+  python3 tools/video_combo/video_combo.py harvest Angelechy \
+      --deck decks/angelechy_luna_mardelplata_2026-11.ydk --count 5 --since 2026-10-01
 """
 import argparse
+import glob
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -123,6 +129,7 @@ def cmd_extract(a):
     print(f"  {len(result['steps'])} steps, end board of {len(result['end_board'])} cards")
     if result["unresolved_names"]:
         print(f"  could not match: {'; '.join(result['unresolved_names'])}")
+    return result
 
 
 def markdown(r):
@@ -208,7 +215,65 @@ def cmd_compare(a):
             print("Try more --iterations, or check combo.md for steps the video may have mislabelled.")
 
 
-def main():
+def _slug(text):
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_") or "archetype"
+
+
+def cmd_harvest(a):
+    import harvest
+    slug = _slug(a.archetype)
+    root = os.path.abspath(a.out or os.path.join(ROOT, "combos", slug))
+    print(f"Searching YouTube for {a.archetype} combo videos" + (f" since {a.since}" if a.since else ""))
+    videos = harvest.search(a.archetype, count=a.count, since=a.since, query=a.query)
+    if not videos:
+        raise SystemExit("No matching videos found. Try --query, an older --since, or a larger --count.")
+    for v in videos:
+        print(f"  {v['upload_date'] or '?'}  {v['title']}  ({v['uploader']})")
+    if a.list_only:
+        return
+    parser = build_parser()
+    for i, v in enumerate(videos, 1):
+        folder = os.path.join(root, v["id"])
+        if os.path.exists(os.path.join(folder, "combo.json")) and not a.redo:
+            print(f"\n[{i}/{len(videos)}] already extracted: {v['title']}")
+            continue
+        print(f"\n[{i}/{len(videos)}] {v['title']}")
+        args = ["extract", v["url"], "--out", folder, "--model", a.model]
+        if a.deck:
+            args += ["--deck", a.deck]
+        if a.opponent:
+            args += ["--opponent", a.opponent]
+        try:
+            cmd_extract(parser.parse_args(args))
+        except (Exception, SystemExit) as err:  # one bad video must not stop the batch
+            print(f"  failed: {str(err).splitlines()[0][:120] if str(err) else type(err).__name__}")
+        finally:
+            if not a.keep_video:  # frames stay for re-runs; the video itself is large
+                for f in glob.glob(os.path.join(folder, "work", "video.*")):
+                    if not f.endswith((".vtt", ".json")):
+                        os.remove(f)
+    a.combos = root
+    a.name = a.archetype
+    cmd_library(a)
+
+
+def cmd_library(a):
+    import harvest
+    db = CardDB()
+    slug = _slug(a.name)
+    out = a.library or os.path.join(ROOT, "data", "combos", slug + ".json")
+    lib = harvest.build_library(a.combos, a.name, db, deck_file=_rel(a.deck, ROOT) if a.deck else None)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    json.dump(lib, open(out, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    print(f"\nLibrary: {_rel(out, os.getcwd())}  ({lib['videos']} videos, {len(lib['lines'])} distinct lines)")
+    for i, line in enumerate(lib["lines"][:5], 1):
+        board = "; ".join(c["name"] for c in line["end_board_core"]) or "?"
+        print(f"  #{i} seen in {line['support']} video(s), {len(line['steps'])} steps -> {board}")
+    if lib["starters"]:
+        print("  starters: " + "; ".join(f"{c['name']} ({c['share']:.0%})" for c in lib["starters"][:5]))
+
+
+def build_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -234,6 +299,32 @@ def main():
     c.add_argument("--engine", help="engine JSON (default: engine.json next to combo.json)")
     c.set_defaults(func=cmd_compare)
 
+    h = sub.add_parser("harvest", help="find an archetype's combo videos, extract them, build the library")
+    h.add_argument("archetype", help='e.g. "Angelechy"; video titles must contain it')
+    h.add_argument("--deck", help=".ydk of a current list for the archetype (strongly recommended)")
+    h.add_argument("--opponent", help=".ydk of an opponent, for state files")
+    h.add_argument("--count", type=int, default=5, help="videos to extract (default 5)")
+    h.add_argument("--since", help="skip videos uploaded before YYYY-MM-DD (e.g. the last banlist)")
+    h.add_argument("--query", help='YouTube search text (default: "<archetype> combo")')
+    h.add_argument("--out", help="folder for the per-video results (default combos/<archetype>)")
+    h.add_argument("--library", help="library file (default data/combos/<archetype>.json)")
+    h.add_argument("--model", default=os.environ.get("VIDEO_COMBO_MODEL", "claude-sonnet-5-5"))
+    h.add_argument("--list-only", action="store_true", help="show the videos it would use, then stop")
+    h.add_argument("--redo", action="store_true", help="extract again even if a video was done before")
+    h.add_argument("--keep-video", action="store_true", help="keep the downloaded videos")
+    h.set_defaults(func=cmd_harvest)
+
+    lb = sub.add_parser("library", help="merge combos/<archetype>/*/combo.json into a library file")
+    lb.add_argument("combos", help="folder holding one sub-folder per video")
+    lb.add_argument("--name", required=True, help="archetype name")
+    lb.add_argument("--deck", help=".ydk the combos were read with")
+    lb.add_argument("--library", help="output (default data/combos/<name>.json)")
+    lb.set_defaults(func=cmd_library)
+    return p
+
+
+def main():
+    p = build_parser()
     a = p.parse_args()
     if a.cmd == "extract" and not (a.video or a.frames_from):
         p.error("give a video link/file or --frames-from")
