@@ -9,6 +9,7 @@
 #include "json.h"
 #include "live.h"
 #include "reference.h"
+#include "combo.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
 #include "side.h"
@@ -341,6 +342,39 @@ std::string Engine::reference(const std::string& request) {
 	std::string out = res.to_json(db_);
 	out.pop_back();
 	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + ",\"missing_cards\":" + missing_json({&d}) + "}";
+	return out;
+}
+
+std::string Engine::combo_tree(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	std::lock_guard<std::mutex> run(run_mu_);
+	cancel_ = false;
+	std::string err;
+	Value req = Value::parse(request, &err);
+	Deck mine, theirs;
+	if(!read_deck(req["deck"], mine, err))
+		return error_json(err);
+	bool known = req["opponent"].is_object();
+	if(known && !read_deck(req["opponent"], theirs, err))
+		return error_json(err);
+	std::vector<uint32_t> hand = codes(req["hand"]);
+	if(hand.empty())
+		return error_json("the combo tree needs your hand");
+	ComboTreeConfig cfg;
+	cfg.iterations = static_cast<int>(req["iterations"].integer(1500));
+	cfg.branch_iterations = static_cast<int>(req["branch_iterations"].integer(300));
+	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));
+	cfg.cancel = &cancel_;
+	cfg.progress = [this](const std::string& phase, int done, int total) { set_progress("tree: " + phase, done, total); };
+	auto tree = build_combo_tree(db_, *scripts_, mine, hand, known ? &theirs : nullptr, cfg);
+	set_progress("idle", 0, 0);
+	std::string out = tree.to_json(db_);
+	out.pop_back();
+	std::vector<const Deck*> decks{&mine};
+	if(known)
+		decks.push_back(&theirs);
+	out += ",\"missing_cards\":" + missing_json(decks) + "}";
 	return out;
 }
 

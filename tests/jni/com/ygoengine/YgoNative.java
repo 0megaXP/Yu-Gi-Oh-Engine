@@ -10,6 +10,7 @@ public final class YgoNative {
     public static native String profile(long handle, String request);
     public static native String side(long handle, String request);
     public static native String reference(long handle, String request);
+    public static native String comboTree(long handle, String request);
     public static native void cancel(long handle);
     public static native String progress(long handle);
     public static native long liveCreate(long handle, String request);

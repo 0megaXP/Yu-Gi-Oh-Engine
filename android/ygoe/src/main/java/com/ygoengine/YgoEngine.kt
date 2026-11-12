@@ -103,6 +103,30 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         return Parse.reference(runNative(onProgress) { YgoNative.reference(it, req.toString()) })
     }
 
+    /**
+     * Combo tree for a going-first [hand]: the main line, then for each hand trap the opponent
+     * is likely to hold (from [opponent]'s list, or the most played ones when it is null), where
+     * it hurts most and your best continuation from there.
+     */
+    suspend fun comboTree(
+        deck: EngineDeck,
+        hand: List<Long>,
+        opponent: EngineDeck? = null,
+        iterations: Int = 1500,
+        branchIterations: Int = 300,
+        seed: Long = 1,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): ComboTree {
+        val req = JSONObject()
+            .put("deck", deck.toJson())
+            .put("hand", org.json.JSONArray(hand))
+            .put("opponent", opponent?.toJson() ?: JSONObject.NULL)
+            .put("iterations", iterations)
+            .put("branch_iterations", branchIterations)
+            .put("seed", seed)
+        return Parse.comboTree(runNative(onProgress) { YgoNative.comboTree(it, req.toString()) })
+    }
+
     /** Stops the running search early; the call returns what it found, with cancelled = true. */
     fun cancel() {
         if (handle != 0L) YgoNative.cancel(handle)

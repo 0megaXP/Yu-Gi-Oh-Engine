@@ -215,6 +215,37 @@ data class ReferenceResult(
     }
 }
 
+/** What happens when the opponent uses [handTrap] at the worst moment for the main line. */
+data class ComboBranch(
+    val handTrap: DuelCard,
+    /** It has no point in the main line where it can be used. */
+    val stopsNothing: Boolean,
+    /** Your action it answers (the step just before it was used). */
+    val usedOn: String,
+    /** How many places in the main line it could have been used. */
+    val chokePoints: Int,
+    /** Your best continuation from the interruption to the end of the turn. */
+    val continuation: List<String>,
+    val board: List<EngineCard>,
+    /** Deck-neutral board value (as reference boards). */
+    val value: Double,
+    /** 0..1, same scale as the main line's score. */
+    val score: Double,
+)
+
+data class ComboTree(
+    val mainMoves: List<String>,
+    val mainBoard: List<EngineCard>,
+    val mainValue: Double,
+    val mainScore: Double,
+    /** False when no opponent deck was given and the most played hand traps were used. */
+    val opponentKnown: Boolean,
+    /** Most damaging first; hand traps that stop nothing last. */
+    val branches: List<ComboBranch>,
+    val cancelled: Boolean,
+    val missingCards: List<Long>,
+)
+
 class EngineException(message: String) : Exception(message)
 
 // ------------------------------------------------------------------ parsing
@@ -286,6 +317,33 @@ internal object Parse {
         cancelled = o.optBoolean("cancelled"),
         missingCards = o.optJSONArray("missing_cards").longs(),
     )
+
+    fun comboTree(text: String): ComboTree {
+        val o = checked(text)
+        val main = o.getJSONObject("main")
+        return ComboTree(
+            mainMoves = main.optJSONArray("moves").strings(),
+            mainBoard = main.optJSONArray("board").map(::card),
+            mainValue = main.optDouble("value", 0.0),
+            mainScore = main.optDouble("score", 0.0),
+            opponentKnown = o.optBoolean("opponent_known"),
+            branches = o.optJSONArray("branches").map { b ->
+                val ht = b.getJSONObject("hand_trap")
+                ComboBranch(
+                    handTrap = DuelCard(ht.optLong("code"), ht.optString("name")),
+                    stopsNothing = b.optBoolean("stops_nothing"),
+                    usedOn = b.optString("used_on"),
+                    chokePoints = b.optInt("choke_points"),
+                    continuation = b.optJSONArray("continuation").strings(),
+                    board = b.optJSONArray("board").map(::card),
+                    value = b.optDouble("value", 0.0),
+                    score = b.optDouble("score", 0.0),
+                )
+            },
+            cancelled = o.optBoolean("cancelled"),
+            missingCards = o.optJSONArray("missing_cards").longs(),
+        )
+    }
 
     fun reference(text: String): ReferenceResult {
         val o = checked(text)

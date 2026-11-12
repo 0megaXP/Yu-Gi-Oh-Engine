@@ -36,6 +36,19 @@ All card ids are **official passcodes** (YGOPRODeck ids). The engine maps cards 
 
 Rough cost on a phone: a few hundred iterations per second per big core. `iterations = 2000` with checking enabled takes roughly 10–30 s.
 
+### Combo tree
+
+```kotlin
+val tree = engine.comboTree(deck, hand, opponent = theirDeck /* or null */) { p -> ui.progress = p.fraction }
+tree.mainMoves; tree.mainBoard
+tree.branches.forEach { b -> b.handTrap; b.usedOn; b.continuation; b.board; b.score }
+```
+
+1. **Main line:** the best line for the hand going first, with no interaction.
+2. **Hand traps tested:** the non-engine cards in the opponent's list that interrupt from the hand, with Main Deck copies counting double Side Deck copies. With no opponent deck, the most played hand traps are used (Ash, Veiler, Imperm, Ogre, Droll, Nibiru, Fuwalos, Ghost Belle).
+3. **Finding where each hurts:** the main line is replayed with that hand trap in the opponent's hand, to find every place it can be used (`choke_points`). Up to 4 of those places, spread over the line, are tried. Each one is searched again with the interruption forced.
+4. **The branch:** the place where the interruption hurts most is kept, together with your best continuation from there. If the opponent decides first (for example the target), they pick the choice that is worst for you.
+
 ### Reference end boards
 
 ```kotlin
