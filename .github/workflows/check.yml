@@ -1,0 +1,16 @@
+name: Sandbox compile check
+on: [push]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - working-directory: sandbox-check
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon
