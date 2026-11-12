@@ -11,6 +11,7 @@
 #include "live.h"
 #include "pieces.h"
 #include "reference.h"
+#include "replay.h"
 #include "combo.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
@@ -355,6 +356,46 @@ std::string Engine::reference(const std::string& request) {
 	std::string out = res.to_json(db_);
 	out.pop_back();
 	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + ",\"missing_cards\":" + missing_json({&d}) + "}";
+	return out;
+}
+
+std::string Engine::video_lines(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	std::lock_guard<std::mutex> run(run_mu_);
+	cancel_ = false;
+	std::string err;
+	Value req = Value::parse(request, &err);
+	Deck d;
+	if(!read_deck(req["deck"], d, err, db_))
+		return error_json(err);
+	std::vector<VideoLine> lines;
+	for(const auto& l : req["lines"].items()) {
+		VideoLine v;
+		v.id = l["id"].str();
+		for(const auto& c : l["hand"].items())
+			v.hand.push_back(static_cast<uint32_t>(c.integer()));
+		for(const auto& s : l["steps"].items())
+			v.steps.push_back({s["action"].str(), static_cast<uint32_t>(s["code"].integer(0)), s["detail"].str()});
+		for(const auto& c : l["end_board"].items())
+			v.end_board.push_back(static_cast<uint32_t>(c.integer()));
+		lines.push_back(std::move(v));
+	}
+	if(lines.empty())
+		return error_json("no lines to check");
+	ReplayConfig cfg;
+	cfg.beam = static_cast<int>(req["beam"].integer(cfg.beam));
+	cfg.tries = static_cast<int>(req["tries"].integer(cfg.tries));
+	cfg.seconds = req["seconds"].num(cfg.seconds);
+	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));
+	cfg.cancel = &cancel_;
+	set_progress("video lines", 0, static_cast<int>(lines.size()));
+	auto res = check_video_lines(db_, *scripts_, d, lines, cfg,
+	                             [&](int done, int total) { set_progress("video lines", done, total); });
+	set_progress("idle", 0, 0);
+	std::string out = res.to_json(db_);
+	out.pop_back();
+	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + "}";
 	return out;
 }
 

@@ -72,6 +72,36 @@ A line is split into sub-combos ("pieces"):
   - **Measured effect:** on 12 unseen Angelechy hands, the best line found improved from 0.780 to 0.797 at 400 iterations (better on 8 hands, worse on 1). At 1500 iterations there was no clear difference. It helps most with small budgets (Normal bot, quick searches on the phone).
   - **Desktop:** `ygoe-cli pieces-bench deck.ydk reference.json --hands 12 --iterations 400` measures it.
 
+### Video lines
+
+Combos read from videos (YGO Sandbox's Combos tab, or `tools/video_combo`) are replayed by the real rules, and the verified ones become combo pieces.
+
+```kotlin
+val res = engine.videoLines(deck, listOf(
+    VideoLineInput(id = url, hand = hand, endBoard = fieldCards, steps = listOf(
+        VideoStepInput("activate", 17782288, "discard Dominus Purge, Special Summon Enlisted"), ...)),
+))
+res.lines        // per line: verified, stepsMatched / stepsChecked, boardMatch, problem, moves, board, pieces
+res.libraryJson  // the verified lines' pieces, merged; pass as `library` (alone or joined with a reference's)
+```
+
+- **How a line is replayed:** the deck goes first from the video's opening hand, with no opponent interaction.
+  - **The player's actions:** at each action, the option matching the next video step is chosen: the same card, activated, Normal Summoned, Set or Special Summoned by its own procedure. Optional triggers ("Use X") count as activating X.
+  - **Choices inside an action:** costs, targets and what to search are tried several ways. Cards the video names around that step are preferred.
+  - **Beam:** a small beam keeps the replays that match the most steps and can play the video's next action right away.
+- **Steps that are only seen:** searches, cards sent to the GY, banished or attached, and summons made by an effect count when that card turns up in the right place.
+  - Up to 3 misread or merged steps may be skipped to find the next match.
+  - Phases, attacks and unidentified cards aren't checked.
+- **Verified:** at least 3 steps were checked, at least 75% of them were played, and the replay ends on at least 75% of the video's end-board cards.
+  - A verified line is an exact engine line, so it is split into combo pieces like a reference sample.
+  - A line that doesn't verify comes back with the reason in `problem`.
+- **Measured:**
+  - **Engine-made lines:** on 16 lines the engine itself found (8 Angelechy, 8 Elfnote), rewritten as bare video steps with no details, 12 verified.
+  - **Impossible lines:** a line that can't be played from its hand doesn't verify.
+  - **Detail helps:** real videos give details (costs, materials, search targets), which steer the choices inside each action.
+- **Request:** `{"deck", "lines": [{"id", "hand", "steps": [{"action", "code", "detail"}], "end_board"}], "beam", "tries", "seconds", "seed"}`. The actions are the ones the video reader writes (`activate`, `normal_summon`, `link_summon`, `search`, `send_to_gy`, ...).
+- **Desktop:** `ygoe-cli json lines examples/request_lines.json`.
+
 ### Reference end boards
 
 ```kotlin

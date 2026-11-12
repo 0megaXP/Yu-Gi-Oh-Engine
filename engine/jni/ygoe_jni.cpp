@@ -93,6 +93,10 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_reference(JNIEnv* env, jc
 	return to_jstring(env, engine(h)->reference(to_string(env, request)));
 }
 
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_videoLines(JNIEnv* env, jclass, jlong h, jstring request) {
+	return to_jstring(env, engine(h)->video_lines(to_string(env, request)));
+}
+
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_comboTree(JNIEnv* env, jclass, jlong h, jstring request) {
 	return to_jstring(env, engine(h)->combo_tree(to_string(env, request)));
 }

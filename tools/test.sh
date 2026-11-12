@@ -26,6 +26,10 @@ for call in analyze profile side; do
   build/ygoe-cli json "$call" "examples/request_$call.json" > "$OUT/$call.json"
 done
 
+echo "== video lines (one playable line, one that isn't)"
+build/ygoe-cli json lines examples/request_lines.json > "$OUT/lines.json"
+grep -q '"verified":1,' "$OUT/lines.json"
+
 echo "== asset pack + JNI"
 python3 tools/make_pack.py third_party/CardScripts data "$OUT/pack" > /dev/null
 mkdir -p "$OUT/classes"

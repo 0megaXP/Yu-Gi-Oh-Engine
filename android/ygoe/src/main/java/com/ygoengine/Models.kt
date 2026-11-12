@@ -306,6 +306,57 @@ class EngineException(message: String) : Exception(message)
 
 // ------------------------------------------------------------------ parsing
 
+/** One step of a combo read from a video. [code] is the official passcode, 0 when unknown. */
+data class VideoStepInput(val action: String, val code: Long, val detail: String = "")
+
+/** A combo read from a video: its opening hand, steps and end-board field cards (official passcodes). */
+data class VideoLineInput(
+    /** Echoed back in [VideoLineCheck.id], e.g. the video's URL. */
+    val id: String,
+    val hand: List<Long>,
+    val steps: List<VideoStepInput>,
+    val endBoard: List<Long>,
+) {
+    internal fun toJson() = JSONObject()
+        .put("id", id)
+        .put("hand", JSONArray(hand))
+        .put("steps", JSONArray(steps.map { JSONObject().put("action", it.action).put("code", it.code).put("detail", it.detail) }))
+        .put("end_board", JSONArray(endBoard))
+}
+
+/** A video line replayed by the rules. */
+data class VideoLineCheck(
+    val id: String,
+    /** Most steps played by the rules and most of the end board reached. */
+    val verified: Boolean,
+    val stepsChecked: Int,
+    val stepsMatched: Int,
+    /** Per input step: 1 played, 0 not played, -1 not checkable (unknown card, phase, attack...). */
+    val stepMatch: List<Int>,
+    /** Share of the video's end-board cards on the replayed board. */
+    val boardMatch: Double,
+    /** Why it didn't verify; "" when it did. */
+    val problem: String,
+    /** Deck-neutral value of the replayed board (as reference boards). */
+    val value: Double,
+    val moves: List<String>,
+    val board: List<EngineCard>,
+    val pieces: List<ComboPiece>,
+)
+
+data class VideoLinesResult(
+    val lines: List<VideoLineCheck>,
+    val verified: Int,
+    /** Pieces of the verified lines, merged. */
+    val library: List<LibraryPiece>,
+    val cancelled: Boolean,
+    val json: String,
+) {
+    /** The verified lines' pieces, to pass as `library`; null if no line verified. */
+    val libraryJson: String? get() = runCatching { JSONObject(json).optJSONArray("library") }.getOrNull()
+        ?.takeIf { it.length() > 0 }?.toString()
+}
+
 internal object Parse {
     fun checked(text: String): JSONObject {
         val o = JSONObject(text)
@@ -416,6 +467,33 @@ internal object Parse {
             },
             cancelled = o.optBoolean("cancelled"),
             missingCards = o.optJSONArray("missing_cards").longs(),
+        )
+    }
+
+    fun videoLines(text: String): VideoLinesResult {
+        val o = checked(text)
+        return VideoLinesResult(
+            lines = o.optJSONArray("lines").map { l ->
+                VideoLineCheck(
+                    id = l.optString("id"),
+                    verified = l.optBoolean("verified"),
+                    stepsChecked = l.optInt("steps_checked"),
+                    stepsMatched = l.optInt("steps_matched"),
+                    stepMatch = l.optJSONArray("step_match").let { a -> if (a == null) emptyList() else (0 until a.length()).map { a.getInt(it) } },
+                    boardMatch = l.optDouble("board_match", 0.0),
+                    problem = l.optString("problem"),
+                    value = l.optDouble("value", 0.0),
+                    moves = l.optJSONArray("moves").strings(),
+                    board = l.optJSONArray("board").map(::card),
+                    pieces = l.optJSONArray("pieces").map(::piece),
+                )
+            },
+            verified = o.optInt("verified"),
+            library = o.optJSONArray("library").map {
+                LibraryPiece(piece(it), it.optInt("count"), it.optDouble("share", 0.0), it.optDouble("value", 0.0))
+            },
+            cancelled = o.optBoolean("cancelled"),
+            json = text,
         )
     }
 

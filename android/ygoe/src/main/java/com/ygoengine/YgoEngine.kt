@@ -10,6 +10,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -111,6 +112,24 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
     ): ReferenceResult {
         val req = JSONObject().put("deck", deck.toJson()).put("hands", hands).put("iterations", iterations).put("seed", seed)
         return Parse.reference(runNative(onProgress) { YgoNative.reference(it, req.toString()) })
+    }
+
+    /**
+     * Replays combos read from videos ([lines]) from their opening hands, going first with no
+     * opponent interaction, and checks each by the real rules. Verified lines come back with
+     * their combo pieces, and [VideoLinesResult.libraryJson] holds them merged, ready to pass
+     * as `library` like a reference's pieces. A few seconds per line on a phone.
+     */
+    suspend fun videoLines(
+        deck: EngineDeck,
+        lines: List<VideoLineInput>,
+        seconds: Double = 60.0,
+        seed: Long = 1,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): VideoLinesResult {
+        val req = JSONObject().put("deck", deck.toJson()).put("seconds", seconds).put("seed", seed)
+            .put("lines", JSONArray(lines.map { it.toJson() }))
+        return Parse.videoLines(runNative(onProgress) { YgoNative.videoLines(it, req.toString()) })
     }
 
     /**

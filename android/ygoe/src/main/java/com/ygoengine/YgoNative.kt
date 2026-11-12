@@ -14,6 +14,7 @@ internal object YgoNative {
     @JvmStatic external fun side(handle: Long, request: String): String
     @JvmStatic external fun reference(handle: Long, request: String): String
     @JvmStatic external fun comboTree(handle: Long, request: String): String
+    @JvmStatic external fun videoLines(handle: Long, request: String): String
     @JvmStatic external fun cancel(handle: Long)
     /** "phase\tdone\ttotal" */
     @JvmStatic external fun progress(handle: Long): String

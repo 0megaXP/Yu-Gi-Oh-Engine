@@ -1,0 +1,212 @@
+{
+ "deck": {
+  "main": [
+   42141493,
+   42141493,
+   42141493,
+   14558127,
+   14558127,
+   14558127,
+   59438930,
+   59438930,
+   59438930,
+   94145021,
+   17782288,
+   17782288,
+   17782288,
+   13068112,
+   13068112,
+   13068112,
+   86457955,
+   86457955,
+   86457955,
+   59062857,
+   12845564,
+   35261759,
+   35726888,
+   35726888,
+   35726888,
+   73628505,
+   97045737,
+   97045737,
+   97045737,
+   40366667,
+   40366667,
+   40366667,
+   6325660,
+   6325660,
+   80565021,
+   80565021,
+   80565021,
+   54171327,
+   48340269,
+   48340269
+  ],
+  "extra": [
+   42410161,
+   42410161,
+   81797573,
+   81797573,
+   50284408,
+   86673403,
+   28904860,
+   28904860,
+   55393975,
+   55393975,
+   2743001,
+   22850702,
+   73104892,
+   31114334,
+   73218989
+  ],
+  "side": [
+   15397015,
+   15397015,
+   15397015,
+   12197223,
+   12197223,
+   12197223,
+   102380,
+   102380,
+   97268402,
+   97268402,
+   97268402,
+   8267140,
+   8267140,
+   1372887,
+   1372887
+  ],
+  "name": "Angelechy (Luna)"
+ },
+ "seconds": 30,
+ "lines": [
+  {
+   "id": "angelechy-double-problem",
+   "hand": [
+    59438930,
+    80565021,
+    42141493,
+    97045737,
+    17782288
+   ],
+   "steps": [
+    {
+     "action": "activate",
+     "code": 17782288,
+     "detail": "field spell"
+    },
+    {
+     "action": "activate",
+     "code": 17782288,
+     "detail": "discard Dominus Purge to Special Summon Angelechy Enlisted"
+    },
+    {
+     "action": "send_to_gy",
+     "code": 97045737,
+     "detail": ""
+    },
+    {
+     "action": "special_summon",
+     "code": 81797573,
+     "detail": ""
+    },
+    {
+     "action": "activate",
+     "code": 55393975,
+     "detail": "add Angelechy Problem from deck"
+    },
+    {
+     "action": "search",
+     "code": 17782288,
+     "detail": ""
+    },
+    {
+     "action": "activate",
+     "code": 17782288,
+     "detail": "second copy, field spell"
+    },
+    {
+     "action": "activate",
+     "code": 17782288,
+     "detail": "discard Opening to e4, summon Enlisted"
+    },
+    {
+     "action": "special_summon",
+     "code": 81797573,
+     "detail": ""
+    },
+    {
+     "action": "activate",
+     "code": 28904860,
+     "detail": ""
+    },
+    {
+     "action": "activate",
+     "code": 42410161,
+     "detail": "add Opening to e4"
+    },
+    {
+     "action": "search",
+     "code": 80565021,
+     "detail": ""
+    },
+    {
+     "action": "normal_summon",
+     "code": 59438930,
+     "detail": ""
+    },
+    {
+     "action": "set",
+     "code": 80565021,
+     "detail": ""
+    }
+   ],
+   "end_board": [
+    81797573,
+    81797573,
+    59438930,
+    55393975,
+    28904860,
+    42410161,
+    80565021,
+    17782288
+   ]
+  },
+  {
+   "id": "not-playable-from-this-hand",
+   "hand": [
+    59438930,
+    80565021,
+    42141493,
+    97045737,
+    17782288
+   ],
+   "steps": [
+    {
+     "action": "activate",
+     "code": 80565021,
+     "detail": ""
+    },
+    {
+     "action": "link_summon",
+     "code": 50284408,
+     "detail": ""
+    },
+    {
+     "action": "activate",
+     "code": 50284408,
+     "detail": ""
+    },
+    {
+     "action": "xyz_summon",
+     "code": 86673403,
+     "detail": ""
+    }
+   ],
+   "end_board": [
+    50284408,
+    86673403
+   ]
+  }
+ ]
+}

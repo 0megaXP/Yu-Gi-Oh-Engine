@@ -36,6 +36,10 @@ public:
 	std::string reference(const std::string& request);
 	// {"deck": deck, "hand": [5 ids], "opponent": deck|null, "iterations", "branch_iterations", "seed"}
 	std::string combo_tree(const std::string& request);
+	// {"deck": deck, "lines": [{"id", "hand": [ids], "steps": [{"action", "code", "detail"}], "end_board": [ids]}],
+	//  "beam", "tries", "seconds", "seed"} -> each line replayed and checked by the rules, plus the
+	// combo pieces of the verified ones (docs/api.md, Video lines)
+	std::string video_lines(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
 	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and
