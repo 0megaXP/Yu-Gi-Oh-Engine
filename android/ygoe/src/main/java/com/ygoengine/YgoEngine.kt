@@ -77,11 +77,18 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
      * Starts a duel between [first] (player 0, goes first) and [second] (player 1).
      * Close the returned duel before closing the engine.
      */
-    suspend fun newDuel(first: EngineDeck, second: EngineDeck, seed: Long = System.nanoTime()): LiveDuel =
+    suspend fun newDuel(
+        first: EngineDeck,
+        second: EngineDeck,
+        seed: Long = System.nanoTime(),
+        /** Combo pieces for each player's bot ([ReferenceResult.libraryJson]), or null. */
+        libraries: List<String?> = listOf(null, null),
+    ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
                 .put("decks", org.json.JSONArray().put(first.toJson()).put(second.toJson()))
                 .put("seed", seed)
+                .put("libraries", org.json.JSONArray(libraries.map { l -> l?.let { org.json.JSONArray(it) } ?: JSONObject.NULL }))
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
             LiveDuel(d)
@@ -115,6 +122,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         iterations: Int = 1500,
         branchIterations: Int = 300,
         seed: Long = 1,
+        /** Your deck's combo pieces ([ReferenceResult.libraryJson]), or null. */
+        library: String? = null,
         onProgress: ((Progress) -> Unit)? = null,
     ): ComboTree {
         val req = JSONObject()
@@ -124,6 +133,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
             .put("iterations", iterations)
             .put("branch_iterations", branchIterations)
             .put("seed", seed)
+            .put("library", library?.let { org.json.JSONArray(it) } ?: JSONObject.NULL)
         return Parse.comboTree(runNative(onProgress) { YgoNative.comboTree(it, req.toString()) })
     }
 

@@ -407,4 +407,150 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 	return o + "]";
 }
 
+// ------------------------------------------------------------------ guides
+
+std::vector<LibraryPiece> parse_library(const CardDB& db, const std::string& text) {
+	return parse_library(db, json::Value::parse(text));
+}
+
+std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) {
+	std::vector<LibraryPiece> out;
+	auto sid = [&](const json::Value& c) { return db.script_id(static_cast<uint32_t>(c["code"].integer())); };
+	auto placed = [&](const json::Value& a) {
+		std::vector<PieceCard> r;
+		for(const auto& c : a.items())
+			r.push_back({sid(c), c["where"].str()});
+		return r;
+	};
+	for(const auto& o : v.items()) {
+		LibraryPiece lp;
+		ComboPiece& p = lp.piece;
+		p.first = static_cast<int>(o["first"].integer());
+		p.last = static_cast<int>(o["last"].integer());
+		for(const auto& s : o["steps"].items())
+			p.steps.push_back(s.str());
+		for(const auto& c : o["needs_hand"].items())
+			p.needs_hand.push_back(sid(c));
+		p.needs_earlier = placed(o["needs_earlier"]);
+		p.normal_summon = o["normal_summon"].boolean();
+		p.gives = placed(o["gives"]);
+		p.leaves = placed(o["leaves"]);
+		for(const auto& c : o["stopped_by"].items())
+			p.stopped_by.push_back({sid(c), static_cast<int>(c["step"].integer())});
+		lp.count = static_cast<int>(o["count"].integer(1));
+		lp.value = o["value"].num(0);
+		lp.best = lp.value;
+		if(!p.steps.empty())
+			out.push_back(std::move(lp));
+	}
+	return out;
+}
+
+PieceResources resources_of(const Board& b, uint8_t p) {
+	PieceResources r;
+	for(const auto& c : b.hand[p])
+		if(c.code)
+			r.hand.push_back(c.code);
+	for(const auto* zone : {&b.mzone[p], &b.szone[p], &b.grave[p], &b.banished[p]})
+		for(const auto& c : *zone)
+			if(c.code)
+				r.other.push_back(c.code);
+	return r;
+}
+
+namespace {
+
+bool can_play(const ComboPiece& p, const std::vector<uint32_t>& hand, const std::vector<uint32_t>& other, bool ns_used) {
+	if(p.normal_summon && ns_used)
+		return false;
+	std::vector<uint32_t> h = hand;
+	for(auto code : p.needs_hand) {
+		auto it = std::find(h.begin(), h.end(), code);
+		if(it == h.end())
+			return false;
+		h.erase(it);
+	}
+	for(const auto& c : p.needs_earlier)
+		if(std::find(other.begin(), other.end(), c.code) == other.end() &&
+		   std::find(h.begin(), h.end(), c.code) == h.end())
+			return false;
+	return true;
+}
+
+std::vector<std::string> split_labels(const std::string& step) {
+	std::vector<std::string> out;
+	const std::string sep = "  →  ";
+	size_t a = 0;
+	while(true) {
+		size_t b = step.find(sep, a);
+		out.push_back(step.substr(a, b == std::string::npos ? std::string::npos : b - a));
+		if(b == std::string::npos)
+			break;
+		a = b + sep.size();
+	}
+	return out;
+}
+
+}  // namespace
+
+std::vector<const ComboPiece*> PieceGuide::playable(const PieceResources& r) const {
+	std::vector<const ComboPiece*> out;
+	for(const auto& lp : lib_)
+		if(can_play(lp.piece, r.hand, r.other, r.normal_summon_used))
+			out.push_back(&lp.piece);
+	return out;
+}
+
+std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces) const {
+	std::vector<std::string> labels;
+	std::vector<uint32_t> hand = r.hand, other = r.other;
+	bool ns_used = r.normal_summon_used;
+	std::vector<char> used(lib_.size(), 0);
+	for(int n = 0; n < max_pieces; ++n) {
+		std::vector<double> w(lib_.size(), 0);
+		double total = 0;
+		for(size_t i = 0; i < lib_.size(); ++i) {
+			const auto& lp = lib_[i];
+			if(used[i] || !can_play(lp.piece, hand, other, ns_used))
+				continue;
+			// Common pieces from strong lines first; a piece that makes nothing is a last resort.
+			double x = (1.0 + lp.count) * (1.0 + std::max(0.0, lp.value) / 5.0);
+			if(lp.piece.gives.empty() && lp.piece.leaves.empty())
+				x *= 0.2;
+			// Use what earlier pieces gave before starting something unrelated.
+			if(n > 0 && !lp.piece.needs_earlier.empty())
+				x *= 3;
+			w[i] = x;
+			total += x;
+		}
+		if(total <= 0)
+			break;
+		std::uniform_real_distribution<double> u(0, total);
+		double pick = u(rng);
+		size_t i = 0;
+		for(; i + 1 < w.size(); ++i) {
+			pick -= w[i];
+			if(pick <= 0 && w[i] > 0)
+				break;
+		}
+		if(w[i] <= 0)
+			break;
+		used[i] = 1;
+		const ComboPiece& p = lib_[i].piece;
+		for(auto code : p.needs_hand) {
+			auto it = std::find(hand.begin(), hand.end(), code);
+			if(it != hand.end())
+				hand.erase(it);
+		}
+		ns_used |= p.normal_summon;
+		for(const auto* list : {&p.gives, &p.leaves})
+			for(const auto& c : *list)
+				(c.where == "hand" ? hand : other).push_back(c.code);
+		for(const auto& step : p.steps)
+			for(auto& l : split_labels(step))
+				labels.push_back(std::move(l));
+	}
+	return labels;
+}
+
 }  // namespace ygoe

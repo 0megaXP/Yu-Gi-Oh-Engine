@@ -211,6 +211,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 			if(vroots.empty())
 				continue;
 			SearchConfig b = cfg.search;
+			b.guide = nullptr;  // the opponent's turn: your pieces don't apply
 			b.horizon_turns = 1;
 			b.iterations = cfg.verify_iterations * static_cast<int>(vroots.size());
 			b.seconds = cfg.search.seconds / 2;

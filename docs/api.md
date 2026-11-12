@@ -65,6 +65,12 @@ A line is split into sub-combos ("pieces"):
   - `stoppedBy`: the hand traps that can respond during it, each with the first step it can answer. These come from a second replay with the hand traps in the opponent's hand.
 - **Starters:** a piece that needs nothing from earlier pieces is a `starter`.
 - **Library:** reference end boards also return `ref.library`, the pieces merged across the sample lines by what they need: starters first, then the most common.
+- **Using the library:** pass `ref.libraryJson` as `library` to `analyze` (in `AnalysisRequest`) or `comboTree`, or per player as `libraries` to `newDuel`.
+  - **How the search uses it:** in 70% of iterations the search is steered along a plan built by chaining pieces. A plan starts with a piece the current cards allow, then adds pieces whose needs are met by what is left in hand plus what earlier pieces gave. Pieces from different lines get recombined this way.
+  - **Following a plan:** an option matching one of the plan's next labels is strongly preferred, both in the tree and in playouts. Up to 3 labels may be skipped.
+  - **After an interruption:** the plan is rebuilt from what is still available, so the search tries the pieces that can still be played.
+  - **Measured effect:** on 12 unseen Angelechy hands, the best line found improved from 0.780 to 0.797 at 400 iterations (better on 8 hands, worse on 1). At 1500 iterations there was no clear difference. It helps most with small budgets (Normal bot, quick searches on the phone).
+  - **Desktop:** `ygoe-cli pieces-bench deck.ydk reference.json --hands 12 --iterations 400` measures it.
 
 ### Reference end boards
 

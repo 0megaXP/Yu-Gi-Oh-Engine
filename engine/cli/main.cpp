@@ -25,6 +25,9 @@
 #include "ocgapi_constants.h"
 #include "profile.h"
 #include "side.h"
+#include "pieces.h"
+#include "reference.h"
+#include "search.h"
 
 using namespace ygoe;
 
@@ -260,6 +263,68 @@ int main(int argc, char** argv) {
 		return cmd_profile(db, a);
 	if(cmd == "side")
 		return cmd_side(db, scripts, a);
+	if(cmd == "pieces-bench") {
+		// pieces-bench deck.ydk reference.json [--hands N --iterations K --seed S]
+		// Searches random hands going first with and without the reference's combo pieces.
+		if(a.pos.size() < 3)
+			return usage();
+		Deck deck;
+		if(!load_ydk(a.pos[1], deck, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		std::ifstream f(a.pos[2]);
+		std::stringstream ss;
+		ss << f.rdbuf();
+		auto ref = json::Value::parse(ss.str());
+		auto lib = parse_library(db, ref["library"]);
+		auto guide = std::make_shared<PieceGuide>(lib);
+		std::printf("%zu pieces\n", guide->size());
+		int hands = std::stoi(a.get("hands", "10"));
+		int iters = std::stoi(a.get("iterations", "400"));
+		uint64_t seed = std::stoull(a.get("seed", "500"));
+		Evaluator eval(db, deck, deck);
+		eval.set_profile(0, generic_profile());
+		eval.set_profile(1, generic_profile());
+		double sum[2] = {0, 0};
+		int wins = 0, ties = 0;
+		for(int h = 0; h < hands; ++h) {
+			Scenario sc;
+			sc.decks[0] = sc.decks[1] = deck;
+			sc.hand_known[0] = false;
+			sc.hand_size[0] = 5;
+			sc.hand_known[1] = true;
+			sc.seed = seed + h * 7919;
+			Searcher searcher(db, scripts, eval, declare_pool(sc));
+			RootState root{make_setup(sc, 0), {}};
+			double r[2];
+			for(int g = 0; g < 2; ++g) {
+				SearchConfig cfg;
+				cfg.iterations = iters;
+				cfg.seconds = 120;
+				cfg.horizon_turns = 1;
+				if(g) {
+					cfg.guide = guide;
+					cfg.guided_share = std::stod(a.get("share", "0.7"));
+				}
+				auto out = searcher.run({root}, 0, cfg);
+				r[g] = 0;
+				for(auto& m : out.my_moves)
+					for(auto& t : m.best)
+						r[g] = std::max(r[g], t.reward);
+				sum[g] += r[g];
+			}
+			Duel d(db, scripts);
+			d.replay(root.setup, {});
+			auto res = resources_of(d.board(), 0);
+			std::printf("hand %2d: plain %.3f  pieces %.3f  (%zu playable)\n", h, r[0], r[1], guide->playable(res).size());
+			wins += r[1] > r[0] + 0.005;
+			ties += std::abs(r[1] - r[0]) <= 0.005;
+		}
+		std::printf("average: plain %.3f  pieces %.3f; pieces better on %d, equal %d, worse %d of %d\n", sum[0] / hands,
+		            sum[1] / hands, wins, ties, hands - wins - ties, hands);
+		return 0;
+	}
 	if(cmd == "proxy")
 		return cmd_proxy(db, a);
 	if(cmd == "duel") {
@@ -279,6 +344,16 @@ int main(int argc, char** argv) {
 		if(!live.ok()) {
 			std::fprintf(stderr, "%s\n", live.error().c_str());
 			return 1;
+		}
+		for(int p = 0; p < 2; ++p) {
+			std::string path = a.get("lib" + std::to_string(p), "");
+			if(path.empty())
+				continue;
+			std::ifstream lf(path);
+			std::stringstream ls;
+			ls << lf.rdbuf();
+			auto v = json::Value::parse(ls.str());
+			live.set_guide(p, std::make_shared<PieceGuide>(parse_library(db, v.is_array() ? v : v["library"])));
 		}
 		uint32_t max_turns = static_cast<uint32_t>(std::stoi(a.get("turns", "4")));
 		auto print_log = [&] {

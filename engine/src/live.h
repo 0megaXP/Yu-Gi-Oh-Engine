@@ -30,6 +30,8 @@ public:
 	// Lets the bot answer the current decision. Returns the chosen label ("" if nothing to do).
 	std::string bot_move(BotLevel level);
 	void cancel() { cancel_ = true; }
+	// Combo pieces for a player's bot (from that deck's reference boards), see pieces.h.
+	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
 
 	const Duel& duel() const { return *duel_; }
 
@@ -58,6 +60,7 @@ private:
 	// (often random playout moves); those only track whether play still follows it and are
 	// never played for the other side's bot.
 	int plan_player_ = -1;
+	std::shared_ptr<const PieceGuide> guides_[2];
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

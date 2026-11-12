@@ -70,11 +70,14 @@ data class AnalysisRequest(
     val knowledge: Knowledge = Knowledge.PRACTICE,
     val seed: Long = 1,
     val settings: SearchSettings = SearchSettings(),
+    /** Your deck's combo pieces ([ReferenceResult.libraryJson]): the search tries plans chained from them first. */
+    val library: String? = null,
 ) {
     internal fun toJson(): JSONObject {
         val sides = listOf(first, second)
         fun perSide(f: (SideState) -> Any?) = JSONArray(sides.map { f(it) ?: JSONObject.NULL })
         return JSONObject()
+            .put("library", library?.let { JSONArray(it) } ?: JSONObject.NULL)
             .put("decks", perSide { it.deck.toJson() })
             .put("me", me)
             .put("mode", knowledge.wire)
@@ -245,6 +248,10 @@ data class ReferenceResult(
 ) {
     val median: Double get() = samples.map { it.value }.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
     val best: Double get() = samples.maxOfOrNull { it.value } ?: 0.0
+
+    /** The raw piece library, to pass to analyze / comboTree / newDuel; null if this reference has none. */
+    val libraryJson: String? get() = runCatching { JSONObject(json).optJSONArray("library") }.getOrNull()
+        ?.takeIf { it.length() > 0 }?.toString()
 
     /** Share (0..1) of reference boards that [value] beats or equals. */
     fun percentile(value: Double): Double =

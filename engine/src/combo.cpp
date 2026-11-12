@@ -141,6 +141,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 	mc.seconds = 120;
 	mc.horizon_turns = 1;
 	mc.cancel = cfg.cancel;
+	mc.guide = cfg.guide;
 	auto out = searcher.run({root}, 0, mc);
 	const Trajectory* best = nullptr;
 	for(auto& m : out.my_moves)
@@ -275,6 +276,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 			bc.seconds = 30;
 			bc.horizon_turns = 1;
 			bc.cancel = cfg.cancel;
+			bc.guide = cfg.guide;
 			auto bo = searcher.run({r}, 0, bc);
 			double v = -1;
 			const Trajectory* t = robust_best(bo, 0, v);

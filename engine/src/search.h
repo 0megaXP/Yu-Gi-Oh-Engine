@@ -8,6 +8,7 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,8 @@
 #include "evaluate.h"
 
 namespace ygoe {
+
+class PieceGuide;
 
 // One concrete state to search from: a duel setup plus the responses already played.
 struct RootState {
@@ -48,6 +51,10 @@ struct SearchConfig {
 	int max_rollout_steps = 600;
 	int keep_trajectories = 6;    // best trajectories kept per first move
 	const std::atomic<bool>* cancel = nullptr;  // set to true to stop early (results so far are kept)
+	// Combo pieces to try (pieces.h): in `guided_share` of the iterations the searching player
+	// is steered along a plan chained from these pieces, which the search then improves on.
+	std::shared_ptr<const PieceGuide> guide;
+	double guided_share = 0.7;
 };
 
 struct MoveStats {

@@ -9,6 +9,7 @@
 //
 // Pieces from many lines of a deck are collected into a library (see reference.h).
 #pragma once
+#include <random>
 #include <string>
 #include <vector>
 
@@ -62,5 +63,37 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 // Adds the pieces of one line (with its end value) to `lib`.
 void add_to_library(std::vector<LibraryPiece>& lib, const LineSplit& split, double value);
 void sort_library(std::vector<LibraryPiece>& lib, size_t max);
+// Reads pieces back from pieces_json / library_json output (official ids → script ids).
+std::vector<LibraryPiece> parse_library(const CardDB& db, const std::string& json_array);
+namespace json { class Value; }
+std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& array);
+
+// What a player has to work with right now: cards in hand, and everything else they can use
+// (field, GY, banished). Script ids.
+struct PieceResources {
+	std::vector<uint32_t> hand;
+	std::vector<uint32_t> other;
+	bool normal_summon_used = false;
+};
+PieceResources resources_of(const Board& b, uint8_t player);
+
+// Chains library pieces into plans for a search to try first.
+//
+// A plan starts from a piece the current cards allow and keeps adding pieces whose needs are
+// met by what the hand still holds plus what earlier pieces gave, so pieces found in different
+// lines get recombined. The result is the labels of their steps, in order; the search boosts an
+// option matching the next label (see SearchConfig::guide).
+class PieceGuide {
+public:
+	explicit PieceGuide(std::vector<LibraryPiece> lib) : lib_(std::move(lib)) {}
+	bool empty() const { return lib_.empty(); }
+	size_t size() const { return lib_.size(); }
+	std::vector<std::string> sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces = 5) const;
+	// The pieces that could start right now (for display / debugging).
+	std::vector<const ComboPiece*> playable(const PieceResources& r) const;
+
+private:
+	std::vector<LibraryPiece> lib_;
+};
 
 }  // namespace ygoe

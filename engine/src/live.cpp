@@ -167,6 +167,7 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
 	cfg.horizon_turns = 1;
 	cfg.cancel = &cancel_;
+	cfg.guide = guides_[d.player];
 	std::vector<RootState> roots{{setup_, history_}};
 	auto out = searcher_->run(roots, d.player, cfg);
 	if(out.moves.empty())

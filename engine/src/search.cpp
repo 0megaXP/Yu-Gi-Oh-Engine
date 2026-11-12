@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "ocgapi_constants.h"
+#include "pieces.h"
 
 namespace ygoe {
 
@@ -461,21 +462,53 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 	std::atomic<int> next_iteration{0};
 	std::atomic<int> done{0};
 	std::atomic<int> failures{0};
+	std::atomic<long> guide_steps{0}, guide_done{0}, guide_runs{0};
 	const auto t0 = std::chrono::steady_clock::now();
 	auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
 	bool root_info_set = false;
+
+	// What the searching player has, for chaining pieces (their own cards are the same in
+	// every determinization).
+	PieceResources resources;
+	const bool guided = cfg.guide && !cfg.guide->empty() && cfg.guided_share > 0;
+	if(guided) {
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		if(d.replay(roots[0].setup, roots[0].history))
+			resources = resources_of(d.board(), me);
+	}
 
 	auto worker = [&](unsigned tid) {
 		std::mt19937_64 rng(0xC0FFEEull * (tid + 1) + roots.size());
 		Duel duel(db_, scripts_);
 		duel.set_declare_pool(pool_);
 		int steps_this_turn = 0;
+		std::vector<std::string> plan;  // labels of a chained-pieces plan, for this iteration
+		size_t plan_pos = 0;
+		auto plan_match = [&](const Option& o, size_t at) {
+			if(at >= plan.size())
+				return false;
+			const std::string& want = plan[at];
+			return o.label == want || (o.label.size() > 5 && o.label.compare(0, 5, "Yes: ") == 0 && o.label.compare(5, std::string::npos, want) == 0);
+		};
+		// How far ahead in the plan `o` is (0 = the next label), -1 if not within reach. A few
+		// labels may be skipped: a step the line already did another way, a choice that
+		// differs this time.
+		auto plan_ahead = [&](const Option& o) {
+			for(size_t k = 0; k < 4 && plan_pos + k < plan.size(); ++k)
+				if(plan_match(o, plan_pos + k))
+					return static_cast<int>(k);
+			return -1;
+		};
+		std::uniform_real_distribution<double> unit(0, 1);
 		// Playout prior. Summoning or setting a hand trap usually wastes it, so those are
 		// tried last (still possible: some lines need the body, e.g. as Synchro material).
 		auto weight = [&](const Decision& dd, const Option& o) {
 			double w = policy_weight(dd, o, duel.turn_player(), steps_this_turn);
 			if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
 				w *= 0.1;
+			if(dd.player == me && plan_ahead(o) >= 0)
+				w = std::max(w, 1.0) * 25;
 			return w;
 		};
 		while(true) {
@@ -490,6 +523,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 			const uint32_t root_turn = duel.turn();
 			uint32_t turn_seen = duel.turn();
 			steps_this_turn = 0;
+			plan.clear();
+			plan_pos = 0;
+			if(guided && unit(rng) < cfg.guided_share)
+				plan = cfg.guide->sample(resources, rng);
 			Trajectory traj;
 			traj.root = ri;
 			std::vector<std::pair<Node*, size_t>> path;
@@ -602,7 +639,23 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 								best_i = i;
 							}
 						}
-						if(!unvisited.empty()) {
+						// A guided iteration follows its plan through the tree too.
+						size_t follow = SIZE_MAX;
+						if(dec.player == me && plan_pos < plan.size()) {
+							int best_k = 99;
+							for(size_t i = 0; i < present.size(); ++i) {
+								if(tried[i] || node->children[present[i]].bad)
+									continue;
+								int k = plan_ahead(dec.options[i]);
+								if(k >= 0 && k < best_k) {
+									best_k = k;
+									follow = i;
+								}
+							}
+						}
+						if(follow != SIZE_MAX) {
+							idx = follow;
+						} else if(!unvisited.empty()) {
 							idx = unvisited[weighted_pick(uw, rng)];
 						} else if(best_i != SIZE_MAX) {
 							idx = best_i;
@@ -629,6 +682,11 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 						responded = true;
 						traj.responses.push_back(opt.response);
 						traj.steps.push_back({dec.player, dec.type, opt.label, dec.minor});
+						if(dec.player == me && plan_pos < plan.size()) {
+							int k = plan_ahead(opt);
+							if(k >= 0)
+								plan_pos += static_cast<size_t>(k) + 1;
+						}
 						if(parent) {
 							std::lock_guard<std::mutex> lock(mu);
 							Child& c = parent->children[chosen_index];
@@ -651,6 +709,11 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 					break;
 				++steps;
 				++steps_this_turn;
+			}
+			if(!plan.empty()) {
+				guide_steps += static_cast<long>(plan.size());
+				guide_done += static_cast<long>(std::min(plan_pos, plan.size()));
+				++guide_runs;
 			}
 			// Who acts next decides whose interruptions count.
 			uint8_t next = duel.turn() >= root_turn + static_cast<uint32_t>(cfg.horizon_turns)
@@ -701,6 +764,9 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		t.join();
 
 	out.iterations = done.load();
+	if(guide_runs > 0 && std::getenv("YGOE_GUIDE_DEBUG"))
+		std::fprintf(stderr, "guide: %ld plans, %.0f%% of their steps followed (avg plan %.1f labels)\n", guide_runs.load(),
+		             100.0 * guide_done / std::max(1L, guide_steps.load()), double(guide_steps) / guide_runs);
 	out.failures = failures.load();
 	out.seconds = elapsed();
 	best_by_move.resize(root->children.size());
