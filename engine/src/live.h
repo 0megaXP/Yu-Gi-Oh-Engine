@@ -54,6 +54,10 @@ private:
 	// The bot's current plan: the expected sequence of decision labels (both players).
 	std::vector<Step> plan_;
 	size_t plan_pos_ = 0;
+	// Whose plan it is. The plan also holds the moves that bot expected from the other side
+	// (often random playout moves); those only track whether play still follows it and are
+	// never played for the other side's bot.
+	int plan_player_ = -1;
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

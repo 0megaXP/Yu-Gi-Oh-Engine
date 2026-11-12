@@ -82,7 +82,14 @@ public:
 	bool drop_idle_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
 	// Replays t.steps by their labels from `root`, filling in responses and reward. Fails if a
 	// step is no longer available or the result scores below `min_reward`.
-	bool replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward);
+	// With `lenient`, chain windows the steps don't answer are passed, and a "__decline__" step
+	// takes the decision's pass / "no" answer.
+	bool replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward,
+	                   bool lenient = false);
+	// Removes `player`'s optional responses (chain activations, "use this effect?" yes) that add
+	// nothing: the line scores as well holding the card, e.g. a hand trap on your own card or
+	// on a monster that has already done its job. Holding the card keeps it for a better time.
+	bool drop_idle_responses(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 

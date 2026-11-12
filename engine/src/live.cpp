@@ -148,7 +148,8 @@ int LiveDuel::choose(BotLevel level) {
 	if(d.options.size() == 1)
 		return 0;
 	// Follow the plan while it still matches.
-	if(level != BotLevel::Easy && plan_pos_ < plan_.size() && plan_[plan_pos_].player == d.player) {
+	if(level != BotLevel::Easy && plan_pos_ < plan_.size() && plan_[plan_pos_].player == d.player &&
+	   plan_player_ == d.player) {
 		for(size_t i = 0; i < d.options.size(); ++i)
 			if(d.options[i].label == plan_[plan_pos_].label)
 				return static_cast<int>(i);
@@ -174,7 +175,32 @@ int LiveDuel::choose(BotLevel level) {
 	// average alone undersells good starters. Rank well-explored moves by a blend of their
 	// average and the best complete line found through them.
 	const MoveStats* pick = &out.moves.front();
-	{
+	const bool response = d.type == DecisionType::Chain || d.type == DecisionType::EffectYesNo;
+	if(response) {
+		// Using a card in a chain window spends it; the search's horizon cannot see the better
+		// moment it is being saved for. So rank by the average only (the best single line is
+		// noisy here, it depends on random opponent play) and use it only for a clear gain.
+		const MoveStats* pass = nullptr;
+		for(const auto& m : out.moves)
+			if(m.label == "Don't respond" || m.label.rfind("Don't use", 0) == 0)
+				pass = &m;
+		int most = out.moves.front().visits;
+		const MoveStats* use = nullptr;
+		for(const auto& m : out.moves)
+			if(&m != pass && m.visits >= std::max(8, most / 6) && (!use || m.mean > use->mean))
+				use = &m;
+		// Spending a card from the hand, or acting on the opponent's turn, needs a clear gain;
+		// an effect of a card already on your field during your own turn only a small one.
+		double margin = 0.005;
+		if(use) {
+			for(const auto& o : d.options)
+				if(o.label == use->label && ((o.loc & LOCATION_HAND) || d.player != duel_->turn_player()))
+					margin = 0.03;
+		}
+		pick = pass;
+		if(!pass || (use && use->mean > pass->mean + margin))
+			pick = use ? use : &out.moves.front();
+	} else {
 		int most = out.moves.front().visits;
 		double best_score = -1;
 		for(const auto& m : out.moves) {
@@ -194,6 +220,7 @@ int LiveDuel::choose(BotLevel level) {
 		Trajectory t = m.best.front();
 		searcher_->defer_sets(roots[0], t, d.player, cfg.horizon_turns);
 		searcher_->drop_idle_summons(roots[0], t, d.player, cfg.horizon_turns);
+		searcher_->drop_idle_responses(roots[0], t, d.player, cfg.horizon_turns);
 		return t;
 	};
 	const bool check_boards = level == BotLevel::Strong && d.type == DecisionType::Idle &&
@@ -275,6 +302,7 @@ int LiveDuel::choose(BotLevel level) {
 		// to hit set cards, and no Spell/Trap Zone blocked mid-combo.
 		Trajectory t = !repaired.empty() && repaired.front().first == &best ? repaired.front().second : repair(best);
 		plan_ = t.steps;
+		plan_player_ = d.player;
 		if(!plan_.empty() && plan_.front().player == d.player)
 			want = plan_.front().label;
 	}

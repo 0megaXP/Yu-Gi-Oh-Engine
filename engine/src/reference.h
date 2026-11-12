@@ -11,6 +11,7 @@
 
 #include "analyze.h"
 #include "deck.h"
+#include "pieces.h"
 
 namespace ygoe {
 
@@ -20,6 +21,7 @@ struct ReferenceSample {
 	int interrupts = 0;                  // interruptions the board holds
 	std::vector<CardSummary> board;      // field + hand at the end of the turn
 	std::vector<std::string> moves;
+	std::vector<ComboPiece> pieces;      // the line split into sub-combos
 };
 
 struct ReferenceResult {
@@ -27,6 +29,7 @@ struct ReferenceResult {
 	int iterations = 0;                  // per hand
 	std::vector<ReferenceSample> samples;  // best first
 	std::vector<std::pair<uint32_t, double>> common_cards;  // field cards by share of boards
+	std::vector<LibraryPiece> library;   // sub-combos merged across the samples
 	std::string to_json(const CardDB& db) const;
 };
 

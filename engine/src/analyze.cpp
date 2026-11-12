@@ -143,6 +143,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 			for(auto& t : mv.best) {
 				searcher.defer_sets(roots[t.root], t, sc.me, a.horizon_turns);
 				searcher.drop_idle_summons(roots[t.root], t, sc.me, a.horizon_turns);
+				searcher.drop_idle_responses(roots[t.root], t, sc.me, a.horizon_turns);
 			}
 			std::sort(mv.best.begin(), mv.best.end(), [](auto& x, auto& y) { return x.reward > y.reward; });
 			std::string label = mv.best.empty() ? mv.label : first_action(mv.best.front(), sc.me);

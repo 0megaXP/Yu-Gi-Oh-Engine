@@ -229,6 +229,13 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 	return true;
 }
 
+namespace {
+bool is_pass_label(const std::string& l) {
+	return l == "Don't respond" || l.rfind("Don't use", 0) == 0 || l.rfind("No:", 0) == 0 || l == "Done selecting" ||
+	       l == "Cancel";
+}
+}  // namespace
+
 bool Searcher::drop_idle_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns) {
 	bool changed = false;
 	for(size_t i = 0; i < t.steps.size(); ++i) {
@@ -262,7 +269,42 @@ bool Searcher::drop_idle_summons(const RootState& root, Trajectory& t, uint8_t p
 	return changed;
 }
 
-bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward) {
+bool Searcher::drop_idle_responses(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns) {
+	bool changed = false;
+	int tries = 0;
+	for(size_t i = 0; i < t.steps.size() && tries < 8; ++i) {
+		const Step& s = t.steps[i];
+		if(s.player != player || s.minor || is_pass_label(s.label))
+			continue;
+		if(s.type != DecisionType::Chain && !(s.type == DecisionType::EffectYesNo && s.label.rfind("Use ", 0) == 0))
+			continue;
+		// The activation and its choices, up to this player's next action.
+		size_t j = i + 1;
+		while(j < t.steps.size()) {
+			const Step& n = t.steps[j];
+			if(n.player == player && !n.minor && !is_pass_label(n.label) &&
+			   (n.type == DecisionType::Idle || n.type == DecisionType::Chain || n.type == DecisionType::Battle ||
+			    n.type == DecisionType::EffectYesNo))
+				break;
+			if(n.type == DecisionType::Idle || n.type == DecisionType::Battle)
+				break;  // the other player's action: not part of this response
+			++j;
+		}
+		++tries;
+		Trajectory candidate = t;
+		Step decline{player, s.type, "__decline__", false};
+		candidate.steps.erase(candidate.steps.begin() + static_cast<long>(i), candidate.steps.begin() + static_cast<long>(j));
+		candidate.steps.insert(candidate.steps.begin() + static_cast<long>(i), decline);
+		if(replay_labels(root, candidate, player, horizon_turns, t.reward - 0.005, true)) {
+			t = std::move(candidate);
+			changed = true;
+		}
+	}
+	return changed;
+}
+
+bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward,
+                             bool lenient) {
 	static const bool dbg = std::getenv("YGOE_DEFER_DEBUG") != nullptr;
 	// Replay the steps by labels; every step must still be available.
 	Duel d(db_, scripts_);
@@ -272,7 +314,66 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 	const uint32_t root_turn = d.turn();
 	Trajectory out;
 	out.root = t.root;
+	auto pass_index = [](const Decision& dec) {
+		for(size_t o = 0; o < dec.options.size(); ++o)
+			if(dec.options[o].kind == OptKind::Pass || dec.options[o].kind == OptKind::No)
+				return o;
+		return SIZE_MAX;
+	};
+	auto take = [&](size_t pick) {
+		const Decision& dec = d.decision();
+		auto resp = dec.options[pick].response;
+		Step done{dec.player, dec.type, dec.options[pick].label, dec.minor};
+		if(!d.respond(resp))
+			return false;
+		out.responses.push_back(std::move(resp));
+		out.steps.push_back(std::move(done));
+		return true;
+	};
 	for(const Step& s : t.steps) {
+		if(lenient) {
+			// Pass windows the line does not answer (they appear or move when a response is dropped).
+			int guard = 0;
+			while(!d.ended() && guard++ < 30) {
+				const Decision& dec = d.decision();
+				size_t p = pass_index(dec);
+				bool matches = dec.player == s.player;
+				if(matches && s.label != "__decline__") {
+					matches = false;
+					for(const auto& o : dec.options)
+						if(o.label == s.label)
+							matches = true;
+					matches = matches || s.minor;
+				}
+				if(matches)
+					break;
+				if(dec.type == DecisionType::Chain && p != SIZE_MAX) {
+					if(!take(p))
+						return false;
+					continue;
+				}
+				// A choice the line never met (an effect that now resolves): take the first answer.
+				if(dec.type != DecisionType::Idle && dec.type != DecisionType::Battle && !dec.options.empty() &&
+				   s.label != "__decline__") {
+					if(!take(0))
+						return false;
+					continue;
+				}
+				break;
+			}
+			if(d.ended())
+				break;
+			const Decision& dec = d.decision();
+			if(s.label == "__decline__") {
+				size_t p = dec.player == s.player ? pass_index(dec) : SIZE_MAX;
+				if(p == SIZE_MAX || !take(p))
+					return false;
+				continue;
+			}
+			// A pass the line no longer meets (the window it answered is gone): skip it.
+			if(is_pass_label(s.label) && (dec.player != s.player || pass_index(dec) == SIZE_MAX))
+				continue;
+		}
 		const Decision& dec = d.decision();
 		if(d.ended() || dec.options.empty() || dec.player != s.player)
 			return false;
@@ -628,10 +729,6 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 }
 
 namespace {
-bool is_pass_label(const std::string& l) {
-	return l == "Don't respond" || l.rfind("Don't use", 0) == 0 || l.rfind("No:", 0) == 0 || l == "Done selecting" ||
-	       l == "Cancel";
-}
 }  // namespace
 
 std::string first_action(const Trajectory& t, uint8_t player) {

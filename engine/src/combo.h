@@ -12,6 +12,7 @@
 
 #include "analyze.h"
 #include "deck.h"
+#include "pieces.h"
 
 namespace ygoe {
 
@@ -22,6 +23,7 @@ struct ComboBranch {
 	std::string used_on;                  // your action it answers (the step before it)
 	int used_at_step = -1;                // index into the main line's moves
 	int choke_points = 0;                 // how many places it could have been used
+	int hits_part = -1;                   // the main line's part it interrupts (ComboTree::main_parts)
 	std::vector<std::string> continuation;  // from the interruption to the end of the turn
 	std::vector<CardSummary> board;
 	double value = 0;                     // deck-neutral board value (as reference boards)
@@ -32,6 +34,7 @@ struct ComboTree {
 	std::vector<std::string> main_moves;
 	std::vector<CardSummary> main_board;
 	double main_value = 0, main_score = 0;
+	std::vector<ComboPiece> main_parts;   // the main line split into sub-combos
 	bool opponent_known = false;
 	std::vector<ComboBranch> branches;    // most damaging first
 	bool cancelled = false;

@@ -154,6 +154,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 	Trajectory main = *best;
 	searcher.defer_sets(root, main, 0, 1);
 	searcher.drop_idle_summons(root, main, 0, 1);
+	searcher.drop_idle_responses(root, main, 0, 1);
 	tree.main_score = main.reward;
 	tree.main_moves = describe(main, 0, true);
 	Board end;
@@ -161,6 +162,8 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 		tree.main_board = summarize_cards(db, end, 0);
 		tree.main_value = board_value(db, mine, end, 0);
 	}
+	LineSplit main_split = split_line(db, scripts, pool, root.setup, main, hts);
+	tree.main_parts = main_split.pieces;
 	++step;
 
 	// Index of each of your non-trivial steps in describe()'s numbering, to name choke points.
@@ -198,6 +201,10 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 				int guard = 0;
 				while(!d.ended() && d.decision().player != s.player && guard++ < 20) {
 					const Decision& dec = d.decision();
+					if(dec.player == 1)
+						for(const auto& o : dec.options)
+							if(o.kind == OptKind::Activate && o.code == ht_id)
+								chokes.push_back({hist, o.response, last_action, move_index});
 					size_t pass = 0;
 					for(size_t o = 0; o < dec.options.size(); ++o)
 						if(dec.options[o].kind == OptKind::Pass)
@@ -279,6 +286,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 				searcher.defer_sets(r, cont, 0, 1);
 				br.used_on = c.after.empty() ? "the start of your turn" : c.after;
 				br.used_at_step = c.move_index;
+				br.hits_part = main_split.piece_of(std::max(0, c.move_index));
 				br.continuation = describe(cont, 0, true);
 				br.score = v;
 				Board b;
@@ -326,12 +334,12 @@ std::string ComboTree::to_json(const CardDB& db) const {
 	std::ostringstream o;
 	o << "{\"opponent_known\":" << (opponent_known ? "true" : "false") << ",\"main\":{\"moves\":" << strings(main_moves)
 	  << ",\"board\":" << cards(main_board) << ",\"value\":" << num(main_value) << ",\"score\":" << num(main_score)
-	  << "},\"branches\":[";
+	  << ",\"parts\":" << pieces_json(db, main_parts) << "},\"branches\":[";
 	for(size_t i = 0; i < branches.size(); ++i) {
 		const auto& b = branches[i];
 		o << (i ? "," : "") << "{\"hand_trap\":{\"code\":" << b.hand_trap << ",\"name\":" << quote(b.hand_trap_name)
 		  << "},\"stops_nothing\":" << (b.stops_nothing ? "true" : "false") << ",\"used_on\":" << quote(b.used_on)
-		  << ",\"used_at_step\":" << b.used_at_step << ",\"choke_points\":" << b.choke_points
+		  << ",\"used_at_step\":" << b.used_at_step << ",\"choke_points\":" << b.choke_points << ",\"hits_part\":" << b.hits_part
 		  << ",\"continuation\":" << strings(b.continuation) << ",\"board\":" << cards(b.board)
 		  << ",\"value\":" << num(b.value) << ",\"score\":" << num(b.score) << "}";
 	}

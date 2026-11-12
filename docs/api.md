@@ -48,6 +48,23 @@ tree.branches.forEach { b -> b.handTrap; b.usedOn; b.continuation; b.board; b.sc
 2. **Hand traps tested:** the non-engine cards in the opponent's list that interrupt from the hand, with Main Deck copies counting double Side Deck copies. With no opponent deck, the most played hand traps are used (Ash, Veiler, Imperm, Ogre, Droll, Nibiru, Fuwalos, Ghost Belle).
 3. **Finding where each hurts:** the main line is replayed with that hand trap in the opponent's hand, to find every place it can be used (`choke_points`). Up to 4 of those places, spread over the line, are tried. Each one is searched again with the interruption forced.
 4. **The branch:** the place where the interruption hurts most is kept, together with your best continuation from there. If the opponent decides first (for example the target), they pick the choice that is worst for you.
+5. **Parts:** `tree.mainParts` is the main line split into sub-combos (see Combo pieces), and `branch.hitsPart` is the part each hand trap interrupts.
+
+### Combo pieces
+
+A line is split into sub-combos ("pieces"):
+
+- **Tracking:** the line is replayed action by action, tracking where each card came from: the starting hand, or the action that put it in the hand, on the field or in the GY.
+- **Cutting:** the line is cut where the fewest cards carry over to the rest, so pieces are mostly 2 to 5 actions long.
+- **What each piece records:**
+  - `needsHand`: the starting-hand cards it uses;
+  - `needsEarlier`: what earlier pieces left for it;
+  - `normalSummon`: whether it uses the Normal Summon;
+  - `gives`: what later pieces use from it;
+  - `leaves`: what stays at the end;
+  - `stoppedBy`: the hand traps that can respond during it, each with the first step it can answer. These come from a second replay with the hand traps in the opponent's hand.
+- **Starters:** a piece that needs nothing from earlier pieces is a `starter`.
+- **Library:** reference end boards also return `ref.library`, the pieces merged across the sample lines by what they need: starters first, then the most common.
 
 ### Reference end boards
 
@@ -55,6 +72,7 @@ tree.branches.forEach { b -> b.handTrap; b.usedOn; b.continuation; b.board; b.sc
 val ref = engine.reference(deck, hands = 20, iterations = 1500) { p -> ui.progress = p.fraction }
 ref.samples       // best board first: hand, value, interrupts, board, moves
 ref.commonCards   // cards most often on the field at the end
+ref.library       // sub-combos across the samples (see Combo pieces); each sample has .pieces
 ref.percentile(line.boardValue)   // where a Play engine line's board sits (0..1)
 save(ref.json); ReferenceResult.fromJson(saved)
 ```

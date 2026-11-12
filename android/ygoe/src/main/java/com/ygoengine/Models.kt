@@ -186,9 +186,47 @@ data class ReferenceSample(
     val interrupts: Int,
     val board: List<EngineCard>,
     val moves: List<String>,
+    /** The line split into sub-combos (empty for references built before pieces existed). */
+    val pieces: List<ComboPiece> = emptyList(),
 )
 
 data class CardShare(val code: Long, val name: String, val share: Double)
+
+/** A card a combo piece needs or gives; [where] is "hand", "field", "gy" or "banished" ("" for starting-hand cards). */
+data class PieceCard(val code: Long, val name: String, val where: String)
+
+/** A hand trap that can stop a piece, and the first of the piece's steps it can answer (0-based). */
+data class PieceStop(val code: Long, val name: String, val step: Int)
+
+/**
+ * A sub-combo: a stretch of a line that turns what it [needsHand] (starting-hand cards), what earlier
+ * pieces left ([needsEarlier]) and maybe the Normal Summon into what later pieces use ([gives]) and
+ * what stays at the end ([leaves]).
+ */
+data class ComboPiece(
+    val first: Int,
+    val last: Int,
+    /** Needs nothing from earlier pieces: it can start a turn. */
+    val starter: Boolean,
+    val steps: List<String>,
+    val needsHand: List<PieceCard>,
+    val needsEarlier: List<PieceCard>,
+    val normalSummon: Boolean,
+    val gives: List<PieceCard>,
+    val leaves: List<PieceCard>,
+    /** Earliest first. */
+    val stoppedBy: List<PieceStop>,
+)
+
+/** A piece found in several reference lines. */
+data class LibraryPiece(
+    val piece: ComboPiece,
+    /** Lines it appeared in, and their share. */
+    val count: Int,
+    val share: Double,
+    /** Average deck-neutral end value of those lines. */
+    val value: Double,
+)
 
 /** What a deck usually builds going first, found by the engine on random hands (no opponent interaction). */
 data class ReferenceResult(
@@ -198,6 +236,8 @@ data class ReferenceResult(
     val samples: List<ReferenceSample>,
     /** Cards on the field at the end, by share of boards. */
     val commonCards: List<CardShare>,
+    /** Sub-combos across the samples: starters first, then most common. */
+    val library: List<LibraryPiece> = emptyList(),
     val cancelled: Boolean,
     val missingCards: List<Long>,
     /** The raw result, to save and load again with [ReferenceResult.fromJson]. */
@@ -224,6 +264,8 @@ data class ComboBranch(
     val usedOn: String,
     /** How many places in the main line it could have been used. */
     val chokePoints: Int,
+    /** Index in [ComboTree.mainParts] of the part it interrupts, -1 if none. */
+    val hitsPart: Int = -1,
     /** Your best continuation from the interruption to the end of the turn. */
     val continuation: List<String>,
     val board: List<EngineCard>,
@@ -238,6 +280,8 @@ data class ComboTree(
     val mainBoard: List<EngineCard>,
     val mainValue: Double,
     val mainScore: Double,
+    /** The main line split into sub-combos. */
+    val mainParts: List<ComboPiece> = emptyList(),
     /** False when no opponent deck was given and the most played hand traps were used. */
     val opponentKnown: Boolean,
     /** Most damaging first; hand traps that stop nothing last. */
@@ -318,6 +362,22 @@ internal object Parse {
         missingCards = o.optJSONArray("missing_cards").longs(),
     )
 
+    fun piece(o: JSONObject): ComboPiece {
+        fun cards(a: JSONArray?) = a.map { PieceCard(it.optLong("code"), it.optString("name"), it.optString("where")) }
+        return ComboPiece(
+            first = o.optInt("first"),
+            last = o.optInt("last"),
+            starter = o.optBoolean("starter"),
+            steps = o.optJSONArray("steps").strings(),
+            needsHand = cards(o.optJSONArray("needs_hand")),
+            needsEarlier = cards(o.optJSONArray("needs_earlier")),
+            normalSummon = o.optBoolean("normal_summon"),
+            gives = cards(o.optJSONArray("gives")),
+            leaves = cards(o.optJSONArray("leaves")),
+            stoppedBy = o.optJSONArray("stopped_by").map { PieceStop(it.optLong("code"), it.optString("name"), it.optInt("step")) },
+        )
+    }
+
     fun comboTree(text: String): ComboTree {
         val o = checked(text)
         val main = o.getJSONObject("main")
@@ -326,6 +386,7 @@ internal object Parse {
             mainBoard = main.optJSONArray("board").map(::card),
             mainValue = main.optDouble("value", 0.0),
             mainScore = main.optDouble("score", 0.0),
+            mainParts = main.optJSONArray("parts").map(::piece),
             opponentKnown = o.optBoolean("opponent_known"),
             branches = o.optJSONArray("branches").map { b ->
                 val ht = b.getJSONObject("hand_trap")
@@ -334,6 +395,7 @@ internal object Parse {
                     stopsNothing = b.optBoolean("stops_nothing"),
                     usedOn = b.optString("used_on"),
                     chokePoints = b.optInt("choke_points"),
+                    hitsPart = b.optInt("hits_part", -1),
                     continuation = b.optJSONArray("continuation").strings(),
                     board = b.optJSONArray("board").map(::card),
                     value = b.optDouble("value", 0.0),
@@ -357,7 +419,11 @@ internal object Parse {
                     interrupts = s.optInt("interrupts"),
                     board = s.optJSONArray("board").map(::card),
                     moves = s.optJSONArray("moves").strings(),
+                    pieces = s.optJSONArray("pieces").map(::piece),
                 )
+            },
+            library = o.optJSONArray("library").map {
+                LibraryPiece(piece(it), it.optInt("count"), it.optDouble("share", 0.0), it.optDouble("value", 0.0))
             },
             commonCards = o.optJSONArray("common_cards").map { CardShare(it.optLong("code"), it.optString("name"), it.optDouble("share", 0.0)) },
             cancelled = o.optBoolean("cancelled"),

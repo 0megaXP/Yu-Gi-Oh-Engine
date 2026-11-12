@@ -7,6 +7,7 @@
 
 #include "json.h"
 #include "ocgapi_constants.h"
+#include "combo.h"
 #include "search.h"
 
 namespace ygoe {
@@ -35,6 +36,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 	Evaluator eval(db, deck, deck);
 	make_neutral(eval);
 	std::map<uint32_t, int> seen;
+	const auto hand_traps = likely_hand_traps(db, nullptr, 8);
 	for(int h = 0; h < hands; ++h) {
 		if(cancel && cancel->load())
 			break;
@@ -67,6 +69,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 		Trajectory t = *best;
 		searcher.defer_sets(root, t, 0, 1);
 		searcher.drop_idle_summons(root, t, 0, 1);
+		searcher.drop_idle_responses(root, t, 0, 1);
 		Board end;
 		if(!searcher.final_board(root, t, end))
 			continue;
@@ -80,6 +83,11 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 				++s.interrupts;
 		s.board = summarize_cards(db, end, 0);
 		s.moves = describe(t, 0, true);
+		{
+			auto split = split_line(db, scripts, declare_pool(sc), root.setup, t, hand_traps);
+			add_to_library(res.library, split, s.value);
+			s.pieces = std::move(split.pieces);
+		}
 		for(auto& c : end.mzone[0])
 			if(c.code && c.owner == 0)
 				++seen[c.code];
@@ -96,6 +104,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 	std::sort(res.common_cards.begin(), res.common_cards.end(), [](auto& a, auto& b) { return a.second > b.second; });
 	if(res.common_cards.size() > 15)
 		res.common_cards.resize(15);
+	sort_library(res.library, 30);
 	return res;
 }
 
@@ -122,13 +131,14 @@ std::string ReferenceResult::to_json(const CardDB& db) const {
 		o << "],\"moves\":[";
 		for(size_t k = 0; k < s.moves.size(); ++k)
 			o << (k ? "," : "") << quote(s.moves[k]);
-		o << "]}";
+		o << "],\"pieces\":" << pieces_json(db, s.pieces) << "}";
 	}
 	o << "],\"common_cards\":[";
 	for(size_t i = 0; i < common_cards.size(); ++i)
 		o << (i ? "," : "") << "{\"code\":" << db.official_id(common_cards[i].first) << ",\"name\":"
 		  << quote(db.name(common_cards[i].first)) << ",\"share\":" << num(common_cards[i].second) << "}";
-	o << "]}";
+	o << "],\"lines\":" << samples.size() << ",\"library\":" << library_json(db, library, static_cast<int>(samples.size()))
+	  << "}";
 	return o.str();
 }
 
