@@ -154,7 +154,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		duel.set_declare_pool(pool_);
 		while(true) {
 			int it = next_iteration.fetch_add(1);
-			if(it >= cfg.iterations || elapsed() > cfg.seconds)
+			if(it >= cfg.iterations || elapsed() > cfg.seconds || (cfg.cancel && cfg.cancel->load()))
 				break;
 			size_t ri = static_cast<size_t>(it) % roots.size();
 			if(!duel.replay(roots[ri].setup, roots[ri].history)) {
@@ -314,7 +314,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				}
 			}
 			int d = ++done;
-			if(progress && tid == 0 && d % 50 == 0)
+			if(progress && tid == 0 && d % 25 == 0)
 				progress(d, elapsed());
 		}
 	};

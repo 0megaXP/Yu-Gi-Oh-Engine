@@ -66,7 +66,7 @@ std::vector<CardSummary> notes_to_cards(const CardDB& db, const std::vector<Boar
 	for(const auto& n : notes) {
 		if(n.player != player)
 			continue;
-		out.push_back({n.code, db.name(n.code), n.where, std::string(n.what) + " (" + fmt(n.value) + ")"});
+		out.push_back({db.official_id(n.code), db.name(n.code), n.where, std::string(n.what) + " (" + fmt(n.value) + ")"});
 	}
 	return out;
 }
@@ -77,15 +77,15 @@ std::vector<CardSummary> summarize_cards(const CardDB& db, const Board& b, uint8
 	std::vector<CardSummary> out;
 	for(const auto& c : b.mzone[p])
 		if(c.code)
-			out.push_back({c.code, db.name(c.code), "Monster Zone",
+			out.push_back({db.official_id(c.code), db.name(c.code), "Monster Zone",
 			               (c.pos & POS_FACEDOWN) ? "face-down" : (std::to_string(c.atk) + " ATK") +
 			                   (c.overlay.empty() ? "" : ", " + std::to_string(c.overlay.size()) + " material")});
 	for(const auto& c : b.szone[p])
 		if(c.code)
-			out.push_back({c.code, db.name(c.code), c.seq == 5 ? "Field Zone" : "S/T Zone", (c.pos & POS_FACEDOWN) ? "set" : "face-up"});
+			out.push_back({db.official_id(c.code), db.name(c.code), c.seq == 5 ? "Field Zone" : "S/T Zone", (c.pos & POS_FACEDOWN) ? "set" : "face-up"});
 	if(include_hand)
 		for(const auto& c : b.hand[p])
-			out.push_back({c.code, db.name(c.code), "hand", ""});
+			out.push_back({db.official_id(c.code), db.name(c.code), "hand", ""});
 	return out;
 }
 
@@ -126,6 +126,8 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 		log("searching " + std::to_string(a.iterations) + " iterations over " + std::to_string(roots.size()) +
 		    " sample(s), horizon " + std::to_string(a.horizon_turns) + " turn(s)");
 	auto out = searcher.run(roots, sc.me, a, [&](int n, double s) {
+		if(cfg.on_progress)
+			cfg.on_progress("search", n, a.iterations);
 		if(log && n % 500 == 0)
 			log("  " + std::to_string(n) + " iterations, " + fmt(s, 1) + "s");
 	});
@@ -156,7 +158,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 	}
 
 	// Phase B: let the opponent play their turn against each candidate board.
-	if(cfg.verify) {
+	if(cfg.verify && !(cfg.search.cancel && cfg.search.cancel->load())) {
 		size_t li = 0;
 		for(const auto& mv : out.my_moves) {
 			if(li >= res.lines.size())
@@ -184,7 +186,11 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 			b.seconds = cfg.search.seconds / 2;
 			if(log)
 				log("checking line " + std::to_string(li) + " against the opponent's turn");
-			auto vo = searcher.run(vroots, sc.me, b);
+			const std::string phase = "verify " + std::to_string(li);
+			auto vo = searcher.run(vroots, sc.me, b, [&](int n, double) {
+				if(cfg.on_progress)
+					cfg.on_progress(phase, n, b.iterations);
+			});
 			if(vo.moves.empty())
 				continue;
 			// Value for the side to move at the verification root: the opponent picks the move

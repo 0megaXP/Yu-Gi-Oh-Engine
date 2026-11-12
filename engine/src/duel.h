@@ -159,6 +159,8 @@ private:
 // Loads scripts from the CardScripts checkout, keeping file contents in memory.
 class ScriptCache {
 public:
+	// `scripts_dir` is either a CardScripts checkout or a folder holding scripts.pack
+	// (built by tools/make_pack.py), which is what the Android app ships.
 	explicit ScriptCache(std::string scripts_dir, bool bytecode = true);
 	// Returns the script text, or nullptr when no such script exists.
 	const std::string* get(const std::string& name);
@@ -168,6 +170,13 @@ private:
 	std::string dir_;
 	bool bytecode_;
 	std::mutex mu_;
+	struct PackEntry {
+		uint64_t offset = 0;
+		uint32_t size = 0;
+	};
+	std::unordered_map<std::string, PackEntry> pack_;
+	std::string pack_path_;
+	bool read_source(const std::string& name, std::string& out);
 	std::unordered_map<std::string, std::unique_ptr<std::string>> cache_;
 };
 

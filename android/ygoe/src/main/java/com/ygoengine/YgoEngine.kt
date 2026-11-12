@@ -1,0 +1,120 @@
+package com.ygoengine
+
+import android.content.Context
+import java.io.Closeable
+import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+
+/**
+ * The Yu-Gi-Oh! engine: best lines for a position, deck profiles and side plans.
+ *
+ * ```
+ * val engine = YgoEngine.open(context)          // once; installs the asset pack on first run
+ * val result = engine.analyze(request) { p -> progress = p.fraction }
+ * ```
+ *
+ * Calls suspend on a background thread. Cancelling the calling coroutine stops the native
+ * search; [cancel] instead stops it but still returns the results found so far.
+ * One analysis runs at a time per engine; a second call waits for the first.
+ */
+class YgoEngine private constructor(private var handle: Long) : Closeable {
+
+    companion object {
+        /** Installs the bundled pack (first run only) and loads the engine. */
+        suspend fun open(context: Context): YgoEngine = withContext(Dispatchers.IO) {
+            open(EnginePack.install(context.applicationContext))
+        }
+
+        /** Loads the engine from a folder holding scripts.pack and the .tsv data files. Blocking. */
+        fun open(packDir: File): YgoEngine {
+            val h = YgoNative.create(packDir.absolutePath, packDir.absolutePath)
+            val err = YgoNative.error(h)
+            if (err.isNotEmpty()) {
+                YgoNative.destroy(h)
+                throw EngineException(err)
+            }
+            return YgoEngine(h)
+        }
+    }
+
+    /** Finds your best lines and checks each end board against the opponent's next turn. */
+    suspend fun analyze(request: AnalysisRequest, onProgress: ((Progress) -> Unit)? = null): AnalysisResult =
+        Parse.analysis(Parse.checked(runNative(onProgress) { YgoNative.analyze(it, request.toJson().toString()) }))
+
+    /** What a deck relies on, its key engine cards and its interruptions. Fast. */
+    suspend fun profile(deck: EngineDeck): DeckProfile = withContext(Dispatchers.Default) {
+        Parse.profile(Parse.checked(YgoNative.profile(live(), JSONObject().put("deck", deck.toJson()).toString())))
+    }
+
+    /**
+     * Side-deck plan for [mine] against [theirs], going first and going second.
+     * With [simulateTurns] > 0 the engine first plays that many opening turns for the opponent
+     * and rates your board breakers against what their boards actually contain (slower).
+     */
+    suspend fun side(
+        mine: EngineDeck,
+        theirs: EngineDeck,
+        simulateTurns: Int = 0,
+        iterationsPerTurn: Int = 400,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): SideResult {
+        val req = JSONObject()
+            .put("mine", mine.toJson())
+            .put("theirs", theirs.toJson())
+            .put("simulate", simulateTurns)
+            .put("iterations", iterationsPerTurn)
+        return Parse.side(Parse.checked(runNative(onProgress) { YgoNative.side(it, req.toString()) }))
+    }
+
+    /** Stops the running search early; the call returns what it found, with cancelled = true. */
+    fun cancel() {
+        if (handle != 0L) YgoNative.cancel(handle)
+    }
+
+    fun progress(): Progress {
+        val parts = YgoNative.progress(live()).split('\t')
+        return Progress(parts.getOrElse(0) { "" }, parts.getOrNull(1)?.toIntOrNull() ?: 0, parts.getOrNull(2)?.toIntOrNull() ?: 0)
+    }
+
+    /** Frees the native engine. A running job is cancelled first (this call then waits for it). */
+    override fun close() {
+        val h = handle
+        handle = 0
+        if (h != 0L) YgoNative.destroy(h)
+    }
+
+    private fun live(): Long {
+        check(handle != 0L) { "engine is closed" }
+        return handle
+    }
+
+    // Runs a blocking native call off the caller's thread, reporting progress on the caller's
+    // dispatcher, and turns coroutine cancellation into a native cancel.
+    private suspend fun runNative(onProgress: ((Progress) -> Unit)?, call: (Long) -> String): String = coroutineScope {
+        val h = live()
+        val work = async(Dispatchers.Default) { call(h) }
+        val poller = onProgress?.let { report ->
+            launch {
+                while (work.isActive) {
+                    report(progress())
+                    delay(250)
+                }
+            }
+        }
+        try {
+            work.await()
+        } catch (e: CancellationException) {
+            YgoNative.cancel(h)
+            throw e
+        } finally {
+            poller?.cancel()
+        }
+    }
+}

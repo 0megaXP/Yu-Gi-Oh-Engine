@@ -97,7 +97,10 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		auto f = split_tabs(line);
 		if(f.size() < 2)
 			continue;
-		passcode_map_[static_cast<uint32_t>(std::stoul(f[0]))] = static_cast<uint32_t>(std::stoul(f[1]));
+		uint32_t official = static_cast<uint32_t>(std::stoul(f[0]));
+		uint32_t sid = static_cast<uint32_t>(std::stoul(f[1]));
+		passcode_map_[official] = sid;
+		official_map_[sid] = official;
 	}
 	return true;
 }
@@ -110,6 +113,11 @@ const CardInfo* CardDB::get(uint32_t code) const {
 uint32_t CardDB::script_id(uint32_t passcode) const {
 	auto it = passcode_map_.find(passcode);
 	return it == passcode_map_.end() ? passcode : it->second;
+}
+
+uint32_t CardDB::official_id(uint32_t sid) const {
+	auto it = official_map_.find(sid);
+	return it == official_map_.end() ? sid : it->second;
 }
 
 std::string CardDB::name(uint32_t code) const {

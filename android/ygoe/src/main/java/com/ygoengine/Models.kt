@@ -1,0 +1,260 @@
+package com.ygoengine
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+// ------------------------------------------------------------------ requests
+
+/** A decklist by official passcodes (the ids YGOPRODeck uses). */
+data class EngineDeck(
+    val name: String,
+    val main: List<Long>,
+    val extra: List<Long>,
+    val side: List<Long> = emptyList(),
+) {
+    internal fun toJson() = JSONObject()
+        .put("name", name)
+        .put("main", JSONArray(main))
+        .put("extra", JSONArray(extra))
+        .put("side", JSONArray(side))
+}
+
+enum class Knowledge(internal val wire: String) {
+    /** The engine sees both hands (training, proxy hands). */
+    PRACTICE("practice"),
+    /** The engine knows only your hand and the public board; the opponent's hand is sampled. */
+    REAL("real"),
+}
+
+enum class Zone(internal val wire: String) { MONSTER("mzone"), SPELL_TRAP("szone") }
+enum class Position(internal val wire: String) { ATTACK("atk"), DEFENSE("def"), SET("set"), FACE_UP("up") }
+
+/** A card already on the field. [seq] is the zone index 0–4 (5 = Field Zone for SPELL_TRAP). */
+data class FieldCard(val code: Long, val zone: Zone, val seq: Int, val position: Position? = null)
+
+/** Everything about one side of the position. A null [hand] means unknown: dealt from the deck. */
+data class SideState(
+    val deck: EngineDeck,
+    val hand: List<Long>? = null,
+    val handSize: Int = 5,
+    val lp: Int = 8000,
+    val field: List<FieldCard> = emptyList(),
+    val graveyard: List<Long> = emptyList(),
+    val banished: List<Long> = emptyList(),
+)
+
+data class SearchSettings(
+    /** Search iterations for your turn. More finds longer combos; ~200–400 per second per core. */
+    val iterations: Int = 2000,
+    val maxSeconds: Double = 45.0,
+    /** 0 = all cores. */
+    val threads: Int = 0,
+    /** Hidden-information samples (real mode / proxy hands). */
+    val samples: Int = 12,
+    val lines: Int = 3,
+    /** Also play the opponent's next turn against each candidate board. */
+    val verify: Boolean = true,
+    val verifyIterations: Int = 300,
+    /** Turns to search; 0 = through the end of your next turn. */
+    val horizonTurns: Int = 0,
+)
+
+/**
+ * A position to analyse. Side 0 always takes turn 1; to analyse a position where the
+ * opponent is the turn player, put them in [first] and set [me] = 1.
+ */
+data class AnalysisRequest(
+    val first: SideState,
+    val second: SideState,
+    val me: Int = 0,
+    val knowledge: Knowledge = Knowledge.PRACTICE,
+    val seed: Long = 1,
+    val settings: SearchSettings = SearchSettings(),
+) {
+    internal fun toJson(): JSONObject {
+        val sides = listOf(first, second)
+        fun perSide(f: (SideState) -> Any?) = JSONArray(sides.map { f(it) ?: JSONObject.NULL })
+        return JSONObject()
+            .put("decks", perSide { it.deck.toJson() })
+            .put("me", me)
+            .put("mode", knowledge.wire)
+            .put("seed", seed)
+            .put("hands", perSide { s -> s.hand?.let { JSONArray(it) } })
+            .put("hand_sizes", perSide { it.handSize })
+            .put("lp", perSide { it.lp })
+            .put("field", perSide { s ->
+                JSONArray(s.field.map { c ->
+                    JSONObject().put("code", c.code).put("zone", c.zone.wire).put("seq", c.seq)
+                        .put("pos", c.position?.wire ?: "")
+                })
+            })
+            .put("grave", perSide { JSONArray(it.graveyard) })
+            .put("banished", perSide { JSONArray(it.banished) })
+            .put("config", JSONObject()
+                .put("iterations", settings.iterations)
+                .put("seconds", settings.maxSeconds)
+                .put("threads", settings.threads)
+                .put("samples", settings.samples)
+                .put("lines", settings.lines)
+                .put("verify", settings.verify)
+                .put("verify_iterations", settings.verifyIterations)
+                .put("horizon", settings.horizonTurns))
+    }
+}
+
+// ------------------------------------------------------------------ results
+
+data class Progress(val phase: String, val done: Int, val total: Int) {
+    val fraction: Float get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val running: Boolean get() = phase != "idle" && phase.isNotEmpty()
+}
+
+/** A card in a report. [code] is the official passcode, usable for card images. */
+data class EngineCard(val code: Long, val name: String, val where: String, val note: String)
+
+data class Line(
+    val firstMove: String,
+    /** Your steps in order; the opponent's responses are prefixed "Opp: ". */
+    val moves: List<String>,
+    /** 0..1: static value of the end board against this opponent. */
+    val ownTurnScore: Double,
+    /** 0..1 after the opponent's strongest turn found, or null if not checked. */
+    val afterOpponent: Double?,
+    /** Ranking score. */
+    val combined: Double,
+    val visits: Int,
+    val endBoard: List<EngineCard>,
+    /** What the end board can stop, valued against this opponent. */
+    val interrupts: List<EngineCard>,
+    /** The opponent's strongest turn found; your responses are prefixed "You: ". */
+    val opponentReply: List<String>,
+    val boardAfter: List<EngineCard>,
+)
+
+data class DeckProfile(
+    val name: String,
+    val monsterEffects: Double,
+    val handEffects: Double,
+    val gyEffects: Double,
+    val spellTrap: Double,
+    val searches: Double,
+    val specialSummons: Double,
+    val summary: String,
+    val keyCards: List<EngineCard>,
+    val interrupts: List<DeckInterrupt>,
+)
+
+data class DeckInterrupt(val card: EngineCard, val copies: Int, val what: String, val from: String, val baseValue: Double, val engine: Boolean)
+
+data class AnalysisResult(
+    val me: Int,
+    val knowledge: Knowledge,
+    /** 0..1 for you, before any move. */
+    val currentScore: Double,
+    val currentInterrupts: List<EngineCard>,
+    val myProfile: DeckProfile,
+    val opponentProfile: DeckProfile,
+    val lines: List<Line>,
+    val iterations: Int,
+    val seconds: Double,
+    /** True when [YgoEngine.cancel] stopped the search; results so far are still included. */
+    val cancelled: Boolean,
+)
+
+data class SideCard(val card: EngineCard, val count: Int, val value: Double, val why: String)
+data class SidePlan(val sideIn: List<SideCard>, val sideOut: List<SideCard>)
+data class BoardShape(val samples: Int, val monsters: Double, val spellTrapFaceUp: Double, val spellTrapSet: Double, val handTraps: Double)
+data class SideResult(
+    val opponent: DeckProfile,
+    val boardShape: BoardShape,
+    val goingFirst: SidePlan,
+    val goingSecond: SidePlan,
+    val cancelled: Boolean,
+)
+
+class EngineException(message: String) : Exception(message)
+
+// ------------------------------------------------------------------ parsing
+
+internal object Parse {
+    fun checked(text: String): JSONObject {
+        val o = JSONObject(text)
+        if (o.has("error")) throw EngineException(o.getString("error"))
+        return o
+    }
+
+    private fun <T> JSONArray?.map(f: (JSONObject) -> T): List<T> =
+        if (this == null) emptyList() else (0 until length()).map { f(getJSONObject(it)) }
+
+    private fun JSONArray?.strings(): List<String> =
+        if (this == null) emptyList() else (0 until length()).map { getString(it) }
+
+    fun card(o: JSONObject) = EngineCard(
+        code = o.optLong("code"),
+        name = o.optString("name"),
+        where = o.optString("where"),
+        note = o.optString("note"),
+    )
+
+    fun profile(o: JSONObject) = DeckProfile(
+        name = o.optString("name"),
+        monsterEffects = o.optDouble("monster_effects", 0.0),
+        handEffects = o.optDouble("hand_effects", 0.0),
+        gyEffects = o.optDouble("gy_effects", 0.0),
+        spellTrap = o.optDouble("spell_trap", 0.0),
+        searches = o.optDouble("searches", 0.0),
+        specialSummons = o.optDouble("special_summons", 0.0),
+        summary = o.optString("summary"),
+        keyCards = o.optJSONArray("key_cards").map(::card),
+        interrupts = o.optJSONArray("interrupts").map {
+            DeckInterrupt(card(it.getJSONObject("card")), it.optInt("copies"), it.optString("what"),
+                it.optString("from"), it.optDouble("base_value", 0.0), it.optBoolean("engine"))
+        },
+    )
+
+    fun analysis(o: JSONObject) = AnalysisResult(
+        me = o.optInt("me"),
+        knowledge = if (o.optString("mode") == "real") Knowledge.REAL else Knowledge.PRACTICE,
+        currentScore = o.optDouble("current_score", 0.5),
+        currentInterrupts = o.optJSONArray("current_interrupts").map(::card),
+        myProfile = profile(o.getJSONObject("my_profile")),
+        opponentProfile = profile(o.getJSONObject("opponent_profile")),
+        lines = o.optJSONArray("lines").map { l ->
+            val after = l.optDouble("after_opponent", -1.0)
+            Line(
+                firstMove = l.optString("first_move"),
+                moves = l.optJSONArray("moves").strings(),
+                ownTurnScore = l.optDouble("own_turn_score", 0.0),
+                afterOpponent = if (after < 0) null else after,
+                combined = l.optDouble("combined", 0.0),
+                visits = l.optInt("visits"),
+                endBoard = l.optJSONArray("end_board").map(::card),
+                interrupts = l.optJSONArray("interrupts").map(::card),
+                opponentReply = l.optJSONArray("opponent_reply").strings(),
+                boardAfter = l.optJSONArray("board_after").map(::card),
+            )
+        },
+        iterations = o.optInt("iterations"),
+        seconds = o.optDouble("seconds", 0.0),
+        cancelled = o.optBoolean("cancelled"),
+    )
+
+    private fun plan(o: JSONObject): SidePlan {
+        fun list(a: JSONArray?) = a.map {
+            SideCard(card(it.getJSONObject("card")), it.optInt("count"), it.optDouble("value", 0.0), it.optString("why"))
+        }
+        return SidePlan(list(o.optJSONArray("side_in")), list(o.optJSONArray("side_out")))
+    }
+
+    fun side(o: JSONObject): SideResult {
+        val s = o.getJSONObject("board_shape")
+        return SideResult(
+            opponent = profile(o.getJSONObject("opponent")),
+            boardShape = BoardShape(s.optInt("samples"), s.optDouble("monsters", 0.0), s.optDouble("st_faceup", 0.0),
+                s.optDouble("st_set", 0.0), s.optDouble("hand_traps", 0.0)),
+            goingFirst = plan(o.getJSONObject("going_first")),
+            goingSecond = plan(o.getJSONObject("going_second")),
+            cancelled = o.optBoolean("cancelled"),
+        )
+    }
+}

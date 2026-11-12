@@ -3,4 +3,10 @@ third_party/
 data/cards.tsv
 data/effects.tsv
 data/strings.tsv
-*.json
+build-jni/
+build-test/
+android/**/build/
+android/.gradle/
+android/local.properties
+*.class
+result*.json

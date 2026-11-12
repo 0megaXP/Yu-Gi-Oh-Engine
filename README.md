@@ -68,6 +68,51 @@ Useful `analyze` options:
 
 State files are described in [docs/state-format.md](docs/state-format.md).
 
+## Android
+
+`android/ygoe` is an Android library module containing:
+- the native engine for arm64-v8a and x86_64 (emulator)
+- the Kotlin API `com.ygoengine.YgoEngine`
+- the asset pack: every card script and the card data, about 17 MB compressed in the APK
+
+The API is described in [docs/api.md](docs/api.md). The build generates the pack with `tools/bootstrap.sh` and `tools/make_pack.py`, so it needs git and python3. GitHub Actions runners have both.
+
+```sh
+cd android && ./gradlew :ygoe:assembleRelease    # -> ygoe/build/outputs/aar/ygoe-release.aar
+```
+
+### Adding it to YGO Sandbox
+
+The module uses the same AGP (8.7.3), Kotlin (2.0.21), minSdk 26 and JDK 17 as YGO Sandbox.
+
+1. Add this repo as a submodule:
+   ```sh
+   git submodule add https://github.com/0megaXP/Yu-Gi-Oh-Engine engine
+   ```
+2. In `settings.gradle.kts`, add:
+   ```kotlin
+   include(":ygoe")
+   project(":ygoe").projectDir = file("engine/android/ygoe")
+   ```
+3. In the root `build.gradle.kts`, add:
+   ```kotlin
+   id("com.android.library") version "8.7.3" apply false
+   ```
+4. In `app/build.gradle.kts`, add:
+   ```kotlin
+   implementation(project(":ygoe"))
+   ```
+5. In the workflow, check out with `submodules: true`.
+
+## Tests
+
+`tools/test.sh` builds everything on the desktop and runs:
+- the CLI on the examples
+- the JSON API
+- the JNI bridge through a small Java harness (load, progress, cancel, profile, side, bad input)
+
+CI (`.github/workflows/build.yml`) runs these and also builds the Android AAR.
+
 ## Matchup included
 
 | Deck | Source |
@@ -88,8 +133,12 @@ engine/src/evaluate.*  board evaluation tuned to the opponent profile
 engine/src/search.*    multithreaded information-set MCTS
 engine/src/analyze.*   phase A + phase B pipeline, text/JSON reports
 engine/src/side.*      side-deck planner
+engine/src/api.*       JSON-in/JSON-out Engine class (what the app calls)
+engine/src/json.*      small JSON reader
+engine/jni/            JNI bridge for com.ygoengine.YgoNative
 engine/cli/main.cpp    command-line front end
-tools/                 bootstrap, card export, script analysis
+android/ygoe/          Android library: native build, asset pack, Kotlin API
+tools/                 bootstrap, card export, script analysis, asset pack, tests
 data/passcode_map.tsv  official passcodes → EDOPro ids for cards still on pre-release ids
 ```
 

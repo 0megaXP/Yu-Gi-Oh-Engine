@@ -18,6 +18,8 @@ struct AnalysisConfig {
 	bool verify = true;           // phase B: play the opponent's next turn against each end board
 	int verify_iterations = 400;  // per candidate trajectory
 	int verify_trajectories = 2;  // trajectories (different samples) per line
+	// Called from a worker thread: phase ("search" / "verify N"), iterations done, iterations planned.
+	std::function<void(const std::string&, int, int)> on_progress;
 };
 
 struct CardSummary {

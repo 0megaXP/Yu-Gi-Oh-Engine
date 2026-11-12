@@ -5,7 +5,9 @@
 #include <map>
 #include <sstream>
 
+#include "evaluate.h"
 #include "ocgapi_constants.h"
+#include "search.h"
 
 namespace ygoe {
 
@@ -173,6 +175,65 @@ SidePlan plan_side(const CardDB& db, const Deck& mine, const Deck& theirs, const
 		++out_i;
 	}
 	return plan;
+}
+
+BoardShape simulate_board_shape(const CardDB& db, ScriptCache& scripts, const Deck& theirs, const Deck& mine,
+                                int samples, int iterations, const std::atomic<bool>* cancel,
+                                const std::function<void(int, const BoardShape&, int, int, int)>& on_sample) {
+	BoardShape shape;
+	Evaluator eval(db, theirs, mine);
+	for(int s = 0; s < samples; ++s) {
+		if(cancel && cancel->load())
+			break;
+		Scenario sc;
+		sc.decks[0] = theirs;
+		sc.decks[1] = mine;
+		sc.hand_known[0] = false;
+		sc.hand_known[1] = false;
+		sc.me = 0;
+		sc.seed = 1000 + s;
+		Searcher searcher(db, scripts, eval, declare_pool(sc));
+		std::vector<RootState> roots{{make_setup(sc, 0), {}}};
+		SearchConfig cfg;
+		cfg.iterations = iterations;
+		cfg.horizon_turns = 1;
+		cfg.cancel = cancel;
+		auto out = searcher.run(roots, 0, cfg);
+		const Trajectory* best = nullptr;
+		for(auto& m : out.moves)
+			for(auto& t : m.best)
+				if(!best || t.reward > best->reward)
+					best = &t;
+		Board b;
+		if(!best || !searcher.final_board(roots[0], *best, b))
+			continue;
+		int monsters = 0, st_up = 0, st_set = 0;
+		for(auto& c : b.mzone[0])
+			if(c.code && (c.pos & POS_FACEUP))
+				++monsters;
+		for(auto& c : b.szone[0])
+			if(c.code)
+				++((c.pos & POS_FACEDOWN) ? st_set : st_up);
+		shape.monsters += monsters;
+		shape.st_faceup += st_up;
+		shape.st_set += st_set;
+		auto ev = eval.evaluate(b, 0, 1, false, -1, true);
+		for(auto& n : ev.notes) {
+			if(n.player != 0)
+				continue;
+			if(n.where == "hand")
+				shape.hand_traps += 1;
+			else if(n.where == "GY")
+				shape.gy_interrupts += 1;
+		}
+		++shape.samples;
+		if(on_sample)
+			on_sample(s + 1, shape, monsters, st_up, st_set);
+	}
+	if(shape.samples)
+		for(double* v : {&shape.monsters, &shape.st_faceup, &shape.st_set, &shape.hand_traps, &shape.gy_interrupts})
+			*v /= shape.samples;
+	return shape;
 }
 
 }  // namespace ygoe

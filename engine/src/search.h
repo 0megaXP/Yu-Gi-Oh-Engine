@@ -45,6 +45,7 @@ struct SearchConfig {
 	double exploration = 0.6;
 	int max_rollout_steps = 600;
 	int keep_trajectories = 6;    // best trajectories kept per first move
+	const std::atomic<bool>* cancel = nullptr;  // set to true to stop early (results so far are kept)
 };
 
 struct MoveStats {

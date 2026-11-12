@@ -14,9 +14,11 @@
 #include <algorithm>
 #include <map>
 #include <random>
+#include <sstream>
 #include <string>
 
 #include "analyze.h"
+#include "api.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
@@ -62,6 +64,7 @@ int usage() {
 	             "  ygoe-cli profile <deck.ydk>\n"
 	             "  ygoe-cli side <mine.ydk> <theirs.ydk> [--simulate N] [--iterations N]\n"
 	             "  ygoe-cli proxy <deck.ydk> [count]\n"
+	             "  ygoe-cli json <analyze|profile|side> <request.json>   (the app API, see docs/api.md)\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
 }
@@ -169,58 +172,6 @@ int cmd_analyze(const CardDB& db, ScriptCache& scripts, const Args& a) {
 	return 0;
 }
 
-// Simulates the opponent going first on sampled hands and measures what their boards contain.
-BoardShape simulate_shape(const CardDB& db, ScriptCache& scripts, const Deck& theirs, const Deck& mine, int samples,
-                          const Args& a) {
-	BoardShape shape;
-	Evaluator eval(db, theirs, mine);
-	for(int s = 0; s < samples; ++s) {
-		Scenario sc;
-		sc.decks[0] = theirs;
-		sc.decks[1] = mine;
-		sc.hand_known[0] = false;
-		sc.hand_known[1] = false;
-		sc.me = 0;
-		sc.seed = 1000 + s;
-		Searcher searcher(db, scripts, eval, declare_pool(sc));
-		std::vector<RootState> roots{{make_setup(sc, 0), {}}};
-		SearchConfig cfg = search_config(a);
-		cfg.iterations = std::stoi(a.get("iterations", "400"));
-		cfg.horizon_turns = 1;
-		auto out = searcher.run(roots, 0, cfg);
-		const Trajectory* best = nullptr;
-		for(auto& m : out.moves)
-			for(auto& t : m.best)
-				if(!best || t.reward > best->reward)
-					best = &t;
-		Board b;
-		if(!best || !searcher.final_board(roots[0], *best, b))
-			continue;
-		for(auto& c : b.mzone[0])
-			if(c.code && (c.pos & POS_FACEUP))
-				shape.monsters += 1;
-		for(auto& c : b.szone[0])
-			if(c.code)
-				((c.pos & POS_FACEDOWN) ? shape.st_set : shape.st_faceup) += 1;
-		auto ev = eval.evaluate(b, 0, 1, false, -1, true);
-		for(auto& n : ev.notes)
-			if(n.player == 0 && n.where == "hand")
-				shape.hand_traps += 1;
-			else if(n.player == 0 && n.where == "GY")
-				shape.gy_interrupts += 1;
-		++shape.samples;
-		std::fprintf(stderr, "  sample %d: %d monsters, %d S/T face-up, %d set\n", s + 1,
-		             (int)std::count_if(b.mzone[0].begin(), b.mzone[0].end(), [](auto& c) { return c.code && (c.pos & POS_FACEUP); }),
-		             (int)std::count_if(b.szone[0].begin(), b.szone[0].end(), [](auto& c) { return c.code && (c.pos & POS_FACEUP); }),
-		             (int)std::count_if(b.szone[0].begin(), b.szone[0].end(), [](auto& c) { return c.code && (c.pos & POS_FACEDOWN); }));
-	}
-	if(shape.samples) {
-		for(double* v : {&shape.monsters, &shape.st_faceup, &shape.st_set, &shape.hand_traps, &shape.gy_interrupts})
-			*v /= shape.samples;
-	}
-	return shape;
-}
-
 int cmd_side(const CardDB& db, ScriptCache& scripts, const Args& a) {
 	if(a.pos.size() < 3)
 		return usage();
@@ -235,7 +186,11 @@ int cmd_side(const CardDB& db, ScriptCache& scripts, const Args& a) {
 	int sim = std::stoi(a.get("simulate", "0"));
 	if(sim > 0) {
 		std::fprintf(stderr, "simulating %d opening turns for %s...\n", sim, theirs.name.c_str());
-		shape = simulate_shape(db, scripts, theirs, mine, sim, a);
+		shape = simulate_board_shape(db, scripts, theirs, mine, sim, std::stoi(a.get("iterations", "400")), nullptr,
+		                             [](int s, const BoardShape&, int monsters, int st_up, int st_set) {
+			                             std::fprintf(stderr, "  sample %d: %d monsters, %d S/T face-up, %d set\n", s,
+			                                          monsters, st_up, st_set);
+		                             });
 	}
 	std::printf("%s vs %s\n  they rely on: %s\n", mine.name.c_str(), theirs.name.c_str(), opp.summary().c_str());
 	if(shape.samples)
@@ -277,8 +232,23 @@ int main(int argc, char** argv) {
 		std::fprintf(stderr, "%s\n", err.c_str());
 		return 1;
 	}
-	ScriptCache scripts(a.get("scripts", "third_party/CardScripts"));
 	const std::string& cmd = a.pos[0];
+	if(cmd == "json") {
+		if(a.pos.size() < 3)
+			return usage();
+		std::ifstream f(a.pos[2]);
+		std::stringstream ss;
+		ss << f.rdbuf();
+		Engine engine(a.get("data", "data"), a.get("scripts", "third_party/CardScripts"));
+		const std::string& what = a.pos[1];
+		std::string out = what == "analyze" ? engine.analyze(ss.str())
+		                  : what == "profile" ? engine.profile(ss.str())
+		                  : what == "side" ? engine.side(ss.str())
+		                  : std::string("{\"error\":\"unknown call\"}");
+		std::printf("%s\n", out.c_str());
+		return out.rfind("{\"error\"", 0) == 0 ? 1 : 0;
+	}
+	ScriptCache scripts(a.get("scripts", "third_party/CardScripts"));
 	if(cmd == "analyze")
 		return cmd_analyze(db, scripts, a);
 	if(cmd == "profile")

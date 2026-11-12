@@ -1,10 +1,13 @@
 // Side-deck suggestions for one matchup, separately for going first and going second.
 #pragma once
+#include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "carddb.h"
 #include "deck.h"
+#include "duel.h"
 #include "profile.h"
 
 namespace ygoe {
@@ -37,6 +40,12 @@ struct SidePlan {
 	std::vector<CardValue> side_values;   // every side card, best first
 	std::vector<CardValue> flex_values;   // non-engine Main Deck cards, weakest first
 };
+
+// Plays `samples` first turns for `theirs` on proxy hands and averages what their boards contain.
+BoardShape simulate_board_shape(const CardDB& db, ScriptCache& scripts, const Deck& theirs, const Deck& mine,
+                                int samples, int iterations, const std::atomic<bool>* cancel = nullptr,
+                                const std::function<void(int sample, const BoardShape& so_far, int monsters,
+                                                         int st_faceup, int st_set)>& on_sample = {});
 
 SidePlan plan_side(const CardDB& db, const Deck& mine, const Deck& theirs, const DeckProfile& opp,
                    const BoardShape& shape, bool going_first, int max_swaps = 8);

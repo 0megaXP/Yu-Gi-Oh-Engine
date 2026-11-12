@@ -44,6 +44,8 @@ public:
 	const CardInfo* get(uint32_t code) const;
 	// Official passcode -> id used by the scripts (identity when not remapped).
 	uint32_t script_id(uint32_t passcode) const;
+	// Inverse of script_id: the official passcode (what YGOPRODeck and card images use).
+	uint32_t official_id(uint32_t script_id) const;
 	std::string name(uint32_t code) const;
 	// Text for an effect description value (aux.Stringid(code, n) == (code << 20) | n).
 	std::string description(uint64_t desc) const;
@@ -52,7 +54,7 @@ public:
 
 private:
 	std::unordered_map<uint32_t, CardInfo> cards_;
-	std::unordered_map<uint32_t, uint32_t> passcode_map_;
+	std::unordered_map<uint32_t, uint32_t> passcode_map_, official_map_;
 	std::unordered_map<uint64_t, std::string> strings_;  // key: code*16+idx
 	std::unordered_map<uint32_t, std::string> texts_;
 };

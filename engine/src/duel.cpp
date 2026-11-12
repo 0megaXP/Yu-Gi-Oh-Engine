@@ -152,7 +152,53 @@ int Board::count_field(uint8_t p) const {
 
 // ---------------------------------------------------------------- scripts
 
-ScriptCache::ScriptCache(std::string dir, bool bytecode) : dir_(std::move(dir)), bytecode_(bytecode) {}
+ScriptCache::ScriptCache(std::string dir, bool bytecode) : dir_(std::move(dir)), bytecode_(bytecode) {
+	// scripts.pack: "YGOEPK1\n", u32 count, then per entry u16 name length, name, u64 offset, u32 size;
+	// offsets are from the start of the file.
+	std::ifstream f(dir_ + "/scripts.pack", std::ios::binary);
+	if(!f)
+		return;
+	char magic[8];
+	f.read(magic, 8);
+	if(std::string(magic, 8) != "YGOEPK1\n")
+		return;
+	uint32_t count = 0;
+	f.read(reinterpret_cast<char*>(&count), 4);
+	for(uint32_t i = 0; i < count && f; ++i) {
+		uint16_t len = 0;
+		f.read(reinterpret_cast<char*>(&len), 2);
+		std::string name(len, '\0');
+		f.read(name.data(), len);
+		PackEntry e;
+		f.read(reinterpret_cast<char*>(&e.offset), 8);
+		f.read(reinterpret_cast<char*>(&e.size), 4);
+		pack_[name] = e;
+	}
+	if(f)
+		pack_path_ = dir_ + "/scripts.pack";
+	else
+		pack_.clear();
+}
+
+bool ScriptCache::read_source(const std::string& name, std::string& out) {
+	if(!pack_path_.empty()) {
+		auto it = pack_.find(name);
+		if(it == pack_.end())
+			return false;
+		std::ifstream f(pack_path_, std::ios::binary);
+		f.seekg(static_cast<std::streamoff>(it->second.offset));
+		out.resize(it->second.size);
+		f.read(out.data(), it->second.size);
+		return static_cast<bool>(f);
+	}
+	std::ifstream f(dir_ + "/" + name, std::ios::binary);
+	if(!f)
+		return false;
+	std::stringstream ss;
+	ss << f.rdbuf();
+	out = ss.str();
+	return true;
+}
 
 const std::string* ScriptCache::get(const std::string& name) {
 	std::lock_guard<std::mutex> lock(mu_);
@@ -162,11 +208,9 @@ const std::string* ScriptCache::get(const std::string& name) {
 	static const char* subdirs[] = {"official/", "pre-release/", "", "unofficial/"};
 	std::unique_ptr<std::string> content;
 	for(auto sub : subdirs) {
-		std::ifstream f(dir_ + "/" + sub + name, std::ios::binary);
-		if(f) {
-			std::stringstream ss;
-			ss << f.rdbuf();
-			content = std::make_unique<std::string>(ss.str());
+		std::string text;
+		if(read_source(std::string(sub) + name, text)) {
+			content = std::make_unique<std::string>(std::move(text));
 			break;
 		}
 	}
