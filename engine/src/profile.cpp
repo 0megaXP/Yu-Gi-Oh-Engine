@@ -11,7 +11,7 @@ namespace ygoe {
 
 namespace {
 // Values from CardScripts/constant.lua.
-constexpr uint32_t ET_FIELD = 0x2, ET_ACTIVATE = 0x10, ET_FLIP = 0x20, ET_IGNITION = 0x40, ET_TRIGGER_O = 0x80,
+constexpr uint32_t ET_ACTIVATE = 0x10, ET_FLIP = 0x20, ET_IGNITION = 0x40, ET_TRIGGER_O = 0x80,
                    ET_QUICK_O = 0x100, ET_TRIGGER_F = 0x200, ET_QUICK_F = 0x400;
 constexpr uint32_t EV_CHAINING = 1027, EV_SPSUMMON = 1105, EV_SUMMON = 1103, EV_SUMMON_SUCCESS = 1100;
 constexpr uint64_t CAT_DESTROY = 0x1, CAT_RELEASE = 0x2, CAT_REMOVE = 0x4, CAT_TOHAND = 0x8, CAT_TODECK = 0x10,
