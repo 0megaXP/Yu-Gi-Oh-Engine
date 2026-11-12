@@ -92,6 +92,8 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& d0, const
 	if(!duel_->start(setup_, &error_))
 		return;
 	log_ = duel_->take_log();
+	log_players_ = duel_->take_log_players();
+	moves_ = duel_->take_moves();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
 	ok_ = true;
@@ -114,6 +116,10 @@ bool LiveDuel::respond_internal(size_t index) {
 		plan_.clear(), plan_pos_ = 0;
 	auto lines = duel_->take_log();
 	log_.insert(log_.end(), lines.begin(), lines.end());
+	auto players = duel_->take_log_players();
+	log_players_.insert(log_players_.end(), players.begin(), players.end());
+	auto moves = duel_->take_moves();
+	moves_.insert(moves_.end(), moves.begin(), moves.end());
 	return true;
 }
 
@@ -385,7 +391,19 @@ std::string LiveDuel::state_json() {
 	o << ",\"log\":[";
 	for(size_t i = 0; i < log_.size(); ++i)
 		o << (i ? "," : "") << quote(log_[i]);
+	o << "],\"log_players\":[";
+	for(size_t i = 0; i < log_.size(); ++i)
+		o << (i ? "," : "") << int(i < log_players_.size() ? log_players_[i] : -1);
+	o << "],\"moves\":[";
+	for(size_t i = 0; i < moves_.size(); ++i) {
+		const Duel::Move& mv = moves_[i];
+		o << (i ? "," : "") << "{\"code\":" << db_.official_id(mv.code) << ",\"from\":[" << int(mv.from_con) << ","
+		  << int(mv.from_loc) << "," << mv.from_seq << "," << mv.from_pos << "],\"to\":[" << int(mv.to_con) << ","
+		  << int(mv.to_loc) << "," << mv.to_seq << "," << mv.to_pos << "]}";
+	}
 	log_.clear();
+	log_players_.clear();
+	moves_.clear();
 	o << "]}";
 	return o.str();
 }

@@ -130,6 +130,15 @@ public:
 	// Human-readable log (only collected when enabled; "[P0]"/"[P1]" stand for the players).
 	void enable_log(bool on) { log_enabled_ = on; }
 	std::vector<std::string> take_log() { auto out = std::move(log_); log_.clear(); return out; }
+	// Who each log line is about (0/1, -1 = nobody), in step with take_log(). Take both together.
+	std::vector<int8_t> take_log_players() { auto out = std::move(log_players_); log_players_.clear(); return out; }
+	// A card moving between places, for animations (only collected with the log).
+	struct Move {
+		uint32_t code;
+		uint8_t from_con, from_loc, to_con, to_loc;
+		uint32_t from_seq, from_pos, to_seq, to_pos;
+	};
+	std::vector<Move> take_moves() { auto out = std::move(moves_); moves_.clear(); return out; }
 	void clear_events() { events_.clear(); }
 	size_t steps() const { return steps_; }
 
@@ -158,7 +167,14 @@ private:
 	std::vector<Event> events_;
 	bool log_enabled_ = false;
 	std::vector<std::string> log_;
+	std::vector<int8_t> log_players_;
+	std::vector<Move> moves_;
+	void push_log(int player, std::string line) {
+		log_.push_back(std::move(line));
+		log_players_.push_back(static_cast<int8_t>(player < 2 ? player : -1));
+	}
 	std::vector<uint32_t> chain_codes_;  // codes on the current chain, for "negated" lines
+	std::vector<uint8_t> chain_players_;  // controller of each chain link
 	void log_message(uint8_t type, const uint8_t* p, const uint8_t* end);
 	std::vector<uint32_t> declare_pool_;
 	size_t steps_ = 0;

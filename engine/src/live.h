@@ -48,6 +48,8 @@ private:
 	std::unique_ptr<Searcher> searcher_;
 	std::vector<std::vector<uint8_t>> history_;
 	std::vector<std::string> log_;
+	std::vector<int8_t> log_players_;
+	std::vector<Duel::Move> moves_;
 	std::string last_move_;
 	// The bot's current plan: the expected sequence of decision labels (both players).
 	std::vector<Step> plan_;

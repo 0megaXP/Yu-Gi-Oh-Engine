@@ -90,6 +90,25 @@ data class DuelOption(val label: String, val code: Long, val kind: String)
 
 data class DuelDecision(val player: Int, val type: String, val prompt: String, val options: List<DuelOption>)
 
+/** A place on the board: player, location (ygopro LOCATION_* bits), slot and position. */
+data class DuelPlace(val player: Int, val location: Int, val sequence: Int, val position: Int) {
+    val faceDown: Boolean get() = position and 0xA != 0
+
+    companion object {
+        const val DECK = 0x01
+        const val HAND = 0x02
+        const val MONSTER_ZONE = 0x04
+        const val SPELL_ZONE = 0x08
+        const val GRAVEYARD = 0x10
+        const val BANISHED = 0x20
+        const val EXTRA = 0x40
+        const val MATERIAL = 0x80
+    }
+}
+
+/** A card changing place, in the order it happened (for animations). Code is 0 if unknown. */
+data class DuelMove(val code: Long, val from: DuelPlace, val to: DuelPlace)
+
 data class DuelState(
     val turn: Int,
     val turnPlayer: Int,
@@ -103,6 +122,10 @@ data class DuelState(
     val decision: DuelDecision?,
     /** Log lines since the previous state; "[P0]"/"[P1]" stand for the players. */
     val log: List<String>,
+    /** For each log line, the player it's about (0/1), or -1. */
+    val logPlayers: List<Int> = emptyList(),
+    /** Cards that changed place since the previous state. */
+    val moves: List<DuelMove> = emptyList(),
 )
 
 internal object DuelParse {
@@ -146,6 +169,13 @@ internal object DuelParse {
             )
         }
         val log = o.optJSONArray("log")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        val logPlayers = o.optJSONArray("log_players")?.let { a -> (0 until a.length()).map { a.optInt(it, -1) } } ?: emptyList()
+        fun place(a: JSONArray?) = DuelPlace(a?.optInt(0) ?: 0, a?.optInt(1) ?: 0, a?.optInt(2) ?: 0, a?.optInt(3) ?: 0)
+        val moves = o.optJSONArray("moves")?.let { a ->
+            (0 until a.length()).map { i ->
+                a.getJSONObject(i).let { m -> DuelMove(m.optLong("code"), place(m.optJSONArray("from")), place(m.optJSONArray("to"))) }
+            }
+        } ?: emptyList()
         return DuelState(
             turn = o.optInt("turn"),
             turnPlayer = o.optInt("turn_player"),
@@ -156,6 +186,8 @@ internal object DuelParse {
             players = players,
             decision = decision,
             log = log,
+            logPlayers = logPlayers,
+            moves = moves,
         )
     }
 }
