@@ -87,6 +87,22 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
             LiveDuel(d)
         }
 
+    /**
+     * Reference end boards for [deck]: the engine plays [hands] random opening hands going first
+     * (no opponent interaction) and keeps the best board for each. About [iterations] search
+     * iterations per hand; 20 hands × 1500 takes a minute or two on a phone.
+     */
+    suspend fun reference(
+        deck: EngineDeck,
+        hands: Int = 20,
+        iterations: Int = 1500,
+        seed: Long = 1,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): ReferenceResult {
+        val req = JSONObject().put("deck", deck.toJson()).put("hands", hands).put("iterations", iterations).put("seed", seed)
+        return Parse.reference(runNative(onProgress) { YgoNative.reference(it, req.toString()) })
+    }
+
     /** Stops the running search early; the call returns what it found, with cancelled = true. */
     fun cancel() {
         if (handle != 0L) YgoNative.cancel(handle)

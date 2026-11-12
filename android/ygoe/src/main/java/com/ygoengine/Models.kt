@@ -122,6 +122,8 @@ data class Line(
     val afterOpponent: Double?,
     /** Ranking score. */
     val combined: Double,
+    /** Deck-neutral value of the end board; compare with [ReferenceResult.percentile]. */
+    val boardValue: Double = 0.0,
     val visits: Int,
     val endBoard: List<EngineCard>,
     /** What the end board can stop, valued against this opponent. */
@@ -174,6 +176,44 @@ data class SideResult(
     val cancelled: Boolean,
     val missingCards: List<Long> = emptyList(),
 )
+
+/** One opening hand from the reference run, with the best board the engine built from it. */
+data class ReferenceSample(
+    val hand: List<Long>,
+    /** Deck-neutral value of the position after the turn (field, set cards, cards kept in hand). */
+    val value: Double,
+    /** Interruptions the board holds. */
+    val interrupts: Int,
+    val board: List<EngineCard>,
+    val moves: List<String>,
+)
+
+data class CardShare(val code: Long, val name: String, val share: Double)
+
+/** What a deck usually builds going first, found by the engine on random hands (no opponent interaction). */
+data class ReferenceResult(
+    val deck: String,
+    val iterations: Int,
+    /** Best board first. */
+    val samples: List<ReferenceSample>,
+    /** Cards on the field at the end, by share of boards. */
+    val commonCards: List<CardShare>,
+    val cancelled: Boolean,
+    val missingCards: List<Long>,
+    /** The raw result, to save and load again with [ReferenceResult.fromJson]. */
+    val json: String,
+) {
+    val median: Double get() = samples.map { it.value }.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+    val best: Double get() = samples.maxOfOrNull { it.value } ?: 0.0
+
+    /** Share (0..1) of reference boards that [value] beats or equals. */
+    fun percentile(value: Double): Double =
+        if (samples.isEmpty()) 0.0 else samples.count { it.value <= value + 1e-9 }.toDouble() / samples.size
+
+    companion object {
+        fun fromJson(text: String): ReferenceResult = Parse.reference(text)
+    }
+}
 
 class EngineException(message: String) : Exception(message)
 
@@ -233,6 +273,7 @@ internal object Parse {
                 ownTurnScore = l.optDouble("own_turn_score", 0.0),
                 afterOpponent = if (after < 0) null else after,
                 combined = l.optDouble("combined", 0.0),
+                boardValue = l.optDouble("board_value", 0.0),
                 visits = l.optInt("visits"),
                 endBoard = l.optJSONArray("end_board").map(::card),
                 interrupts = l.optJSONArray("interrupts").map(::card),
@@ -245,6 +286,27 @@ internal object Parse {
         cancelled = o.optBoolean("cancelled"),
         missingCards = o.optJSONArray("missing_cards").longs(),
     )
+
+    fun reference(text: String): ReferenceResult {
+        val o = checked(text)
+        return ReferenceResult(
+            deck = o.optString("deck"),
+            iterations = o.optInt("iterations"),
+            samples = o.optJSONArray("samples").map { s ->
+                ReferenceSample(
+                    hand = s.optJSONArray("hand").longs(),
+                    value = s.optDouble("value", 0.0),
+                    interrupts = s.optInt("interrupts"),
+                    board = s.optJSONArray("board").map(::card),
+                    moves = s.optJSONArray("moves").strings(),
+                )
+            },
+            commonCards = o.optJSONArray("common_cards").map { CardShare(it.optLong("code"), it.optString("name"), it.optDouble("share", 0.0)) },
+            cancelled = o.optBoolean("cancelled"),
+            missingCards = o.optJSONArray("missing_cards").longs(),
+            json = text,
+        )
+    }
 
     private fun plan(o: JSONObject): SidePlan {
         fun list(a: JSONArray?) = a.map {

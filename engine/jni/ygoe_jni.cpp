@@ -89,6 +89,10 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_side(JNIEnv* env, jclass,
 	return to_jstring(env, engine(h)->side(to_string(env, request)));
 }
 
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_reference(JNIEnv* env, jclass, jlong h, jstring request) {
+	return to_jstring(env, engine(h)->reference(to_string(env, request)));
+}
+
 JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_cancel(JNIEnv*, jclass, jlong h) {
 	engine(h)->cancel();
 }

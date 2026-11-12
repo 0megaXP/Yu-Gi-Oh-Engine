@@ -38,6 +38,9 @@ public final class JniSmoke {
         check(prof.contains("\"key_cards\""), "profile");
         String side = YgoNative.side(h, Files.readString(Path.of(examples, "request_side.json")));
         check(side.contains("\"going_second\""), "side");
+        String ref = YgoNative.reference(h, Files.readString(Path.of(examples, "request_reference.json"))
+            .replace("\"hands\": 6", "\"hands\": 2").replace("\"iterations\": 800", "\"iterations\": 200"));
+        check(ref.contains("\"samples\":[{") && ref.contains("\"common_cards\""), "reference boards");
         check(YgoNative.analyze(h, "{not json").contains("\"error\""), "bad request gives error");
 
         // Live duel: bots play a few turns; a "person" answers one decision by index.

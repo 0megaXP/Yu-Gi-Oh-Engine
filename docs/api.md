@@ -36,6 +36,20 @@ All card ids are **official passcodes** (YGOPRODeck ids). The engine maps cards 
 
 Rough cost on a phone: a few hundred iterations per second per big core. `iterations = 2000` with checking enabled takes roughly 10–30 s.
 
+### Reference end boards
+
+```kotlin
+val ref = engine.reference(deck, hands = 20, iterations = 1500) { p -> ui.progress = p.fraction }
+ref.samples       // best board first: hand, value, interrupts, board, moves
+ref.commonCards   // cards most often on the field at the end
+ref.percentile(line.boardValue)   // where a Play engine line's board sits (0..1)
+save(ref.json); ReferenceResult.fromJson(saved)
+```
+
+- **How the boards are built:** the engine searches random opening hands going first, with no opponent interaction (goldfish), and keeps the best repaired line for each hand.
+- **What the value means:** values are deck-neutral, scored against an average competitive deck, so they compare boards of the same deck. Play engine lines report the same `boardValue`.
+- **Desktop:** `ygoe-cli json reference request.json` runs it from the command line.
+
 ### Duels
 
 ```kotlin
