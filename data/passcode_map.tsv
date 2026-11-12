@@ -1,0 +1,12 @@
+# Official TCG passcode -> id used by the EDOPro card scripts/database.
+# Needed while ProjectIgnis still ships new sets under their pre-release ids.
+# Rows marked "inferred" were matched from tournament decklists by card type and copy
+# count rather than read from a card page; check them when a card behaves oddly.
+# official	script_id	name	source
+13068112	101402092	Angelechy Strategy Score	inferred
+48340269	101402093	Angelechy Brilliant Move	inferred
+86457955	101402094	Angelechy Opposition	card page
+12845564	101402095	Angelechy Endgame Problem	card page
+59062857	101402096	Angelechy Verdict	inferred
+50284408	101402090	Angelechy Castellan	inferred
+86673403	101402091	Angelechy Seneschal	card page

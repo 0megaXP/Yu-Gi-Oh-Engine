@@ -1,0 +1,6 @@
+build/
+third_party/
+data/cards.tsv
+data/effects.tsv
+data/strings.tsv
+*.json

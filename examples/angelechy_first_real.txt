@@ -1,0 +1,9 @@
+# Same opening hand, real-play mode: the engine only knows its own hand and samples
+# Elfnote hands from the opponent's decklist.
+deck0: ../decks/angelechy_luna_mardelplata_2026-11.ydk
+deck1: ../decks/elfnote_koller_wien_2026-11.ydk
+me: 0
+mode: real
+hand0: Angelechy Opening to e4; Angelechy Opposition; Ash Blossom & Joyous Spring; Droll & Lock Bird; Angelechy Problem
+hand1: hidden 5
+seed: 1
