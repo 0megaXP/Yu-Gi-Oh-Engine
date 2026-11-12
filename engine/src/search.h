@@ -43,6 +43,7 @@ struct SearchConfig {
 	int threads = 0;              // 0 = hardware concurrency
 	int horizon_turns = 1;        // stop when this many new turns have started
 	double exploration = 0.6;
+	double prior_bias = 0.25;     // weight of the playout policy as a fading bonus in UCB
 	int max_rollout_steps = 600;
 	int keep_trajectories = 6;    // best trajectories kept per first move
 	const std::atomic<bool>* cancel = nullptr;  // set to true to stop early (results so far are kept)
@@ -71,6 +72,9 @@ public:
 	// `me` maximises; the other side minimises (adversarial on open information).
 	SearchOutput run(const std::vector<RootState>& roots, uint8_t me, const SearchConfig& cfg,
 	                 const std::function<void(int, double)>& progress = {});
+	// Moves `player`'s Set actions in `t` to the end of their Main Phase, if the reordered line
+	// replays and scores at least as well. Returns true when `t` was changed.
+	bool defer_sets(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 

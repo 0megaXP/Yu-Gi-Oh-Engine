@@ -164,15 +164,22 @@ int LiveDuel::choose(BotLevel level) {
 	if(out.moves.empty())
 		return 0;
 	const MoveStats& best = out.moves.front();
-	int index = 0;
-	for(size_t i = 0; i < d.options.size(); ++i)
-		if(d.options[i].label == best.label)
-			index = static_cast<int>(i);
+	std::string want = best.label;
 	plan_.clear();
 	plan_pos_ = 0;
 	if(!best.best.empty()) {
-		plan_ = best.best.front().steps;
+		Trajectory t = best.best.front();
+		// Develop first, set last: the same end board with fewer chances for the opponent
+		// to hit set cards, and no Spell/Trap Zone blocked mid-combo.
+		searcher_->defer_sets(roots[0], t, d.player, cfg.horizon_turns);
+		plan_ = t.steps;
+		if(!plan_.empty() && plan_.front().player == d.player)
+			want = plan_.front().label;
 	}
+	int index = 0;
+	for(size_t i = 0; i < d.options.size(); ++i)
+		if(d.options[i].label == want)
+			index = static_cast<int>(i);
 	return index;
 }
 

@@ -134,6 +134,31 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 	res.iterations = out.iterations;
 	res.seconds = out.seconds;
 
+	// Repair each candidate line so the player sets cards after developing, then regroup the
+	// lines by their (possibly new) first action.
+	{
+		std::vector<MoveStats> merged;
+		for(auto& mv : out.my_moves) {
+			for(auto& t : mv.best)
+				searcher.defer_sets(roots[t.root], t, sc.me, a.horizon_turns);
+			std::sort(mv.best.begin(), mv.best.end(), [](auto& x, auto& y) { return x.reward > y.reward; });
+			std::string label = mv.best.empty() ? mv.label : first_action(mv.best.front(), sc.me);
+			auto it = std::find_if(merged.begin(), merged.end(), [&](auto& m) { return m.label == label; });
+			if(it == merged.end()) {
+				MoveStats m = mv;
+				m.label = label;
+				merged.push_back(std::move(m));
+			} else {
+				it->mean = (it->mean * it->visits + mv.mean * mv.visits) / std::max(1, it->visits + mv.visits);
+				it->visits += mv.visits;
+				it->best.insert(it->best.end(), mv.best.begin(), mv.best.end());
+				std::sort(it->best.begin(), it->best.end(), [](auto& x, auto& y) { return x.reward > y.reward; });
+			}
+		}
+		std::sort(merged.begin(), merged.end(), [](auto& x, auto& y) { return x.visits > y.visits; });
+		out.my_moves = std::move(merged);
+	}
+
 	for(const auto& mv : out.my_moves) {
 		if(static_cast<int>(res.lines.size()) >= cfg.lines)
 			break;
