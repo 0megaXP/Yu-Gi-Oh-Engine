@@ -7,6 +7,7 @@
 #include <string>
 
 #include "carddb.h"
+#include "deck.h"
 #include "duel.h"
 
 namespace ygoe {
@@ -39,6 +40,7 @@ public:
 
 private:
 	void set_progress(const std::string& phase, int done, int total);
+	std::string missing_json(const std::vector<const Deck*>& decks);
 
 	CardDB db_;
 	std::unique_ptr<ScriptCache> scripts_;

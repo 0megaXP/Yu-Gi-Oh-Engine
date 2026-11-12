@@ -1,5 +1,6 @@
 #include "api.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <sstream>
@@ -122,6 +123,26 @@ std::string profile_json(const CardDB& db, const Deck& d) {
 
 }  // namespace
 
+std::string Engine::missing_json(const std::vector<const Deck*>& decks) {
+	// Cards the rules engine can't play (no card data or no script yet): they are
+	// still in the deck but do nothing, so the app should warn about them.
+	std::vector<uint32_t> missing;
+	for(const Deck* d : decks)
+		for(auto* list : {&d->main, &d->extra, &d->side})
+			for(auto code : *list) {
+				uint32_t sid = db_.script_id(code);
+				auto c = db_.get(sid);
+				bool ok = c && (scripts_->has_card_script(sid) || (c->alias && scripts_->has_card_script(c->alias)) ||
+				                (c->type & TYPE_NORMAL) || (c->type & TYPE_TOKEN));
+				if(!ok && std::find(missing.begin(), missing.end(), code) == missing.end())
+					missing.push_back(code);
+			}
+	std::string o = "[";
+	for(size_t i = 0; i < missing.size(); ++i)
+		o += (i ? "," : "") + std::to_string(missing[i]);
+	return o + "]";
+}
+
 Engine::Engine(const std::string& data_dir, const std::string& scripts_dir) {
 	ok_ = db_.load(data_dir, &error_);
 	scripts_ = std::make_unique<ScriptCache>(scripts_dir);
@@ -212,7 +233,8 @@ std::string Engine::analyze(const std::string& request) {
 	set_progress("idle", 0, 0);
 	std::string out = res.to_json();
 	out.pop_back();  // reopen the object to add the flag
-	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + "}";
+	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") +
+	       ",\"missing_cards\":" + missing_json({&sc.decks[0], &sc.decks[1]}) + "}";
 	return out;
 }
 
@@ -274,7 +296,8 @@ std::string Engine::side(const std::string& request) {
 		o << ",\"" << (first ? "going_first" : "going_second") << "\":{\"side_in\":" << list(ins, plan.side_values)
 		  << ",\"side_out\":" << list(outs, plan.flex_values) << "}";
 	}
-	o << ",\"cancelled\":" << (cancel_ ? "true" : "false") << "}";
+	o << ",\"cancelled\":" << (cancel_ ? "true" : "false") << ",\"missing_cards\":" << missing_json({&mine, &theirs})
+	  << "}";
 	return o.str();
 }
 

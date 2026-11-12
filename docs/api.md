@@ -65,6 +65,7 @@ The response contains:
 - `my_profile` and `opponent_profile`
 - `lines[]`, each with `first_move`, `moves`, `own_turn_score`, `after_opponent` (−1 if not checked), `combined`, `visits`, `end_board`, `interrupts`, `opponent_reply` and `board_after`
 - `iterations`, `seconds` and `cancelled`
+- `missing_cards`: passcodes in either deck that EDOPro has no script for yet; they do nothing in the analysis
 
 ### profile
 

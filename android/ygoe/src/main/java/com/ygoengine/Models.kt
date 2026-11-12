@@ -159,6 +159,8 @@ data class AnalysisResult(
     val seconds: Double,
     /** True when [YgoEngine.cancel] stopped the search; results so far are still included. */
     val cancelled: Boolean,
+    /** Cards in either deck the rules engine can't play yet (no script); they do nothing in the analysis. */
+    val missingCards: List<Long> = emptyList(),
 )
 
 data class SideCard(val card: EngineCard, val count: Int, val value: Double, val why: String)
@@ -170,6 +172,7 @@ data class SideResult(
     val goingFirst: SidePlan,
     val goingSecond: SidePlan,
     val cancelled: Boolean,
+    val missingCards: List<Long> = emptyList(),
 )
 
 class EngineException(message: String) : Exception(message)
@@ -188,6 +191,9 @@ internal object Parse {
 
     private fun JSONArray?.strings(): List<String> =
         if (this == null) emptyList() else (0 until length()).map { getString(it) }
+
+    private fun JSONArray?.longs(): List<Long> =
+        if (this == null) emptyList() else (0 until length()).map { getLong(it) }
 
     fun card(o: JSONObject) = EngineCard(
         code = o.optLong("code"),
@@ -237,6 +243,7 @@ internal object Parse {
         iterations = o.optInt("iterations"),
         seconds = o.optDouble("seconds", 0.0),
         cancelled = o.optBoolean("cancelled"),
+        missingCards = o.optJSONArray("missing_cards").longs(),
     )
 
     private fun plan(o: JSONObject): SidePlan {
@@ -255,6 +262,7 @@ internal object Parse {
             goingFirst = plan(o.getJSONObject("going_first")),
             goingSecond = plan(o.getJSONObject("going_second")),
             cancelled = o.optBoolean("cancelled"),
+            missingCards = o.optJSONArray("missing_cards").longs(),
         )
     }
 }
