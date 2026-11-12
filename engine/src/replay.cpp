@@ -23,6 +23,7 @@ enum class Kind {
 	Action,    // must be chosen: activate, Normal Summon, Set
 	Summon,    // chosen (a summon from the Extra Deck by its own procedure) or seen (a card summoned by an effect)
 	Seen,      // only seen: a card added to the hand, sent to the GY, banished, attached
+	Use,       // "played somehow" (text recognition sees the name, not the action): chosen, or seen anywhere
 	Ignored,   // nothing to check (phases, attacks, "resolve", unknown cards)
 };
 
@@ -40,7 +41,9 @@ StepInfo classify(const CardDB& db, const VideoStep& s) {
 		return i;
 	i.sid = db.script_id(s.code);
 	const std::string& a = s.action;
-	if(a == "activate" || a == "chain" || a == "normal_summon") {
+	if(a == "use") {
+		i.kind = Kind::Use;
+	} else if(a == "activate" || a == "chain" || a == "normal_summon") {
 		i.kind = Kind::Action;
 	} else if(a == "set") {
 		i.kind = Kind::Action;
@@ -87,6 +90,9 @@ int count_in(const Board& b, uint32_t sid, Zone z) {
 bool option_matches(const Option& o, const VideoStep& s, const StepInfo& i) {
 	if(!i.sid || o.code != i.sid)
 		return false;
+	if(s.action == "use")
+		return o.kind == OptKind::Activate || o.kind == OptKind::Summon || o.kind == OptKind::SpSummon ||
+		       o.kind == OptKind::MSet || o.kind == OptKind::SSet;
 	switch(o.kind) {
 	case OptKind::Activate: return s.action == "activate" || s.action == "chain" || i.kind == Kind::Summon;
 	case OptKind::Summon: return s.action == "normal_summon";
@@ -214,6 +220,17 @@ private:
 			const StepInfo& i = info_[n.next];
 			if(i.kind == Kind::Action)
 				return;
+			if(i.kind == Kind::Use) {
+				// summoned, searched or sent by another card's effect: it turned up somewhere new
+				bool moved = false;
+				for(Zone z : {Zone::Field, Zone::Hand, Zone::Grave, Zone::Banished, Zone::Overlay})
+					moved = moved || count_in(now, i.sid, z) > count_in(n.base, i.sid, z);
+				if(!moved)
+					return;
+				n.match[n.next] = 1;
+				++n.next;
+				continue;
+			}
 			if(count_in(now, i.sid, i.zone) > count_in(n.base, i.sid, i.zone)) {
 				n.match[n.next] = 1;
 				++n.next;
@@ -223,7 +240,7 @@ private:
 			// video logged it out of order. Look one step past it before giving up on it.
 			if(n.next + 1 < info_.size()) {
 				const StepInfo& j = info_[n.next + 1];
-				if(j.kind != Kind::Action && j.kind != Kind::Ignored &&
+				if(j.kind != Kind::Action && j.kind != Kind::Ignored && j.kind != Kind::Use &&
 				   count_in(now, j.sid, j.zone) > count_in(n.base, j.sid, j.zone)) {
 					// keep n.next on the unseen step; the later one is skipped once reached
 					n.match[n.next + 1] = 1;
@@ -265,7 +282,7 @@ private:
 				++k;
 				continue;
 			}
-			if(i.kind == Kind::Action || i.kind == Kind::Summon) {
+			if(i.kind == Kind::Action || i.kind == Kind::Summon || i.kind == Kind::Use) {
 				for(size_t o = 0; o < dec.options.size(); ++o)
 					if(option_matches(dec.options[o], line_.steps[k], i))
 						out.emplace_back(o, k);
@@ -286,8 +303,8 @@ private:
 			const StepInfo& i = info_[k];
 			if(n.match[k] == 1 || i.kind == Kind::Ignored)
 				continue;
-			if(i.kind == Kind::Action && i.sid == sid &&
-			   (line_.steps[k].action == "activate" || line_.steps[k].action == "chain"))
+			if((i.kind == Kind::Action || i.kind == Kind::Use) && i.sid == sid &&
+			   (line_.steps[k].action == "activate" || line_.steps[k].action == "chain" || line_.steps[k].action == "use"))
 				return k;
 			++skipped;
 		}
@@ -598,14 +615,17 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 		t.steps = best.steps;
 		lc.moves = describe(t, 0, false);
 		double step_share = lc.steps_checked ? double(lc.steps_matched) / lc.steps_checked : 0;
+		// Without the video's end board (text recognition can't see it), the steps alone decide,
+		// with a higher bar; the replayed board becomes the line's end board.
 		if(lc.steps_checked < 3)
 			lc.problem = "too few steps could be checked";
-		else if(want == 0)
-			lc.problem = "the video's end board wasn't read";
+		else if(want == 0 && (lc.steps_checked < 4 || step_share < 0.8))
+			lc.problem = "only " + std::to_string(lc.steps_matched) + " of " + std::to_string(lc.steps_checked) +
+			             " steps could be played by the rules";
 		else if(step_share < 0.75)
 			lc.problem = "only " + std::to_string(lc.steps_matched) + " of " + std::to_string(lc.steps_checked) +
 			             " steps could be played by the rules";
-		else if(lc.board_match < 0.75)
+		else if(want > 0 && lc.board_match < 0.75)
 			lc.problem = "the replay ends on " + std::to_string(have) + " of the video's " + std::to_string(want) + " end-board cards";
 		lc.verified = lc.problem.empty();
 		if(lc.verified) {

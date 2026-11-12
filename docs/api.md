@@ -132,6 +132,9 @@ res.libraryJson  // the verified lines' pieces, merged; pass as `library` (alone
   - **Engine-made lines:** on 16 lines the engine itself found (8 Angelechy, 8 Elfnote), rewritten as bare video steps with no details, 12 verified.
   - **Impossible lines:** a line that can't be played from its hand doesn't verify.
   - **Detail helps:** real videos give details (costs, materials, search targets), which steer the choices inside each action.
+- **Name-only steps:** the action `use` means "this card was played somehow" (what free text recognition can tell). The step matches any of the player's options with that card, or the card turning up in a new place from another card's effect.
+  - **Without an end board:** steps alone decide. That takes at least 4 checked steps with 80% of them played, and the replayed board becomes the line's end board.
+  - **Measured:** on the same 16 engine-made lines reduced to card names only, 7 verified (12 with actions and end board).
 - **Request:** `{"deck", "lines": [{"id", "hand", "steps": [{"action", "code", "detail"}], "end_board"}], "beam", "tries", "seconds", "seed"}`. The actions are the ones the video reader writes (`activate`, `normal_summon`, `link_summon`, `search`, `send_to_gy`, ...).
 - **Desktop:** `ygoe-cli json lines examples/request_lines.json`.
 
