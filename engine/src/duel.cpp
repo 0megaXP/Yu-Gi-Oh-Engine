@@ -312,6 +312,8 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	phase_ = 0;
 	steps_ = 0;
 	events_.clear();
+	log_.clear();
+	chain_codes_.clear();
 
 	// Payload must outlive the duel; one per Duel object is enough.
 	static thread_local Payload payload;
@@ -454,6 +456,8 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 			break;
 		Reader m{msg + 1, msg + size};
 		uint8_t type = msg[0];
+		if(log_enabled_)
+			log_message(type, msg + 1, msg + size);
 		switch(type) {
 		case MSG_RETRY:
 			retry_ = true;
@@ -535,6 +539,128 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 		default:
 			break;
 		}
+	}
+}
+
+namespace {
+std::string who(uint8_t p) { return p < 2 ? "[P" + std::to_string(p) + "]" : "?"; }
+const char* phase_name(uint16_t ph) {
+	switch(ph) {
+	case PHASE_DRAW: return "Draw Phase";
+	case PHASE_STANDBY: return "Standby Phase";
+	case PHASE_MAIN1: return "Main Phase 1";
+	case PHASE_BATTLE_START: return "Battle Phase";
+	case PHASE_MAIN2: return "Main Phase 2";
+	case PHASE_END: return "End Phase";
+	default: return nullptr;
+	}
+}
+}  // namespace
+
+void Duel::log_message(uint8_t type, const uint8_t* begin, const uint8_t* end) {
+	Reader m{begin, end};
+	auto name = [&](uint32_t code) { return code ? db_.name(code) : std::string("a face-down card"); };
+	switch(type) {
+	case MSG_NEW_TURN: {
+		uint8_t p = m.get<uint8_t>();
+		log_.push_back("— Turn " + std::to_string(turn_ + 1) + ": " + who(p) + " —");
+		break;
+	}
+	case MSG_NEW_PHASE: {
+		if(const char* n = phase_name(m.get<uint16_t>()))
+			log_.push_back(n);
+		break;
+	}
+	case MSG_DRAW: {
+		uint8_t p = m.get<uint8_t>();
+		uint32_t n = m.get<uint32_t>();
+		log_.push_back(who(p) + " draws " + std::to_string(n) + " card" + (n == 1 ? "" : "s"));
+		break;
+	}
+	case MSG_SUMMONING: {
+		uint32_t code = m.get<uint32_t>();
+		auto li = read_loc(m);
+		log_.push_back(who(li.con) + " Normal Summons " + name(code));
+		break;
+	}
+	case MSG_SPSUMMONING: {
+		uint32_t code = m.get<uint32_t>();
+		auto li = read_loc(m);
+		log_.push_back(who(li.con) + " Special Summons " + name(code));
+		break;
+	}
+	case MSG_FLIPSUMMONING: {
+		uint32_t code = m.get<uint32_t>();
+		auto li = read_loc(m);
+		log_.push_back(who(li.con) + " Flip Summons " + name(code));
+		break;
+	}
+	case MSG_SET: {
+		m.get<uint32_t>();
+		auto li = read_loc(m);
+		log_.push_back(who(li.con) + " sets a card");
+		break;
+	}
+	case MSG_CHAINING: {
+		uint32_t code = m.get<uint32_t>();
+		auto li = read_loc(m);
+		chain_codes_.push_back(code);
+		log_.push_back(who(li.con) + " activates " + name(code) +
+		               (chain_codes_.size() > 1 ? " (chain link " + std::to_string(chain_codes_.size()) + ")" : ""));
+		break;
+	}
+	case MSG_CHAIN_NEGATED:
+	case MSG_CHAIN_DISABLED: {
+		uint8_t link = m.get<uint8_t>();
+		std::string what = link >= 1 && link <= chain_codes_.size() ? name(chain_codes_[link - 1]) : "the effect";
+		log_.push_back("   " + what + (type == MSG_CHAIN_NEGATED ? " is negated" : "'s effect is negated"));
+		break;
+	}
+	case MSG_CHAIN_END:
+		chain_codes_.clear();
+		break;
+	case MSG_ATTACK: {
+		auto a = read_loc(m);
+		auto t = read_loc(m);
+		(void)t;
+		log_.push_back(who(a.con) + " attacks" + (t.loc ? "" : " directly"));
+		break;
+	}
+	case MSG_DAMAGE:
+	case MSG_PAY_LPCOST: {
+		uint8_t p = m.get<uint8_t>();
+		uint32_t amount = m.get<uint32_t>();
+		log_.push_back(who(p) + (type == MSG_DAMAGE ? " takes " : " pays ") + std::to_string(amount) + " LP");
+		break;
+	}
+	case MSG_RECOVER: {
+		uint8_t p = m.get<uint8_t>();
+		log_.push_back(who(p) + " gains " + std::to_string(m.get<uint32_t>()) + " LP");
+		break;
+	}
+	case MSG_MOVE: {
+		uint32_t code = m.get<uint32_t>();
+		auto from = read_loc(m);
+		auto to = read_loc(m);
+		// Only the moves a player would notice: cards leaving the field or hand, or being banished.
+		bool from_visible = from.loc & (LOCATION_MZONE | LOCATION_SZONE | LOCATION_HAND | LOCATION_GRAVE);
+		bool to_pile = to.loc & (LOCATION_GRAVE | LOCATION_REMOVED | LOCATION_HAND | LOCATION_DECK | LOCATION_EXTRA);
+		if(from.loc && to.loc && from.loc != to.loc && from_visible && to_pile && !(from.loc & LOCATION_OVERLAY)) {
+			if(from.loc == LOCATION_HAND && to.loc == LOCATION_DECK)
+				break;
+			log_.push_back("   " + name(code) + ": " + loc_name(from.loc) + " → " + loc_name(to.loc));
+		} else if((from.loc & LOCATION_DECK) && (to.loc & (LOCATION_HAND | LOCATION_GRAVE | LOCATION_REMOVED)) && code) {
+			log_.push_back("   " + name(code) + ": Deck → " + loc_name(to.loc));
+		}
+		break;
+	}
+	case MSG_WIN: {
+		uint8_t p = m.get<uint8_t>();
+		log_.push_back(p < 2 ? who(p) + " wins" : "The duel is a draw");
+		break;
+	}
+	default:
+		break;
 	}
 }
 

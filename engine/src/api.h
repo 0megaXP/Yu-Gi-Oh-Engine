@@ -34,6 +34,10 @@ public:
 	std::string side(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
+	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and
+	// sets `error` on failure. The duel uses this engine's data, so free it before the engine.
+	class LiveDuel* create_live(const std::string& request, std::string& error);
+
 	// Safe to call from any thread while one of the calls above runs.
 	void cancel() { cancel_ = true; }
 	Progress progress() const;

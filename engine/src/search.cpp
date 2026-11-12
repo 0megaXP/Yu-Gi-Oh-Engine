@@ -98,6 +98,10 @@ size_t weighted_pick(const std::vector<double>& w, std::mt19937_64& rng) {
 
 }  // namespace
 
+double playout_weight(const Decision& d, const Option& o, uint8_t turn_player, int steps_this_turn) {
+	return policy_weight(d, o, turn_player, steps_this_turn);
+}
+
 Searcher::Searcher(const CardDB& db, ScriptCache& scripts, const Evaluator& eval, std::vector<uint32_t> pool)
     : db_(db), scripts_(scripts), eval_(eval), pool_(std::move(pool)) {}
 

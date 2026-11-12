@@ -81,6 +81,9 @@ private:
 	std::vector<uint32_t> pool_;
 };
 
+// Prior weight of an option in the playout policy (also the Easy bot's move choice).
+double playout_weight(const Decision& d, const Option& o, uint8_t turn_player, int steps_this_turn);
+
 // Labels of the non-trivial steps a player took, merged into readable lines.
 // Steps by `player` are written plainly, the other side's with `other_prefix`.
 std::vector<std::string> describe(const Trajectory& t, uint8_t player, bool include_other = false,

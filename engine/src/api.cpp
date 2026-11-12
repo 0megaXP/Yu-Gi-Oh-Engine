@@ -7,6 +7,7 @@
 
 #include "analyze.h"
 #include "json.h"
+#include "live.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
 #include "side.h"
@@ -299,6 +300,25 @@ std::string Engine::side(const std::string& request) {
 	o << ",\"cancelled\":" << (cancel_ ? "true" : "false") << ",\"missing_cards\":" << missing_json({&mine, &theirs})
 	  << "}";
 	return o.str();
+}
+
+LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
+	if(!ok_) {
+		error = error_;
+		return nullptr;
+	}
+	Value req = Value::parse(request, &error);
+	Deck d[2];
+	for(int p = 0; p < 2; ++p)
+		if(!read_deck(req["decks"][p], d[p], error))
+			return nullptr;
+	auto* live = new LiveDuel(db_, *scripts_, d[0], d[1], static_cast<uint64_t>(req["seed"].integer(1)));
+	if(!live->ok()) {
+		error = live->error();
+		delete live;
+		return nullptr;
+	}
+	return live;
 }
 
 std::string Engine::card_names(const std::string& request) {

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "api.h"
+#include "live.h"
 
 namespace {
 
@@ -56,6 +57,8 @@ jstring to_jstring(JNIEnv* env, const std::string& s) {
 }
 
 ygoe::Engine* engine(jlong handle) { return reinterpret_cast<ygoe::Engine*>(handle); }
+ygoe::LiveDuel* live(jlong handle) { return reinterpret_cast<ygoe::LiveDuel*>(handle); }
+thread_local std::string last_error;
 
 }  // namespace
 
@@ -94,6 +97,40 @@ JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_cancel(JNIEnv*, jclass, jlon
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_progress(JNIEnv* env, jclass, jlong h) {
 	auto p = engine(h)->progress();
 	return to_jstring(env, p.phase + "\t" + std::to_string(p.done) + "\t" + std::to_string(p.total));
+}
+
+// ---- live duels ----
+
+JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_liveCreate(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_error.clear();
+	auto* d = engine(h)->create_live(to_string(env, request), last_error);
+	return reinterpret_cast<jlong>(d);
+}
+
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_lastError(JNIEnv* env, jclass) {
+	return to_jstring(env, last_error);
+}
+
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_liveState(JNIEnv* env, jclass, jlong d) {
+	return to_jstring(env, live(d)->state_json());
+}
+
+JNIEXPORT jboolean JNICALL Java_com_ygoengine_YgoNative_liveRespond(JNIEnv*, jclass, jlong d, jint index) {
+	return index >= 0 && live(d)->respond(static_cast<size_t>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
+// level: 0 easy, 1 normal, 2 strong. Returns the chosen move's label ("" if none).
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_liveBot(JNIEnv* env, jclass, jlong d, jint level) {
+	auto lv = level <= 0 ? ygoe::BotLevel::Easy : level == 1 ? ygoe::BotLevel::Normal : ygoe::BotLevel::Strong;
+	return to_jstring(env, live(d)->bot_move(lv));
+}
+
+JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_liveCancel(JNIEnv*, jclass, jlong d) {
+	live(d)->cancel();
+}
+
+JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_liveDestroy(JNIEnv*, jclass, jlong d) {
+	delete live(d);
 }
 
 }  // extern "C"

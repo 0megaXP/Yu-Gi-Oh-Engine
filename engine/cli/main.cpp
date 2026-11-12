@@ -18,7 +18,9 @@
 #include <string>
 
 #include "analyze.h"
+#include "json.h"
 #include "api.h"
+#include "live.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
@@ -65,6 +67,7 @@ int usage() {
 	             "  ygoe-cli side <mine.ydk> <theirs.ydk> [--simulate N] [--iterations N]\n"
 	             "  ygoe-cli proxy <deck.ydk> [count]\n"
 	             "  ygoe-cli json <analyze|profile|side> <request.json>   (the app API, see docs/api.md)\n"
+	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
 }
@@ -257,5 +260,48 @@ int main(int argc, char** argv) {
 		return cmd_side(db, scripts, a);
 	if(cmd == "proxy")
 		return cmd_proxy(db, a);
+	if(cmd == "duel") {
+		if(a.pos.size() < 3)
+			return usage();
+		Deck d0, d1;
+		if(!load_ydk(a.pos[1], d0, &err) || !load_ydk(a.pos[2], d1, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		auto level = [&](const std::string& k) {
+			std::string v = a.get(k, "normal");
+			return v == "easy" ? BotLevel::Easy : v == "strong" ? BotLevel::Strong : BotLevel::Normal;
+		};
+		BotLevel lv[2] = {level("bot0"), level("bot1")};
+		LiveDuel live(db, scripts, d0, d1, std::stoull(a.get("seed", "1")));
+		if(!live.ok()) {
+			std::fprintf(stderr, "%s\n", live.error().c_str());
+			return 1;
+		}
+		uint32_t max_turns = static_cast<uint32_t>(std::stoi(a.get("turns", "4")));
+		auto print_log = [&] {
+			std::string st = live.state_json();
+			auto v = json::Value::parse(st);
+			for(auto& line : v["log"].items())
+				std::printf("%s\n", line.str().c_str());
+		};
+		print_log();
+		int moves = 0;
+		auto t0 = std::chrono::steady_clock::now();
+		while(!live.duel().ended() && live.duel().turn() <= max_turns) {
+			uint8_t p = live.duel().decision().player;
+			std::string label = live.bot_move(lv[p]);
+			if(label.empty())
+				break;
+			++moves;
+			std::printf("  > P%d: %s\n", p, label.c_str());
+			print_log();
+		}
+		double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		auto b = live.duel().board();
+		std::printf("\n%d bot decisions in %.1fs; LP %d / %d; %s\n", moves, secs, b.lp[0], b.lp[1],
+		            live.duel().ended() ? ("winner P" + std::to_string(live.duel().winner())).c_str() : "not finished");
+		return 0;
+	}
 	return usage();
 }

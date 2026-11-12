@@ -73,6 +73,20 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         return Parse.side(Parse.checked(runNative(onProgress) { YgoNative.side(it, req.toString()) }))
     }
 
+    /**
+     * Starts a duel between [first] (player 0, goes first) and [second] (player 1).
+     * Close the returned duel before closing the engine.
+     */
+    suspend fun newDuel(first: EngineDeck, second: EngineDeck, seed: Long = System.nanoTime()): LiveDuel =
+        withContext(Dispatchers.Default) {
+            val req = JSONObject()
+                .put("decks", org.json.JSONArray().put(first.toJson()).put(second.toJson()))
+                .put("seed", seed)
+            val d = YgoNative.liveCreate(live(), req.toString())
+            if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
+            LiveDuel(d)
+        }
+
     /** Stops the running search early; the call returns what it found, with cancelled = true. */
     fun cancel() {
         if (handle != 0L) YgoNative.cancel(handle)

@@ -43,6 +43,7 @@ add_library(ygoe STATIC
   engine/src/side.cpp
   engine/src/analyze.cpp
   engine/src/json.cpp
+  engine/src/live.cpp
   engine/src/api.cpp)
 target_include_directories(ygoe PUBLIC engine/src)
 target_link_libraries(ygoe PUBLIC ocgcore)

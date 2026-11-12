@@ -36,6 +36,25 @@ All card ids are **official passcodes** (YGOPRODeck ids). The engine maps cards 
 
 Rough cost on a phone: a few hundred iterations per second per big core. `iterations = 2000` with checking enabled takes roughly 10–30 s.
 
+### Duels
+
+```kotlin
+val duel = engine.newDuel(first = deckA, second = deckB)    // player 0 goes first
+var state = duel.state()                                     // board, hands, LP, phase, log, decision
+state.decision?.let { d ->
+    if (d.player == humanPlayer) duel.respond(chosenIndex)   // answer with an option index
+    else duel.botMove(BotLevel.NORMAL)                       // or let the bot answer
+}
+duel.close()
+```
+
+- Choices that never matter to a person are answered automatically: zone placement, ordering, and windows with a single possible answer. So every `decision` the app sees is a real choice.
+- The bot comes in three levels:
+  - **Easy:** playout priorities only.
+  - **Normal** and **Strong:** search the rest of the turn from the exact current state (about 350 and 1200 iterations), then follow that plan until play differs from it.
+- The bot plays with full information.
+- On the desktop, `ygoe-cli duel a.ydk b.ydk --bot0 strong --bot1 easy` plays bots against each other and prints the log.
+
 ## JSON
 
 ### analyze

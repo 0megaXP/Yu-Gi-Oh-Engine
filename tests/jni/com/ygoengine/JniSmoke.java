@@ -39,6 +39,23 @@ public final class JniSmoke {
         String side = YgoNative.side(h, Files.readString(Path.of(examples, "request_side.json")));
         check(side.contains("\"going_second\""), "side");
         check(YgoNative.analyze(h, "{not json").contains("\"error\""), "bad request gives error");
+
+        // Live duel: bots play a few turns; a "person" answers one decision by index.
+        String duelReq = Files.readString(Path.of(examples, "request_duel.json"));
+        long d = YgoNative.liveCreate(h, duelReq);
+        check(d != 0, "live duel created " + YgoNative.lastError());
+        String st = YgoNative.liveState(d);
+        check(st.contains("\"decision\":{") && st.contains("\"monsters\""), "live state");
+        check(YgoNative.liveRespond(d, 0), "respond to first decision");
+        check(!YgoNative.liveRespond(d, 999), "illegal answer rejected");
+        int moves = 0;
+        while (moves < 400 && !YgoNative.liveState(d).contains("\"turn\":4,")) {
+            if (YgoNative.liveBot(d, moves % 2 == 0 ? 0 : 1).isEmpty()) break;
+            moves++;
+        }
+        check(moves > 10, "bots made " + moves + " moves");
+        YgoNative.liveDestroy(d);
+        check(YgoNative.liveCreate(h, "{\"decks\":[]}") == 0 && !YgoNative.lastError().isEmpty(), "bad duel request rejected");
         YgoNative.destroy(h);
         System.out.println("JNI smoke test passed");
     }

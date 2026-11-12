@@ -11,4 +11,11 @@ public final class YgoNative {
     public static native String side(long handle, String request);
     public static native void cancel(long handle);
     public static native String progress(long handle);
+    public static native long liveCreate(long handle, String request);
+    public static native String lastError();
+    public static native String liveState(long duel);
+    public static native boolean liveRespond(long duel, int index);
+    public static native String liveBot(long duel, int level);
+    public static native void liveCancel(long duel);
+    public static native void liveDestroy(long duel);
 }

@@ -126,6 +126,9 @@ public:
 	uint8_t turn_player() const { return turn_player_; }
 	uint16_t phase() const { return phase_; }
 	const std::vector<Event>& events() const { return events_; }
+	// Human-readable log (only collected when enabled; "[P0]"/"[P1]" stand for the players).
+	void enable_log(bool on) { log_enabled_ = on; }
+	std::vector<std::string> take_log() { auto out = std::move(log_); log_.clear(); return out; }
 	void clear_events() { events_.clear(); }
 	size_t steps() const { return steps_; }
 
@@ -152,6 +155,10 @@ private:
 	uint16_t phase_ = 0;
 	std::array<uint64_t, 2> last_hint_{0, 0};
 	std::vector<Event> events_;
+	bool log_enabled_ = false;
+	std::vector<std::string> log_;
+	std::vector<uint32_t> chain_codes_;  // codes on the current chain, for "negated" lines
+	void log_message(uint8_t type, const uint8_t* p, const uint8_t* end);
 	std::vector<uint32_t> declare_pool_;
 	size_t steps_ = 0;
 };

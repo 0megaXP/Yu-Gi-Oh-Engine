@@ -15,4 +15,13 @@ internal object YgoNative {
     @JvmStatic external fun cancel(handle: Long)
     /** "phase\tdone\ttotal" */
     @JvmStatic external fun progress(handle: Long): String
+
+    // Live duels
+    @JvmStatic external fun liveCreate(handle: Long, request: String): Long
+    @JvmStatic external fun lastError(): String
+    @JvmStatic external fun liveState(duel: Long): String
+    @JvmStatic external fun liveRespond(duel: Long, index: Int): Boolean
+    @JvmStatic external fun liveBot(duel: Long, level: Int): String
+    @JvmStatic external fun liveCancel(duel: Long)
+    @JvmStatic external fun liveDestroy(duel: Long)
 }

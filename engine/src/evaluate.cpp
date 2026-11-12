@@ -81,7 +81,11 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		for(const auto& cv : b.grave[p])
 			v += 0.03 + interrupts_from(cv, LOCATION_GRAVE, "GY");
 		v += 0.02 * b.extra[p].size();
-		v += b.lp[p] > 0 ? 0.8 * std::min(b.lp[p], 8000) / 8000.0 : -50;
+		// Life points: worth more the lower they get, so bots push damage and protect themselves.
+		if(b.lp[p] <= 0)
+			v -= 50;
+		else
+			v += 2.5 * std::min(b.lp[p], 8000) / 8000.0 - (b.lp[p] <= 2000 ? 0.6 : 0.0);
 		ev.value[p] = v;
 	}
 	ev.raw = ev.value[me] - ev.value[1 - me];
