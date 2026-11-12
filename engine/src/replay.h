@@ -42,12 +42,14 @@ struct LineCheck {
 	int steps_checked = 0;             // steps with a known card and an action the engine can see
 	int steps_matched = 0;
 	std::vector<int> step_match;       // per video step: 1 matched, 0 not matched, -1 not checked
+	int verified_steps = 0;            // steps played by the rules from the start: all of them when verified,
+	                                   // the first ones when only the start of the line could be played
 	double board_match = 0;            // share of the video's field cards on the replayed board
 	std::string problem;               // why it didn't verify ("" when verified)
 	double value = 0;                  // deck-neutral board value (as reference boards)
 	std::vector<std::string> moves;    // the replayed line
 	std::vector<CardSummary> board;    // the replayed end board
-	std::vector<ComboPiece> pieces;    // only for verified lines
+	std::vector<ComboPiece> pieces;    // for verified lines, and for the played start of partly verified ones
 };
 
 struct LinesCheck {

@@ -128,6 +128,11 @@ res.libraryJson  // the verified lines' pieces, merged; pass as `library` (alone
 - **Verified:** at least 3 steps were checked, at least 75% of them were played, and the replay ends on at least 75% of the video's end-board cards.
   - A verified line is an exact engine line, so it is split into combo pieces like a reference sample.
   - A line that doesn't verify comes back with the reason in `problem`.
+- **Partly verified:** when a line doesn't verify but its first 4 or more checked steps were all played by the rules, `verifiedSteps` (`verified_steps` in JSON) gives how many. The played start is split into pieces and learned from at single weight; the rest is left out.
+  - This fits logs from manual simulators (Duelingbook), where the player clicks effects in the order they like rather than the chain order: the log stays right until the first out-of-order chain.
+  - **Opponent-side steps:** a logged activation by the opponent (a hand trap, or a card given to them) is played when the opponent can activate it at the line's next step.
+  - **Repeats:** the same card activated twice in a row may count once.
+  - **Measured on a real Duelingbook log** (Angelechy, 14 effects read by free text recognition): the first 4 steps are played, then Duelingbook's order puts the opponent's effect before the player's triggers in the same chain, so 6 of 14 match and the line is partly verified at 4.
 - **Measured:**
   - **Engine-made lines:** on 16 lines the engine itself found (8 Angelechy, 8 Elfnote), rewritten as bare video steps with no details, 12 verified.
   - **Impossible lines:** a line that can't be played from its hand doesn't verify.

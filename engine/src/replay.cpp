@@ -1,6 +1,7 @@
 #include "replay.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <chrono>
 #include <cstdio>
 #include <map>
@@ -108,6 +109,7 @@ struct Node {
 	std::vector<Step> steps;
 	size_t next = 0;               // next video step to find
 	std::vector<int> match;        // per video step: 1 matched, 0 missed, -1 ignored
+	std::vector<size_t> settled;   // per video step: responses up to where its action had played out
 	Board base;                    // board before the action that may have caused the pending "seen" steps
 	bool done = false;
 	bool stuck = false;            // no option matched the next steps: the rest of the turn was skipped
@@ -132,7 +134,14 @@ public:
 			info_.push_back(classify(db, s));
 		for(auto c : line.end_board)
 			end_sids_.push_back(db.script_id(c));
+		// the same card logged twice in a row: often one action declared twice (Duelingbook)
+		for(size_t k = 0; k < line.steps.size(); ++k)
+			repeat_.push_back(k > 0 && line.steps[k].code && line.steps[k].code == line.steps[k - 1].code &&
+			                  line.steps[k].action == line.steps[k - 1].action);
 	}
+
+	// A logged repeat that couldn't be played isn't counted as a miss.
+	bool repeat(size_t k) const { return k < repeat_.size() && repeat_[k]; }
 
 	const DuelSetup& setup() const { return setup_; }
 	const std::vector<uint32_t>& pool() const { return pool_; }
@@ -262,8 +271,17 @@ private:
 			return false;
 		if(dec.type == DecisionType::Idle || dec.type == DecisionType::Battle)
 			return true;
-		if(dec.type == DecisionType::Chain)
-			return !candidates(dec, n, 0).empty();
+		if(dec.type == DecisionType::Chain) {
+			bool hit = !candidates(dec, n, 0).empty();
+			if(std::getenv("YGOE_REPLAY_TRACE") && dec.options.size() > 1) {
+				std::fprintf(stderr, "chain window p0 at step %zu (%s): %s; options:", n.next,
+				             n.next < info_.size() ? db_.name(info_[n.next].sid).c_str() : "-", hit ? "match" : "no match");
+				for(auto& o : dec.options)
+					std::fprintf(stderr, " [%s]", o.label.substr(0, 60).c_str());
+				std::fprintf(stderr, "\n");
+			}
+			return hit;
+		}
 		return false;
 	}
 
@@ -340,6 +358,9 @@ private:
 	// was sampled (so trying again could give a different result).
 	bool advance(Duel& d, Node& n, bool sample) {
 		bool sampled = false;
+		// set while an opponent-side activation from the log resolves: its choices (what it
+		// summons, targets) follow the video's hints like the player's own
+		bool opponent_acting = false;
 		auto h = hints(n);
 		for(int guard = 0; guard < 400; ++guard) {
 			if(d.ended() || d.turn() > 1)
@@ -367,12 +388,41 @@ private:
 					continue;
 				}
 			}
+			// The log names this card's activation, but it's the opponent's to make: a card the combo
+			// gave them (Seneschal summoned to their field), or one a manual simulator lets either
+			// player declare. Play it as logged.
 			if(dec.player != 0) {
+				size_t take_o = SIZE_MAX, step = SIZE_MAX;
+				for(size_t o = 0; o < dec.options.size() && take_o == SIZE_MAX; ++o) {
+					const Option& op = dec.options[o];
+					if(op.kind != OptKind::Activate && op.kind != OptKind::Yes)
+						continue;
+					// only the very next logged step: the opponent acting early derails the line
+					if((step = pending_activation(op.code, n)) != SIZE_MAX && step == n.next)
+						take_o = o;
+				}
+				if(take_o != SIZE_MAX) {
+					if(!take(d, n, take_o))
+						return sampled;
+					n.match[step] = 1;
+					if(step == n.next) {
+						n.next = step + 1;
+						skipped_ahead(n);
+					}
+					opponent_acting = true;
+					continue;
+				}
+			}
+			bool chooser = dec.player == 0 || (opponent_acting && pass_index(dec) == SIZE_MAX);
+			if(dec.player != 0 && !chooser) {
 				// goldfish: the opponent passes whenever it can
+				opponent_acting = false;
 				pick = pass_or(dec, best_policy(dec));
-			} else if(dec.type == DecisionType::Chain) {
+			} else if(dec.player != 0 && (dec.minor || dec.options.size() == 1)) {
+				pick = best_policy(dec);
+			} else if(dec.player == 0 && dec.type == DecisionType::Chain) {
 				pick = pass_or(dec, 0);
-			} else if(dec.minor || dec.options.size() == 1) {
+			} else if(dec.player == 0 && (dec.minor || dec.options.size() == 1)) {
 				pick = best_policy(dec);
 			} else {
 				std::vector<double> w(dec.options.size());
@@ -393,6 +443,12 @@ private:
 					}
 					w[o] = x * (1 + m);
 				}
+				if(std::getenv("YGOE_REPLAY_TRACE_CHOICES")) {
+					std::fprintf(stderr, "choice p%d at step %zu:", dec.player, n.next);
+					for(size_t o = 0; o < w.size(); ++o)
+						std::fprintf(stderr, " [%s %.1f]", dec.options[o].label.substr(0, 40).c_str(), w[o]);
+					std::fprintf(stderr, "\n");
+				}
 				if(sample) {
 					std::discrete_distribution<size_t> dist(w.begin(), w.end());
 					pick = dist(rng_);
@@ -405,6 +461,13 @@ private:
 				return sampled;
 		}
 		return sampled;
+	}
+
+	static size_t pass_index(const Decision& dec) {
+		for(size_t o = 0; o < dec.options.size(); ++o)
+			if(dec.options[o].kind == OptKind::Pass || dec.options[o].kind == OptKind::No)
+				return o;
+		return SIZE_MAX;
 	}
 
 	static size_t pass_or(const Decision& dec, size_t fallback) {
@@ -439,6 +502,11 @@ private:
 	void finish_node(Duel& d, Node& n) {
 		Board now = d.board();
 		absorb_seen(n, now);
+		// steps found since the last point: the line is consistent up to here
+		n.settled.resize(n.match.size(), 0);
+		for(size_t k = 0; k < n.match.size(); ++k)
+			if(n.match[k] == 1 && n.settled[k] == 0)
+				n.settled[k] = n.responses.size();
 		if(d.ended() || d.turn() > 1)
 			n.done = true;
 		score(n, now);
@@ -452,7 +520,7 @@ private:
 		for(size_t k = 0; k < n.match.size(); ++k) {
 			if(n.match[k] == 1)
 				++matched;
-			else if(n.match[k] == 0 && k < n.next)
+			else if(n.match[k] == 0 && k < n.next && !repeat(k))
 				++missed;
 		}
 		int on_board = 0;
@@ -486,6 +554,16 @@ private:
 			return;
 		const Decision& dec = d.decision();
 		auto cands = n.next < info_.size() ? candidates(dec, n) : std::vector<std::pair<size_t, size_t>>{};
+		if(cands.empty() && n.next < info_.size() && std::getenv("YGOE_REPLAY_TRACE")) {
+			// where a replay got stuck: the step it waits for and what the engine offers instead
+			std::fprintf(stderr, "stuck before step %zu (%s %s), score %.0f, after:\n", n.next,
+			             line_.steps[n.next].action.c_str(), db_.name(info_[n.next].sid).c_str(), n.score);
+			for(size_t k = n.steps.size() > 6 ? n.steps.size() - 6 : 0; k < n.steps.size(); ++k)
+				std::fprintf(stderr, "    p%d %s\n", n.steps[k].player, n.steps[k].label.substr(0, 110).c_str());
+			std::fprintf(stderr, "  offered to p%d (%d):\n", dec.player, static_cast<int>(dec.type));
+			for(auto& o : dec.options)
+				std::fprintf(stderr, "    - %s\n", o.label.substr(0, 110).c_str());
+		}
 		if(cands.empty()) {
 			// all steps found, or the next ones can't be played here: end the turn
 			Node m = n;
@@ -510,8 +588,14 @@ private:
 				skipped_ahead(m);
 				if(!take(e, m, opt))
 					break;
+				size_t before = m.steps.size();
 				bool sampled = advance(e, m, t > 0);
 				finish_node(e, m);
+				if(std::getenv("YGOE_REPLAY_TRACE") && step >= 3 && step <= 4) {
+					std::fprintf(stderr, "after step %zu try %d: next=%zu score=%.0f done=%d\n", step, t, m.next, m.score, m.done ? 1 : 0);
+					for(size_t k = before > 0 ? before - 1 : 0; k < m.steps.size(); ++k)
+						std::fprintf(stderr, "    p%d %s\n", m.steps[k].player, m.steps[k].label.substr(0, 100).c_str());
+				}
 				out.push_back(std::move(m));
 				if(!sampled && t > 0)
 					break;  // nothing random inside this action: one try is enough
@@ -562,6 +646,7 @@ private:
 	std::vector<uint32_t> pool_;
 	std::vector<StepInfo> info_;
 	std::vector<uint32_t> end_sids_;
+	std::vector<bool> repeat_;
 };
 
 }  // namespace
@@ -588,6 +673,8 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 		Replayer r(db, scripts, deck, line, cfg);
 		Node best = r.run();
 		for(size_t k = 0; k < best.match.size(); ++k) {
+			if(best.match[k] == 0 && r.repeat(k))
+				best.match[k] = -1;
 			lc.step_match.push_back(best.match[k]);
 			if(best.match[k] >= 0)
 				++lc.steps_checked;
@@ -628,8 +715,43 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 		else if(want > 0 && lc.board_match < 0.75)
 			lc.problem = "the replay ends on " + std::to_string(have) + " of the video's " + std::to_string(want) + " end-board cards";
 		lc.verified = lc.problem.empty();
+		// Not all of it, but the start played by the rules: that part is a real line too. A log from
+		// a manual simulator (Duelingbook) can follow its player's clicks rather than the chain
+		// rules, so a replay may agree only up to a point.
+		if(!lc.verified) {
+			size_t last = SIZE_MAX;
+			int run = 0;
+			for(size_t k = 0; k < best.match.size(); ++k) {
+				if(best.match[k] < 0)
+					continue;
+				if(best.match[k] != 1)
+					break;
+				last = k;
+				++run;
+			}
+			if(run >= 4 && last < best.settled.size() && best.settled[last] > 0) {
+				lc.verified_steps = run;
+				Trajectory part;
+				part.responses.assign(best.responses.begin(), best.responses.begin() + static_cast<long>(best.settled[last]));
+				part.steps.assign(best.steps.begin(), best.steps.begin() + static_cast<long>(best.settled[last]));
+				Board pb;
+				Duel pd(db, scripts);
+				pd.set_declare_pool(r.pool());
+				if(pd.replay(r.setup(), part.responses)) {
+					pb = pd.board();
+					auto split = split_line(db, scripts, r.pool(), r.setup(), part, hand_traps);
+					add_to_library(res.library, split, board_value(db, deck, pb, 0));
+					lc.pieces = std::move(split.pieces);
+					if(policy) {
+						auto ex = policy->examples_from_line(scripts, r.pool(), r.setup(), part.responses, 0, 1.0f);
+						examples.insert(examples.end(), ex.begin(), ex.end());
+					}
+				}
+			}
+		}
 		if(lc.verified) {
 			++verified_lines;
+			lc.verified_steps = lc.steps_matched;
 			auto split = split_line(db, scripts, r.pool(), r.setup(), t, hand_traps);
 			add_to_library(res.library, split, lc.value);
 			if(policy) {
@@ -666,7 +788,7 @@ std::string LinesCheck::to_json(const CardDB& db) const {
 		  << ",\"steps_checked\":" << l.steps_checked << ",\"steps_matched\":" << l.steps_matched << ",\"step_match\":[";
 		for(size_t k = 0; k < l.step_match.size(); ++k)
 			o << (k ? "," : "") << l.step_match[k];
-		o << "],\"board_match\":" << num(l.board_match) << ",\"problem\":" << quote(l.problem) << ",\"value\":" << num(l.value)
+		o << "],\"verified_steps\":" << l.verified_steps << ",\"board_match\":" << num(l.board_match) << ",\"problem\":" << quote(l.problem) << ",\"value\":" << num(l.value)
 		  << ",\"moves\":[";
 		for(size_t k = 0; k < l.moves.size(); ++k)
 			o << (k ? "," : "") << quote(l.moves[k]);
