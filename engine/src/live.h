@@ -19,6 +19,8 @@ class LiveDuel {
 public:
 	// Player 0 goes first. Both players start with 5 random cards from their deck.
 	LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& deck0, const Deck& deck1, uint64_t seed);
+	// The player a person controls (-1 = none). Their zone choices are asked, not answered automatically.
+	void set_human(int player) { human_ = player; }
 	bool ok() const { return ok_; }
 	const std::string& error() const { return error_; }
 
@@ -50,6 +52,7 @@ private:
 	std::unique_ptr<Searcher> searcher_;
 	std::vector<std::vector<uint8_t>> history_;
 	std::vector<std::string> log_;
+	int human_ = -1;
 	std::vector<int8_t> log_players_;
 	std::vector<Duel::Move> moves_;
 	std::string last_move_;

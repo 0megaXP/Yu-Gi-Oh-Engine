@@ -1,3 +1,5 @@
+#include <cctype>
+#include <mutex>
 #include "carddb.h"
 
 #include <fstream>
@@ -6,6 +8,18 @@
 #include "ocgapi_constants.h"
 
 namespace ygoe {
+
+namespace {
+// Lowercase, keeping only letters and digits, so small punctuation differences don't matter.
+std::string lower_name(const std::string& s) {
+	std::string out;
+	for(unsigned char ch : s)
+		if(std::isalnum(ch))
+			out += static_cast<char>(std::tolower(ch));
+	return out;
+}
+}  // namespace
+
 
 bool CardInfo::is_extra_deck() const {
 	return (type & (TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK)) != 0;
@@ -102,6 +116,37 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		passcode_map_[official] = sid;
 		official_map_[sid] = official;
 	}
+	// Name index: for names shared by several ids (official and pre-release copies), keep the lowest id.
+	for(const auto& [id, c] : cards_) {
+		// Only real cards (8-digit passcodes) and pre-release copies (1xx xxx xxx), not anime or custom cards.
+		if(c.alias || c.name.empty() || id >= 110000000u)
+			continue;
+		std::string key = lower_name(c.name);
+		auto it = by_name_.find(key);
+		if(it == by_name_.end() || id < it->second)
+			by_name_[key] = id;
+	}
+	return true;
+}
+
+bool CardDB::learn_name(uint32_t passcode, const std::string& name) const {
+	std::string want = lower_name(name);
+	if(want.empty())
+		return false;
+	// A passcode the database lists as itself is trusted: name differences there are only
+	// translations (OCG vs TCG names). Only mapped or unknown passcodes are corrected.
+	if(get(passcode) && !passcode_map_.count(passcode))
+		return false;
+	uint32_t sid = script_id(passcode);
+	if(auto c = get(sid); c && lower_name(c->name) == want)
+		return false;
+	auto it = by_name_.find(want);
+	if(it == by_name_.end() || it->second == sid)
+		return false;
+	std::unique_lock lock(learn_mu_);
+	learned_[passcode] = it->second;
+	learned_official_[it->second] = passcode;
+	has_learned_.store(true, std::memory_order_release);
 	return true;
 }
 
@@ -111,11 +156,21 @@ const CardInfo* CardDB::get(uint32_t code) const {
 }
 
 uint32_t CardDB::script_id(uint32_t passcode) const {
+	if(has_learned_.load(std::memory_order_acquire)) {
+		std::shared_lock lock(learn_mu_);
+		if(auto l = learned_.find(passcode); l != learned_.end())
+			return l->second;
+	}
 	auto it = passcode_map_.find(passcode);
 	return it == passcode_map_.end() ? passcode : it->second;
 }
 
 uint32_t CardDB::official_id(uint32_t sid) const {
+	if(has_learned_.load(std::memory_order_acquire)) {
+		std::shared_lock lock(learn_mu_);
+		if(auto l = learned_official_.find(sid); l != learned_official_.end())
+			return l->second;
+	}
 	auto it = official_map_.find(sid);
 	return it == official_map_.end() ? sid : it->second;
 }

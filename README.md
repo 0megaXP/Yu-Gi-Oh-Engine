@@ -147,7 +147,7 @@ data/passcode_map.tsv  official passcodes → EDOPro ids for cards still on pre-
 - **Cost per iteration.** ygopro-core cannot copy a running duel, so every search iteration rebuilds the duel and replays the responses. Scripts are cached as precompiled Lua bytecode, which brings duel creation to about 5 ms. Expect a few hundred iterations per second per core. Long combos need several thousand iterations to be found reliably.
 - **State files.** Puzzle setups can't express "already used this turn" or "summoned this turn". To analyse a live game exactly, drive the duel through the engine from turn 1 (the `history` of a `RootState`) instead of describing the board.
 - **Heuristic parts.** The static interruption values and the side planner's card-text keywords are heuristics. The opponent-turn simulation is what grounds the final ranking.
-- **Passcode map.** `data/passcode_map.tsv` maps Beyond the Brave passcodes to EDOPro's pre-release ids. Rows marked *inferred* were matched by card type and copy count.
+- **Passcode map.** `data/passcode_map.tsv` maps Beyond the Brave passcodes to EDOPro's pre-release ids. Every row was checked against YGOPRODeck; decks sent by the app also carry card names, and the engine corrects any passcode whose name doesn't match.
 
 ## License note
 

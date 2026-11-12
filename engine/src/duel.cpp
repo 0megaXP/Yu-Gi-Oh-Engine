@@ -930,16 +930,37 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 		}
 		if(msg == MSG_SELECT_DISFIELD)
 			std::stable_sort(zones.begin(), zones.end(), [&](auto& a, auto& b) { return (a[0] != d.player) > (b[0] != d.player); });
+		// Zones named as the deciding player sees the table: columns 1-5 from their left.
+		auto zone_label = [&](const std::array<uint8_t, 3>& z) {
+			bool mine = z[0] == d.player;
+			uint8_t s = z[2];
+			std::string what;
+			if(z[1] == LOCATION_MZONE && s >= 5) {
+				bool left = (s == 5) == mine;
+				what = std::string("Extra Monster Zone (") + (left ? "left" : "right") + ")";
+			} else if(z[1] == LOCATION_SZONE && s == 5) {
+				what = "Field Zone";
+			} else if(z[1] == LOCATION_SZONE && s >= 6) {
+				what = std::string("Pendulum Zone (") + ((s == 6) == mine ? "left" : "right") + ")";
+			} else {
+				int column = mine ? s + 1 : 5 - s;
+				what = std::string(z[1] == LOCATION_MZONE ? "Monster Zone" : "Spell & Trap Zone") + ", column " +
+				       std::to_string(column) + (column == 1 ? " (left)" : column == 5 ? " (right)" : "");
+			}
+			return (mine ? "Your " : "Opponent's ") + what;
+		};
 		if(zones.size() >= count) {
 			std::vector<uint8_t> resp;
-			for(uint8_t i = 0; i < count; ++i)
+			std::string label;
+			for(uint8_t i = 0; i < count; ++i) {
 				resp.insert(resp.end(), zones[i].begin(), zones[i].end());
-			add(OptKind::Choose, resp, "zone");
-			// Offer the other own monster zones too, because Link arrows/columns can matter.
+				label += (i ? " + " : "") + zone_label(zones[i]);
+			}
+			add(OptKind::Choose, resp, label);
+			// One zone to pick: offer every free zone, because columns and Link arrows matter.
 			if(count == 1)
-				for(size_t z = 1; z < zones.size() && z < 7; ++z)
-					if(zones[z][1] == zones[0][1] && zones[z][0] == zones[0][0])
-						add(OptKind::Choose, {zones[z][0], zones[z][1], zones[z][2]}, "zone " + std::to_string(zones[z][2]));
+				for(size_t z = 1; z < zones.size(); ++z)
+					add(OptKind::Choose, {zones[z][0], zones[z][1], zones[z][2]}, zone_label(zones[z]));
 		}
 		break;
 	}
@@ -1046,7 +1067,18 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 				v |= bits[i];
 			std::vector<uint8_t> resp(8);
 			std::memcpy(resp.data(), &v, 8);
-			add(OptKind::Choose, resp, "race mask " + std::to_string(v));
+			std::string label;
+			for(auto i : c) {
+				static const char* races[] = {"Warrior", "Spellcaster", "Fairy", "Fiend", "Zombie", "Machine", "Aqua",
+				                              "Pyro", "Rock", "Winged Beast", "Plant", "Insect", "Thunder", "Dragon",
+				                              "Beast", "Beast-Warrior", "Dinosaur", "Fish", "Sea Serpent", "Reptile",
+				                              "Psychic", "Divine-Beast", "Creator God", "Wyrm", "Cyberse", "Illusion"};
+				int b = 0;
+				while(b < 64 && !(bits[i] & (1ull << b)))
+					++b;
+				label += (label.empty() ? "" : " + ") + std::string(b < 26 ? races[b] : "Type " + std::to_string(b));
+			}
+			add(OptKind::Choose, resp, "Declare " + label);
 		}
 		break;
 	}

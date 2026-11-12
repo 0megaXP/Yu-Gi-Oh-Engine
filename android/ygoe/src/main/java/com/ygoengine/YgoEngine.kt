@@ -83,11 +83,14 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         seed: Long = System.nanoTime(),
         /** Combo pieces for each player's bot ([ReferenceResult.libraryJson]), or null. */
         libraries: List<String?> = listOf(null, null),
+        /** The player a person controls (0 or 1), or -1 for bot vs bot. Their zone choices are asked. */
+        human: Int = -1,
     ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
                 .put("decks", org.json.JSONArray().put(first.toJson()).put(second.toJson()))
                 .put("seed", seed)
+                .put("human", human)
                 .put("libraries", org.json.JSONArray(libraries.map { l -> l?.let { org.json.JSONArray(it) } ?: JSONObject.NULL }))
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })

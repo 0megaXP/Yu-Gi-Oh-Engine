@@ -5,18 +5,23 @@ import org.json.JSONObject
 
 // ------------------------------------------------------------------ requests
 
-/** A decklist by official passcodes (the ids YGOPRODeck uses). */
+/**
+ * A decklist by official passcodes (the ids YGOPRODeck uses). [names] gives each passcode's card
+ * name when known: the engine uses it to catch passcodes it would otherwise map to the wrong card.
+ */
 data class EngineDeck(
     val name: String,
     val main: List<Long>,
     val extra: List<Long>,
     val side: List<Long> = emptyList(),
+    val names: Map<Long, String> = emptyMap(),
 ) {
     internal fun toJson() = JSONObject()
         .put("name", name)
         .put("main", JSONArray(main))
         .put("extra", JSONArray(extra))
         .put("side", JSONArray(side))
+        .put("names", JSONObject().apply { names.forEach { (code, n) -> put(code.toString(), n) } })
 }
 
 enum class Knowledge(internal val wire: String) {

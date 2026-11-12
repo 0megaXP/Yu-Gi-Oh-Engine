@@ -22,6 +22,7 @@ public:
 	bool boolean(bool def = false) const { return type_ == Bool ? b_ : def; }
 	const std::string& str() const { return s_; }
 	const std::vector<Value>& items() const { return arr_; }
+	const std::map<std::string, Value>& entries() const { return obj_; }
 	// Missing keys return a shared null value.
 	const Value& operator[](const std::string& key) const;
 	const Value& operator[](size_t i) const;

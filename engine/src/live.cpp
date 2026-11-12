@@ -60,11 +60,13 @@ const char* kind_text(OptKind k) {
 }
 
 // Decisions a person never needs to make by hand: the first answer is always fine.
-bool trivial(const Decision& d) {
+bool trivial(const Decision& d, int human) {
 	if(d.options.size() == 1)
 		return true;
 	switch(d.type) {
 	case DecisionType::Place:
+		// A person picks their own zones (columns matter); bots take the first free one.
+		return d.player != human;
 	case DecisionType::Sort:
 	case DecisionType::Counter:
 	case DecisionType::RockPaperScissors: return true;
@@ -125,7 +127,7 @@ bool LiveDuel::respond_internal(size_t index) {
 
 void LiveDuel::auto_resolve() {
 	int guard = 0;
-	while(!duel_->ended() && trivial(duel_->decision()) && guard++ < 200) {
+	while(!duel_->ended() && trivial(duel_->decision(), human_) && guard++ < 200) {
 		// For a single "Don't respond" chain window, or a zone/sort choice, take the first answer.
 		if(!respond_internal(0))
 			break;

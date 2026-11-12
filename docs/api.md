@@ -99,7 +99,8 @@ state.decision?.let { d ->
 duel.close()
 ```
 
-- Choices that never matter to a person are answered automatically: zone placement, ordering, and windows with a single possible answer. So every `decision` the app sees is a real choice.
+- Choices that never matter to a person are answered automatically: ordering, counters, and windows with a single possible answer. Zone placement is automatic for bots; for the player passed as `human` to `newDuel`, every free zone is offered, named by column from that player's left ("Your Monster Zone, column 3"). So every `decision` the app sees is a real choice.
+- Decks may carry `names` (passcode → card name). When the card a passcode resolves to has a different name, the engine switches to the card with that name, so a wrong or missing `passcode_map.tsv` row can't swap cards.
 - The bot comes in three levels:
   - **Easy:** playout priorities only.
   - **Normal** and **Strong:** search the rest of the turn from the exact current state (about 350 and 1200 iterations), then follow that plan until play differs from it.

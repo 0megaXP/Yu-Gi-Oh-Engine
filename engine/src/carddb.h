@@ -1,6 +1,8 @@
 // Card data, effect metadata and effect strings, loaded from the files tools/bootstrap.sh exports.
 #pragma once
+#include <atomic>
 #include <cstdint>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -46,6 +48,10 @@ public:
 	uint32_t script_id(uint32_t passcode) const;
 	// Inverse of script_id: the official passcode (what YGOPRODeck and card images use).
 	uint32_t official_id(uint32_t script_id) const;
+	// The app knows each passcode's real name. If the card this passcode resolves to has another
+	// name, use the card with that name instead (fixes wrong or missing passcode_map rows).
+	// Returns true when it changed what the passcode means.
+	bool learn_name(uint32_t passcode, const std::string& name) const;
 	std::string name(uint32_t code) const;
 	// Text for an effect description value (aux.Stringid(code, n) == (code << 20) | n).
 	std::string description(uint64_t desc) const;
@@ -55,6 +61,11 @@ public:
 private:
 	std::unordered_map<uint32_t, CardInfo> cards_;
 	std::unordered_map<uint32_t, uint32_t> passcode_map_, official_map_;
+	std::unordered_map<std::string, uint32_t> by_name_;  // lowercase name -> id
+	// Corrections learned from names at run time (see learn_name).
+	mutable std::unordered_map<uint32_t, uint32_t> learned_, learned_official_;
+	mutable std::shared_mutex learn_mu_;
+	mutable std::atomic<bool> has_learned_{false};
 	std::unordered_map<uint64_t, std::string> strings_;  // key: code*16+idx
 	std::unordered_map<uint32_t, std::string> texts_;
 };

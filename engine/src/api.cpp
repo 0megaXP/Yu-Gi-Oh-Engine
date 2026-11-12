@@ -1,3 +1,4 @@
+#include <cctype>
 #include "api.h"
 
 #include <algorithm>
@@ -37,7 +38,7 @@ std::vector<uint32_t> codes(const Value& v) {
 	return out;
 }
 
-bool read_deck(const Value& v, Deck& d, std::string& err) {
+bool read_deck(const Value& v, Deck& d, std::string& err, const CardDB& db) {
 	if(!v.is_object()) {
 		err = "deck must be an object with main/extra/side arrays";
 		return false;
@@ -46,6 +47,11 @@ bool read_deck(const Value& v, Deck& d, std::string& err) {
 	d.main = codes(v["main"]);
 	d.extra = codes(v["extra"]);
 	d.side = codes(v["side"]);
+	// Optional {"passcode": "name"}: lets the engine correct passcodes it maps to the wrong card.
+	if(v["names"].is_object())
+		for(const auto& [k, n] : v["names"].entries())
+			if(!k.empty() && std::isdigit(static_cast<unsigned char>(k[0])))
+				db.learn_name(static_cast<uint32_t>(std::stoul(k)), n.str());
 	if(d.main.empty()) {
 		err = "deck '" + d.name + "' has an empty main deck";
 		return false;
@@ -185,7 +191,7 @@ std::string Engine::analyze(const std::string& request) {
 
 	Scenario sc;
 	for(int p = 0; p < 2; ++p)
-		if(!read_deck(req["decks"][p], sc.decks[p], err))
+		if(!read_deck(req["decks"][p], sc.decks[p], err, db_))
 			return error_json(err);
 	sc.me = static_cast<uint8_t>(req["me"].integer(0));
 	sc.knowledge = req["mode"].str() == "real" ? Knowledge::Real : Knowledge::Practice;
@@ -250,7 +256,7 @@ std::string Engine::profile(const std::string& request) {
 	std::string err;
 	Value req = Value::parse(request, &err);
 	Deck d;
-	if(!read_deck(req["deck"], d, err))
+	if(!read_deck(req["deck"], d, err, db_))
 		return error_json(err);
 	return profile_json(db_, d);
 }
@@ -263,7 +269,7 @@ std::string Engine::side(const std::string& request) {
 	std::string err;
 	Value req = Value::parse(request, &err);
 	Deck mine, theirs;
-	if(!read_deck(req["mine"], mine, err) || !read_deck(req["theirs"], theirs, err))
+	if(!read_deck(req["mine"], mine, err, db_) || !read_deck(req["theirs"], theirs, err, db_))
 		return error_json(err);
 	auto opp = profile_deck(db_, theirs);
 	BoardShape shape;
@@ -315,7 +321,7 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	Value req = Value::parse(request, &error);
 	Deck d[2];
 	for(int p = 0; p < 2; ++p)
-		if(!read_deck(req["decks"][p], d[p], error))
+		if(!read_deck(req["decks"][p], d[p], error, db_))
 			return nullptr;
 	auto* live = new LiveDuel(db_, *scripts_, d[0], d[1], static_cast<uint64_t>(req["seed"].integer(1)));
 	if(!live->ok()) {
@@ -323,6 +329,7 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 		delete live;
 		return nullptr;
 	}
+	live->set_human(static_cast<int>(req["human"].integer(-1)));
 	for(int p = 0; p < 2; ++p)
 		if(req["libraries"][p].is_array())
 			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p])));
@@ -337,7 +344,7 @@ std::string Engine::reference(const std::string& request) {
 	std::string err;
 	Value req = Value::parse(request, &err);
 	Deck d;
-	if(!read_deck(req["deck"], d, err))
+	if(!read_deck(req["deck"], d, err, db_))
 		return error_json(err);
 	int hands = static_cast<int>(req["hands"].integer(20));
 	int iterations = static_cast<int>(req["iterations"].integer(1500));
@@ -359,10 +366,10 @@ std::string Engine::combo_tree(const std::string& request) {
 	std::string err;
 	Value req = Value::parse(request, &err);
 	Deck mine, theirs;
-	if(!read_deck(req["deck"], mine, err))
+	if(!read_deck(req["deck"], mine, err, db_))
 		return error_json(err);
 	bool known = req["opponent"].is_object();
-	if(known && !read_deck(req["opponent"], theirs, err))
+	if(known && !read_deck(req["opponent"], theirs, err, db_))
 		return error_json(err);
 	std::vector<uint32_t> hand = codes(req["hand"]);
 	if(hand.empty())
