@@ -77,12 +77,15 @@ data class AnalysisRequest(
     val settings: SearchSettings = SearchSettings(),
     /** Your deck's combo pieces ([ReferenceResult.libraryJson]): the search tries plans chained from them first. */
     val library: String? = null,
+    /** Learned move policy ([ReferenceResult.policyJson]): steers the search toward options good lines choose. */
+    val policy: String? = null,
 ) {
     internal fun toJson(): JSONObject {
         val sides = listOf(first, second)
         fun perSide(f: (SideState) -> Any?) = JSONArray(sides.map { f(it) ?: JSONObject.NULL })
         return JSONObject()
             .put("library", library?.let { JSONArray(it) } ?: JSONObject.NULL)
+            .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("decks", perSide { it.deck.toJson() })
             .put("me", me)
             .put("mode", knowledge.wire)
@@ -258,6 +261,9 @@ data class ReferenceResult(
     val libraryJson: String? get() = runCatching { JSONObject(json).optJSONArray("library") }.getOrNull()
         ?.takeIf { it.length() > 0 }?.toString()
 
+    /** The move policy after learning from this reference's lines, to keep and pass on; null if none. */
+    val policyJson: String? get() = runCatching { JSONObject(json).optJSONObject("policy") }.getOrNull()?.toString()
+
     /** Share (0..1) of reference boards that [value] beats or equals. */
     fun percentile(value: Double): Double =
         if (samples.isEmpty()) 0.0 else samples.count { it.value <= value + 1e-9 }.toDouble() / samples.size
@@ -352,6 +358,9 @@ data class VideoLinesResult(
     val cancelled: Boolean,
     val json: String,
 ) {
+    /** The move policy after learning from the verified lines; null if none verified. */
+    val policyJson: String? get() = runCatching { JSONObject(json).optJSONObject("policy") }.getOrNull()?.toString()
+
     /** The verified lines' pieces, to pass as `library`; null if no line verified. */
     val libraryJson: String? get() = runCatching { JSONObject(json).optJSONArray("library") }.getOrNull()
         ?.takeIf { it.length() > 0 }?.toString()

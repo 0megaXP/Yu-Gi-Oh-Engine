@@ -9,6 +9,7 @@
 #include "ocgapi_constants.h"
 #include "combo.h"
 #include "search.h"
+#include "policy.h"
 
 namespace ygoe {
 
@@ -29,8 +30,9 @@ double board_value(const CardDB& db, const Deck& deck, const Board& b, uint8_t p
 
 ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const Deck& deck, int hands, int iterations,
                                 uint64_t seed, const std::atomic<bool>* cancel,
-                                const std::function<void(int, int)>& progress) {
+                                const std::function<void(int, int)>& progress, Policy* policy) {
 	ReferenceResult res;
+	std::vector<PolicyExample> examples;
 	res.deck = deck.name;
 	res.iterations = iterations;
 	Evaluator eval(db, deck, deck);
@@ -83,6 +85,10 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 				++s.interrupts;
 		s.board = summarize_cards(db, end, 0);
 		s.moves = describe(t, 0, true);
+		if(policy) {
+			auto ex = policy->examples_from_line(scripts, declare_pool(sc), root.setup, t.responses, 0);
+			examples.insert(examples.end(), ex.begin(), ex.end());
+		}
 		{
 			auto split = split_line(db, scripts, declare_pool(sc), root.setup, t, hand_traps);
 			add_to_library(res.library, split, s.value);
@@ -105,6 +111,10 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 	if(res.common_cards.size() > 15)
 		res.common_cards.resize(15);
 	sort_library(res.library, 60);
+	if(policy && !examples.empty()) {
+		policy->train(examples);
+		res.policy = policy->to_json();
+	}
 	return res;
 }
 
@@ -137,7 +147,10 @@ std::string ReferenceResult::to_json(const CardDB& db) const {
 	for(size_t i = 0; i < common_cards.size(); ++i)
 		o << (i ? "," : "") << "{\"code\":" << db.official_id(common_cards[i].first) << ",\"name\":"
 		  << quote(db.name(common_cards[i].first)) << ",\"share\":" << num(common_cards[i].second) << "}";
-	o << "],\"lines\":" << samples.size() << ",\"library\":" << library_json(db, library, static_cast<int>(samples.size()))
+	o << "]";
+	if(!policy.empty())
+		o << ",\"policy\":" << policy;
+	o << ",\"lines\":" << samples.size() << ",\"library\":" << library_json(db, library, static_cast<int>(samples.size()))
 	  << "}";
 	return o.str();
 }

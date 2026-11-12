@@ -54,6 +54,7 @@ struct LinesCheck {
 	std::vector<LineCheck> lines;
 	std::vector<LibraryPiece> library;  // pieces of the verified lines, merged
 	int verified = 0;
+	std::string policy;                 // the move policy after learning from the verified lines (JSON), if one was given
 	std::string to_json(const CardDB& db) const;
 };
 
@@ -66,7 +67,12 @@ struct ReplayConfig {
 	const std::atomic<bool>* cancel = nullptr;
 };
 
+class Policy;
+
+// With `policy`, the verified lines are also learned from (policy.h), counting double: they
+// are a person's play, checked by the rules.
 LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck& deck, const std::vector<VideoLine>& lines,
-                             const ReplayConfig& cfg, const std::function<void(int done, int total)>& progress = {});
+                             const ReplayConfig& cfg, const std::function<void(int done, int total)>& progress = {},
+                             Policy* policy = nullptr);
 
 }  // namespace ygoe

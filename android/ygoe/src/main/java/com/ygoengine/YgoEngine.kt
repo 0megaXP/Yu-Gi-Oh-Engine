@@ -86,6 +86,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         libraries: List<String?> = listOf(null, null),
         /** The player a person controls (0 or 1), or -1 for bot vs bot. Their zone choices are asked. */
         human: Int = -1,
+        /** Learned move policy for the bots' searches ([ReferenceResult.policyJson]), or null. */
+        policy: String? = null,
     ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
@@ -93,6 +95,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
                 .put("seed", seed)
                 .put("human", human)
                 .put("libraries", org.json.JSONArray(libraries.map { l -> l?.let { org.json.JSONArray(it) } ?: JSONObject.NULL }))
+                .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
             LiveDuel(d)
@@ -108,9 +111,15 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         hands: Int = 20,
         iterations: Int = 1500,
         seed: Long = 1,
+        /**
+         * The move policy learned so far ([ReferenceResult.policyJson]), or null to start one. The
+         * best line of every hand trains it further; the result carries the updated policy.
+         */
+        policy: String? = null,
         onProgress: ((Progress) -> Unit)? = null,
     ): ReferenceResult {
         val req = JSONObject().put("deck", deck.toJson()).put("hands", hands).put("iterations", iterations).put("seed", seed)
+            .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
         return Parse.reference(runNative(onProgress) { YgoNative.reference(it, req.toString()) })
     }
 
@@ -125,9 +134,12 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         lines: List<VideoLineInput>,
         seconds: Double = 60.0,
         seed: Long = 1,
+        /** The move policy learned so far, or null; verified lines train it (the result has the update). */
+        policy: String? = null,
         onProgress: ((Progress) -> Unit)? = null,
     ): VideoLinesResult {
         val req = JSONObject().put("deck", deck.toJson()).put("seconds", seconds).put("seed", seed)
+            .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("lines", JSONArray(lines.map { it.toJson() }))
         return Parse.videoLines(runNative(onProgress) { YgoNative.videoLines(it, req.toString()) })
     }
@@ -146,6 +158,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         seed: Long = 1,
         /** Your deck's combo pieces ([ReferenceResult.libraryJson]), or null. */
         library: String? = null,
+        /** Learned move policy ([ReferenceResult.policyJson]), or null. */
+        policy: String? = null,
         onProgress: ((Progress) -> Unit)? = null,
     ): ComboTree {
         val req = JSONObject()
@@ -156,6 +170,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
             .put("branch_iterations", branchIterations)
             .put("seed", seed)
             .put("library", library?.let { org.json.JSONArray(it) } ?: JSONObject.NULL)
+            .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
         return Parse.comboTree(runNative(onProgress) { YgoNative.comboTree(it, req.toString()) })
     }
 

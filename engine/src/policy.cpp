@@ -267,7 +267,11 @@ std::string Policy::to_json() const {
 bool Policy::from_json(const std::string& text) {
 	std::string err;
 	json::Value v = json::Value::parse(text, &err);
-	if(!err.empty() || !v.is_object() || v["dim"].integer() != kDim)
+	return err.empty() && from_value(v);
+}
+
+bool Policy::from_value(const json::Value& v) {
+	if(!v.is_object() || v["dim"].integer() != kDim)
 		return false;
 	std::fill(w_.begin(), w_.end(), 0.0f);
 	for(const auto& p : v["w"].items()) {

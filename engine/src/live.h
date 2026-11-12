@@ -34,6 +34,8 @@ public:
 	void cancel() { cancel_ = true; }
 	// Combo pieces for a player's bot (from that deck's reference boards), see pieces.h.
 	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
+	// Learned move policy (policy.h) for both bots' searches.
+	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
 
 	const Duel& duel() const { return *duel_; }
 
@@ -69,6 +71,7 @@ private:
 	// never played for the other side's bot.
 	int plan_player_ = -1;
 	std::shared_ptr<const PieceGuide> guides_[2];
+	std::shared_ptr<const class Policy> policy_;
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

@@ -12,6 +12,7 @@
 #include "pieces.h"
 #include "reference.h"
 #include "replay.h"
+#include "policy.h"
 #include "combo.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
@@ -25,6 +26,16 @@ using json::quote;
 using json::Value;
 
 std::string error_json(const std::string& msg) { return "{\"error\":" + quote(msg) + "}"; }
+
+// The learned move policy a request passes in ("policy": {...}), or null.
+std::shared_ptr<const Policy> read_policy(const Value& v, const CardDB& db) {
+	if(!v.is_object())
+		return nullptr;
+	auto p = std::make_shared<Policy>(db);
+	if(!p->from_value(v) || !p->trained())
+		return nullptr;
+	return p;
+}
 
 std::string num(double v, int prec = 3) {
 	char b[32];
@@ -235,6 +246,7 @@ std::string Engine::analyze(const std::string& request) {
 	cfg.search.cancel = &cancel_;
 	if(req["library"].is_array())
 		cfg.search.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+	cfg.search.policy = read_policy(req["policy"], db_);
 	cfg.determinizations = static_cast<int>(c["samples"].integer(12));
 	cfg.lines = static_cast<int>(c["lines"].integer(3));
 	cfg.verify = c["verify"].boolean(true);
@@ -334,6 +346,7 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	for(int p = 0; p < 2; ++p)
 		if(req["libraries"][p].is_array())
 			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p])));
+	live->set_policy(read_policy(req["policy"], db_));
 	return live;
 }
 
@@ -350,8 +363,13 @@ std::string Engine::reference(const std::string& request) {
 	int hands = static_cast<int>(req["hands"].integer(20));
 	int iterations = static_cast<int>(req["iterations"].integer(1500));
 	set_progress("reference", 0, hands);
+	// The deck's best lines also train the move policy (the one passed in, or a new one).
+	Policy policy(db_);
+	if(req["policy"].is_object())
+		policy.from_value(req["policy"]);
 	auto res = build_reference(db_, *scripts_, d, hands, iterations, static_cast<uint64_t>(req["seed"].integer(1)), &cancel_,
-	                           [&](int done, int total) { set_progress("reference", done, total); });
+	                           [&](int done, int total) { set_progress("reference", done, total); },
+	                           req["learn"].boolean(true) ? &policy : nullptr);
 	set_progress("idle", 0, 0);
 	std::string out = res.to_json(db_);
 	out.pop_back();
@@ -390,8 +408,13 @@ std::string Engine::video_lines(const std::string& request) {
 	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));
 	cfg.cancel = &cancel_;
 	set_progress("video lines", 0, static_cast<int>(lines.size()));
+	// Verified lines also train the move policy (the one passed in, or a new one).
+	Policy policy(db_);
+	if(req["policy"].is_object())
+		policy.from_value(req["policy"]);
 	auto res = check_video_lines(db_, *scripts_, d, lines, cfg,
-	                             [&](int done, int total) { set_progress("video lines", done, total); });
+	                             [&](int done, int total) { set_progress("video lines", done, total); },
+	                             req["learn"].boolean(true) ? &policy : nullptr);
 	set_progress("idle", 0, 0);
 	std::string out = res.to_json(db_);
 	out.pop_back();
@@ -418,6 +441,7 @@ std::string Engine::combo_tree(const std::string& request) {
 	ComboTreeConfig cfg;
 	if(req["library"].is_array())
 		cfg.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+	cfg.policy = read_policy(req["policy"], db_);
 	cfg.iterations = static_cast<int>(req["iterations"].integer(1500));
 	cfg.branch_iterations = static_cast<int>(req["branch_iterations"].integer(300));
 	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));

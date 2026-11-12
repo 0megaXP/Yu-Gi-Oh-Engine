@@ -72,6 +72,39 @@ A line is split into sub-combos ("pieces"):
   - **Measured effect:** on 12 unseen Angelechy hands, the best line found improved from 0.780 to 0.797 at 400 iterations (better on 8 hands, worse on 1). At 1500 iterations there was no clear difference. It helps most with small budgets (Normal bot, quick searches on the phone).
   - **Desktop:** `ygoe-cli pieces-bench deck.ydk reference.json --hands 12 --iterations 400` measures it.
 
+### Learned move policy
+
+The engine learns which options good lines choose, and its searches try those first. Every search option's playout weight becomes *rule weight × e^score*, where the score comes from a log-linear model.
+
+```kotlin
+var policy: String? = saved                                  // null the first time
+val ref = engine.reference(deck, policy = policy)            // learns from the deck's best lines
+policy = ref.policyJson                                      // keep it: one policy for all decks
+val checked = engine.videoLines(list, lines, policy = policy)
+policy = checked.policyJson ?: policy                        // verified video lines teach it too
+engine.analyze(request.copy(policy = policy)) / comboTree(..., policy = policy) / newDuel(..., policy = policy)
+```
+
+- **Features:** the model sees the kind of decision and option, where the card is, the card's type and level, what its effects do (script categories: search, Special Summon, negate, ...), what a selection is for, whose turn it is, how far into the turn it is, and the card itself.
+  - Most features aren't tied to one card, so what a deck teaches carries over to others.
+  - The card features let each deck's own patterns be learned too.
+- **Training:**
+  - **Reference boards:** each hand's best line teaches the model which option was chosen at every one of the player's decisions.
+  - **Verified video lines:** these count double.
+  - **Learning is cumulative:** pass the policy you have and get back the updated one.
+- **Only for the searching player:** in the Play engine, the combo tree and the bots, the policy steers only the searching player's options.
+- **Measured** with `ygoe-cli policy-bench train.ydk[,more.ydk] test.ydk`, which searches new hands at a small budget with and without the policy:
+
+| Trained on | Tested on | Budget | Average board | Hands better / worse |
+|---|---|---|---|---|
+| Angelechy (16 hands) | 12 new Angelechy hands | 300 | 0.800 → 0.847 | 12 / 0 |
+| Angelechy (16 hands) | 8 new Angelechy hands | 1200 | 0.801 → 0.849 | 7 / 0 |
+| Angelechy (16 hands) | 12 Elfnote hands (unseen deck) | 300 | 0.805 → 0.805 | 4 / 6 |
+| Angelechy + Elfnote (16 each) | 12 new Elfnote hands | 300 | 0.807 → 0.894 | 12 / 0 |
+| Angelechy + Elfnote (16 each) | 12 new Angelechy hands | 300 | 0.803 → 0.850 | 12 / 0 |
+
+- **JSON:** `analyze`, `tree`, live duels, `reference` and `lines` take `"policy": {...}`. `reference` and `lines` return the updated `"policy"`; with `"learn": false` they leave it alone.
+
 ### Video lines
 
 Combos read from videos (YGO Sandbox's Combos tab, or `tools/video_combo`) are replayed by the real rules, and the verified ones become combo pieces.

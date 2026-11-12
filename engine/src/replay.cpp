@@ -12,6 +12,7 @@
 #include "json.h"
 #include "reference.h"
 #include "search.h"
+#include "policy.h"
 
 namespace ygoe {
 
@@ -549,8 +550,9 @@ private:
 }  // namespace
 
 LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck& deck, const std::vector<VideoLine>& lines,
-                             const ReplayConfig& cfg, const std::function<void(int, int)>& progress) {
+                             const ReplayConfig& cfg, const std::function<void(int, int)>& progress, Policy* policy) {
 	LinesCheck res;
+	std::vector<PolicyExample> examples;
 	const auto hand_traps = likely_hand_traps(db, nullptr, 8);
 	int verified_lines = 0;
 	for(size_t li = 0; li < lines.size(); ++li) {
@@ -610,6 +612,10 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 			++verified_lines;
 			auto split = split_line(db, scripts, r.pool(), r.setup(), t, hand_traps);
 			add_to_library(res.library, split, lc.value);
+			if(policy) {
+				auto ex = policy->examples_from_line(scripts, r.pool(), r.setup(), best.responses, 0, 2.0f);
+				examples.insert(examples.end(), ex.begin(), ex.end());
+			}
 			lc.pieces = std::move(split.pieces);
 		}
 		res.lines.push_back(std::move(lc));
@@ -618,6 +624,10 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 		progress(static_cast<int>(lines.size()), static_cast<int>(lines.size()));
 	res.verified = verified_lines;
 	sort_library(res.library, 60);
+	if(policy && !examples.empty()) {
+		policy->train(examples);
+		res.policy = policy->to_json();
+	}
 	return res;
 }
 
@@ -648,7 +658,10 @@ std::string LinesCheck::to_json(const CardDB& db) const {
 		}
 		o << "],\"pieces\":" << pieces_json(db, l.pieces) << "}";
 	}
-	o << "],\"library\":" << library_json(db, library, std::max(1, verified)) << "}";
+	o << "],\"library\":" << library_json(db, library, std::max(1, verified));
+	if(!policy.empty())
+		o << ",\"policy\":" << policy;
+	o << "}";
 	return o.str();
 }
 

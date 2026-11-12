@@ -25,6 +25,7 @@ namespace ygoe {
 
 class ScriptCache;
 struct DuelSetup;
+namespace json { class Value; }
 struct Trajectory;
 
 // What the policy sees at a decision besides the options.
@@ -63,6 +64,7 @@ public:
 
 	std::string to_json() const;
 	bool from_json(const std::string& text);
+	bool from_value(const class json::Value& v);
 
 	// The decisions `player` made in a line, as examples. The line is replayed from `setup`
 	// (with `history` before it); minor and single-option decisions are skipped.
