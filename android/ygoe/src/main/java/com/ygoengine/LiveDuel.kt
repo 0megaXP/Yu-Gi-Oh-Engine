@@ -109,6 +109,9 @@ data class DuelPlace(val player: Int, val location: Int, val sequence: Int, val 
 /** A card changing place, in the order it happened (for animations). Code is 0 if unknown. */
 data class DuelMove(val code: Long, val from: DuelPlace, val to: DuelPlace)
 
+/** A card or effect activated at [place]; [afterMoves] of this state's [DuelState.moves] came before it. */
+data class DuelActivation(val code: Long, val place: DuelPlace, val afterMoves: Int)
+
 data class DuelState(
     val turn: Int,
     val turnPlayer: Int,
@@ -126,6 +129,8 @@ data class DuelState(
     val logPlayers: List<Int> = emptyList(),
     /** Cards that changed place since the previous state. */
     val moves: List<DuelMove> = emptyList(),
+    /** Cards and effects activated since the previous state, in order. */
+    val activations: List<DuelActivation> = emptyList(),
 )
 
 internal object DuelParse {
@@ -176,6 +181,11 @@ internal object DuelParse {
                 a.getJSONObject(i).let { m -> DuelMove(m.optLong("code"), place(m.optJSONArray("from")), place(m.optJSONArray("to"))) }
             }
         } ?: emptyList()
+        val activations = o.optJSONArray("activations")?.let { a ->
+            (0 until a.length()).map { i ->
+                a.getJSONObject(i).let { x -> DuelActivation(x.optLong("code"), place(x.optJSONArray("place")), x.optInt("after")) }
+            }
+        } ?: emptyList()
         return DuelState(
             turn = o.optInt("turn"),
             turnPlayer = o.optInt("turn_player"),
@@ -188,6 +198,7 @@ internal object DuelParse {
             log = log,
             logPlayers = logPlayers,
             moves = moves,
+            activations = activations,
         )
     }
 }

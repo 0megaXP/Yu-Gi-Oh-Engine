@@ -315,6 +315,7 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	log_.clear();
 	log_players_.clear();
 	moves_.clear();
+	activations_.clear();
 	chain_players_.clear();
 	chain_codes_.clear();
 
@@ -609,6 +610,7 @@ void Duel::log_message(uint8_t type, const uint8_t* begin, const uint8_t* end) {
 		auto li = read_loc(m);
 		chain_codes_.push_back(code);
 		chain_players_.push_back(li.con);
+		activations_.push_back({code, li.con, li.loc, li.seq, li.pos, static_cast<uint32_t>(moves_.size())});
 		push_log(li.con, who(li.con) + " activates " + name(code) +
 		               (chain_codes_.size() > 1 ? " (chain link " + std::to_string(chain_codes_.size()) + ")" : ""));
 		break;

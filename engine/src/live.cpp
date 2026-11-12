@@ -96,6 +96,7 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& d0, const
 	log_ = duel_->take_log();
 	log_players_ = duel_->take_log_players();
 	moves_ = duel_->take_moves();
+	activations_ = duel_->take_activations();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
 	ok_ = true;
@@ -120,6 +121,11 @@ bool LiveDuel::respond_internal(size_t index) {
 	log_.insert(log_.end(), lines.begin(), lines.end());
 	auto players = duel_->take_log_players();
 	log_players_.insert(log_players_.end(), players.begin(), players.end());
+	// Activations count the moves before them within this step; shift them past the moves already queued.
+	auto acts = duel_->take_activations();
+	for(auto& a : acts)
+		a.after += static_cast<uint32_t>(moves_.size());
+	activations_.insert(activations_.end(), acts.begin(), acts.end());
 	auto moves = duel_->take_moves();
 	moves_.insert(moves_.end(), moves.begin(), moves.end());
 	return true;
@@ -432,9 +438,16 @@ std::string LiveDuel::state_json() {
 		  << int(mv.from_loc) << "," << mv.from_seq << "," << mv.from_pos << "],\"to\":[" << int(mv.to_con) << ","
 		  << int(mv.to_loc) << "," << mv.to_seq << "," << mv.to_pos << "]}";
 	}
+	o << "],\"activations\":[";
+	for(size_t i = 0; i < activations_.size(); ++i) {
+		const Duel::Activation& a = activations_[i];
+		o << (i ? "," : "") << "{\"code\":" << db_.official_id(a.code) << ",\"place\":[" << int(a.con) << "," << int(a.loc)
+		  << "," << a.seq << "," << a.pos << "],\"after\":" << a.after << "}";
+	}
 	log_.clear();
 	log_players_.clear();
 	moves_.clear();
+	activations_.clear();
 	o << "]}";
 	return o.str();
 }

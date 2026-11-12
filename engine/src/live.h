@@ -55,6 +55,7 @@ private:
 	int human_ = -1;
 	std::vector<int8_t> log_players_;
 	std::vector<Duel::Move> moves_;
+	std::vector<Duel::Activation> activations_;
 	std::string last_move_;
 	// The bot's current plan: the expected sequence of decision labels (both players).
 	std::vector<Step> plan_;

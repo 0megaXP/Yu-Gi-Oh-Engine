@@ -139,6 +139,15 @@ public:
 		uint32_t from_seq, from_pos, to_seq, to_pos;
 	};
 	std::vector<Move> take_moves() { auto out = std::move(moves_); moves_.clear(); return out; }
+	// A card or effect being activated, for the activation effect (only collected with the log).
+	// `after` = how many of the moves taken together with it happened before the activation.
+	struct Activation {
+		uint32_t code;
+		uint8_t con, loc;
+		uint32_t seq, pos;
+		uint32_t after;
+	};
+	std::vector<Activation> take_activations() { auto out = std::move(activations_); activations_.clear(); return out; }
 	void clear_events() { events_.clear(); }
 	size_t steps() const { return steps_; }
 
@@ -169,6 +178,7 @@ private:
 	std::vector<std::string> log_;
 	std::vector<int8_t> log_players_;
 	std::vector<Move> moves_;
+	std::vector<Activation> activations_;
 	void push_log(int player, std::string line) {
 		log_.push_back(std::move(line));
 		log_players_.push_back(static_cast<int8_t>(player < 2 ? player : -1));
