@@ -507,6 +507,16 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 			double w = policy_weight(dd, o, duel.turn_player(), steps_this_turn);
 			if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
 				w *= 0.1;
+			// The other player answering an open window (a phase change, nothing on the chain)
+			// mostly throws a card away; a random opponent doing it often makes passing the turn
+			// look good ("they'll waste their hand trap and I continue").
+			if(dd.type == DecisionType::Chain && dd.player != duel.turn_player() && duel.chain_depth() == 0 &&
+			   o.kind == OptKind::Pass)
+				w *= 6;
+			// Nor does a hand trap answer that player's own effect.
+			if(dd.type == DecisionType::Chain && o.kind == OptKind::Activate && duel.chain_last_player() == dd.player &&
+			   eval_.role(dd.player, o.code).hand_trap)
+				w *= 0.05;
 			if(dd.player == me && plan_ahead(o) >= 0)
 				w = std::max(w, 1.0) * 25;
 			return w;
@@ -577,6 +587,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 						std::fill(tried.begin(), tried.end(), 0);
 				}
 				bool responded = false;
+				bool counted = false;  // availability counted for this visit
 				while(!responded) {
 					size_t idx = 0;
 					Node* parent = nullptr;
@@ -599,11 +610,15 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 							}
 							present.push_back(static_cast<size_t>(c - node->children.data()));
 						}
-						// Availability counts (ISMCTS): once per visit to this decision.
-						if(std::all_of(tried.begin(), tried.end(), [](char t) { return !t; }))
+						// Availability counts (ISMCTS): once per visit to this decision. (Options held
+						// back up front, like setting a hand trap, must not stop the count: with avail
+						// at 0 the exploration term vanishes and one unlucky playout buries a move.)
+						if(!counted) {
+							counted = true;
 							for(size_t i = 0; i < present.size(); ++i)
 								if(std::find(present.begin(), present.begin() + i, present[i]) == present.begin() + i)
 									++node->children[present[i]].avail;
+						}
 						std::vector<size_t> unvisited;
 						std::vector<double> uw;
 						double best = -std::numeric_limits<double>::infinity();
@@ -764,6 +779,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		t.join();
 
 	out.iterations = done.load();
+	if(std::getenv("YGOE_SEARCH_DEBUG"))
+		for(const auto& c : root->children)
+			std::fprintf(stderr, "  root child N=%d avail=%d bad=%d mean=%.3f hi=%.3f %s\n", c.N, c.avail, c.bad ? 1 : 0,
+			             c.N ? c.W / c.N : 0.0, c.hi, c.label.substr(0, 60).c_str());
 	if(guide_runs > 0 && std::getenv("YGOE_GUIDE_DEBUG"))
 		std::fprintf(stderr, "guide: %ld plans, %.0f%% of their steps followed (avg plan %.1f labels)\n", guide_runs.load(),
 		             100.0 * guide_done / std::max(1L, guide_steps.load()), double(guide_steps) / guide_runs);

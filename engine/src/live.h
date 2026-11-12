@@ -41,6 +41,10 @@ private:
 	bool respond_internal(size_t index);
 	void auto_resolve();
 	int choose(BotLevel level);
+	// Roots for the bot's search that hide the other player's hand: on turn 1 the cards still in
+	// their hand are re-drawn from their deck (keeping what they already used), each sample
+	// checked to replay to the same public position. Falls back to the true state.
+	std::vector<RootState> hidden_roots(uint8_t me, int samples);
 	std::string card_json(uint32_t code) const;
 
 	const CardDB& db_;

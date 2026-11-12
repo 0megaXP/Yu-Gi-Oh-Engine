@@ -95,6 +95,9 @@ struct Board {
 	uint16_t phase = 0;
 	// [player] -> cards in each location
 	std::array<std::vector<CardView>, 2> hand, mzone, szone, grave, banished, extra, deck;
+	// Lasting effects on each player shown as hints (descriptions, e.g. "Affected by Dominus
+	// Spark: cannot activate the effects of EARTH, ... monsters").
+	std::array<std::vector<uint64_t>, 2> hints;
 	int count_field(uint8_t p) const;
 };
 
@@ -150,6 +153,10 @@ public:
 	std::vector<Activation> take_activations() { auto out = std::move(activations_); activations_.clear(); return out; }
 	void clear_events() { events_.clear(); }
 	size_t steps() const { return steps_; }
+	// Links on the chain being built (0 = an open window: a phase change, after a summon...).
+	int chain_depth() const { return chain_depth_; }
+	// Who activated the last link on the chain (-1 when empty).
+	int chain_last_player() const { return chain_depth_ ? chain_last_player_ : -1; }
 
 	Board board(bool include_decks = false) const;
 	const CardDB& db() const { return db_; }
@@ -187,6 +194,9 @@ private:
 	std::vector<uint8_t> chain_players_;  // controller of each chain link
 	void log_message(uint8_t type, const uint8_t* p, const uint8_t* end);
 	std::vector<uint32_t> declare_pool_;
+	std::array<std::vector<uint64_t>, 2> player_hints_;
+	int chain_depth_ = 0;
+	int chain_last_player_ = -1;
 	size_t steps_ = 0;
 };
 

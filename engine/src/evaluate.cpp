@@ -1,6 +1,7 @@
 #include "evaluate.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include "ocgapi_constants.h"
@@ -16,6 +17,42 @@ Evaluator::Evaluator(const CardDB& db, const Deck& d0, const Deck& d1) : db_(db)
 	profile_[1] = profile_deck(db, d1);
 	sets_[0] = dominant_setcodes(db, d0);
 	sets_[1] = dominant_setcodes(db, d1);
+	const Deck* decks[2] = {&d0, &d1};
+	for(int p = 0; p < 2; ++p)
+		for(const auto* list : {&decks[p]->main, &decks[p]->extra})
+			for(uint32_t code : *list) {
+				const CardInfo* c = db.get(db.script_id(code));
+				if(!c || !(c->type & TYPE_MONSTER) || !(c->type & TYPE_EFFECT))
+					continue;
+				++effect_monsters_[p];
+				for(int bit = 0; bit < 8; ++bit)
+					if(c->attribute & (1u << bit))
+						++by_attribute_[p][bit];
+			}
+}
+
+uint32_t Evaluator::locked_attributes(uint64_t hint) const {
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		auto it = lock_cache_.find(hint);
+		if(it != lock_cache_.end())
+			return it->second;
+	}
+	std::string t = db_.description(hint);
+	for(auto& ch : t)
+		ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+	uint32_t mask = 0;
+	if(t.find("cannot activate") != std::string::npos && t.find("monster") != std::string::npos) {
+		static const std::pair<const char*, uint32_t> names[] = {
+			{"earth", ATTRIBUTE_EARTH}, {"water", ATTRIBUTE_WATER}, {"fire", ATTRIBUTE_FIRE}, {"wind", ATTRIBUTE_WIND},
+			{"light", ATTRIBUTE_LIGHT}, {"dark", ATTRIBUTE_DARK}, {"divine", ATTRIBUTE_DIVINE}};
+		for(auto& [n, bit] : names)
+			if(t.find(n) != std::string::npos)
+				mask |= bit;
+	}
+	std::lock_guard<std::mutex> lock(mu_);
+	lock_cache_[hint] = mask;
+	return mask;
 }
 
 const CardRole& Evaluator::role(uint8_t owner, uint32_t code) const {
@@ -33,12 +70,33 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		ev.score = winner == me ? 1.0 : (winner == 1 - me ? 0.0 : 0.5);
 		return ev;
 	}
+	double held_off[2] = {0, 0};  // interruptions the defending side holds
 	for(uint8_t p = 0; p < 2; ++p) {
 		const bool defending = p != next;
 		const DeckProfile& opp = profile_[1 - p];
 		double v = 0;
+		// Lasting locks on this player ("cannot activate the effects of EARTH... monsters for the
+		// rest of the Duel", from activating a Dominus trap from the hand): those monsters'
+		// interruptions are gone now, and every later turn loses that share of the deck.
+		uint32_t locked = 0;
+		for(uint64_t h : b.hints[p])
+			locked |= locked_attributes(h);
+		if(locked && effect_monsters_[p] > 0) {
+			int hit = 0;
+			// Share of the deck's effect monsters that lock covers (a monster with several
+			// attribute bits counts once per matching bit; attributes are single in practice).
+			for(int bit = 0; bit < 8; ++bit)
+				if(locked & (1u << bit))
+					hit += by_attribute_[p][bit];
+			v -= 3.0 * std::min(1.0, double(hit) / effect_monsters_[p]);
+		}
 		// Best interrupt a card offers from where it currently is.
 		auto interrupts_from = [&](const CardView& cv, uint32_t loc, const char* where) {
+			if(locked) {
+				const CardInfo* c = db_.get(cv.code);
+				if(c && (c->type & TYPE_MONSTER) && (c->attribute & locked) && !(cv.type & (TYPE_SPELL | TYPE_TRAP)))
+					return 0.0;
+			}
 			const CardRole& r = role(p, cv.code);
 			double best = 0, second = 0;
 			const Interrupt* best_in = nullptr;
@@ -59,6 +117,8 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 				total *= 0.35;  // on your own turn they mostly protect the combo
 			if(want_notes && best_in && defending)
 				ev.notes.push_back({p, cv.code, where, best_in->name(), total});
+			if(defending)
+				held_off[p] += total;
 			return total;
 		};
 		for(const auto& cv : b.hand[p]) {
@@ -109,6 +169,14 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		else
 			v += 2.5 * std::min(b.lp[p], 8000) / 8000.0 - (b.lp[p] <= 2000 ? 0.6 : 0.0);
 		ev.value[p] = v;
+	}
+	// A free turn: cards in the hand of the player about to take their turn are worth more when
+	// nothing on the other side can stop them. Without this, passing with a full hand looks
+	// almost even, and giving the opponent cards (e.g. through Mulcharmy Fuwalos draws) looks
+	// as costly as leaving them an open field.
+	if(next < 2) {
+		const uint8_t def = static_cast<uint8_t>(1 - next);
+		ev.value[next] += 0.45 * b.hand[next].size() * std::exp(-held_off[def] / 1.5);
 	}
 	ev.raw = ev.value[me] - ev.value[1 - me];
 	ev.score = 1.0 / (1.0 + std::exp(-ev.raw / 2.5));

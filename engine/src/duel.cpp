@@ -307,6 +307,9 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	decision_ = {};
 	ended_ = false;
 	winner_ = -1;
+	player_hints_[0].clear();
+	player_hints_[1].clear();
+	chain_depth_ = 0;
 	turn_ = 0;
 	turn_player_ = 0;
 	phase_ = 0;
@@ -474,6 +477,25 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 				last_hint_[player] = value;
 			break;
 		}
+		case MSG_CHAIN_END:
+			chain_depth_ = 0;
+			break;
+		case MSG_PLAYER_HINT: {
+			uint8_t player = m.get<uint8_t>();
+			uint8_t htype = m.get<uint8_t>();
+			uint64_t value = m.get<uint64_t>();
+			if(player < 2) {
+				auto& v = player_hints_[player];
+				if(htype == PHINT_DESC_ADD) {
+					v.push_back(value);
+				} else if(htype == PHINT_DESC_REMOVE) {
+					auto it = std::find(v.begin(), v.end(), value);
+					if(it != v.end())
+						v.erase(it);
+				}
+			}
+			break;
+		}
 		case MSG_WIN: {
 			uint8_t player = m.get<uint8_t>();
 			ended_ = true;
@@ -494,6 +516,8 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 			uint32_t code = m.get<uint32_t>();
 			auto li = read_loc(m);
 			events_.push_back({Event::Chaining, li.con, code, li.loc});
+			++chain_depth_;
+			chain_last_player_ = li.con;
 			break;
 		}
 		case MSG_CHAIN_NEGATED:
@@ -1140,6 +1164,7 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 
 Board Duel::board(bool include_decks) const {
 	Board b;
+	b.hints = player_hints_;
 	b.turn = turn_;
 	b.turn_player = turn_player_;
 	b.phase = phase_;

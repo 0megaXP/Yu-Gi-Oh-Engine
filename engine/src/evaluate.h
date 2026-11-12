@@ -40,6 +40,12 @@ private:
 	const CardDB& db_;
 	DeckProfile profile_[2];
 	std::vector<uint16_t> sets_[2];
+	// Effect monsters in each deck (Main + Extra) by attribute bit, for lasting locks.
+	int effect_monsters_[2] = {0, 0};
+	int by_attribute_[2][8] = {};
+	// Attributes whose monster effects a hint locks (0 if the hint is not such a lock).
+	uint32_t locked_attributes(uint64_t hint) const;
+	mutable std::unordered_map<uint64_t, uint32_t> lock_cache_;
 	mutable std::mutex mu_;
 	mutable std::unordered_map<uint32_t, CardRole> roles_[2];
 };

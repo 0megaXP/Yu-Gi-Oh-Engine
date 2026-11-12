@@ -149,6 +149,70 @@ bool LiveDuel::respond(size_t index) {
 	return true;
 }
 
+std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
+	std::vector<RootState> roots;
+	const uint8_t opp = static_cast<uint8_t>(1 - me);
+	if(duel_->turn() != 1)
+		return {{setup_, history_}};
+	const Board truth = duel_->board();
+	auto multiset = [](const std::vector<CardView>& v) {
+		std::vector<uint32_t> out;
+		for(const auto& c : v)
+			if(c.code)
+				out.push_back(c.code);
+		std::sort(out.begin(), out.end());
+		return out;
+	};
+	auto public_of = [&](const Board& b, uint8_t p) {
+		std::vector<uint32_t> out;
+		for(const auto* z : {&b.mzone[p], &b.szone[p], &b.grave[p], &b.banished[p]})
+			for(const auto& c : *z)
+				if(c.code)
+					out.push_back(c.code);
+		std::sort(out.begin(), out.end());
+		return out;
+	};
+	const auto my_hand = multiset(truth.hand[me]);
+	const auto their_public = public_of(truth, opp);
+	const auto my_public = public_of(truth, me);
+	const auto& ps = setup_.players[opp];
+	// On turn 1 everything of theirs outside the hand and deck came from their opening hand.
+	std::vector<uint32_t> used;  // official ids
+	std::vector<uint32_t> pool = ps.hand;
+	pool.insert(pool.end(), ps.main.begin(), ps.main.end());
+	for(uint32_t sid : their_public)
+		for(size_t i = 0; i < pool.size(); ++i)
+			if(db_.script_id(pool[i]) == sid) {
+				used.push_back(pool[i]);
+				pool.erase(pool.begin() + static_cast<long>(i));
+				break;
+			}
+	if(used.size() != their_public.size() || used.size() > ps.hand.size())
+		return {{setup_, history_}};
+	roots.push_back({setup_, history_});  // the true hand is one of the possibilities
+	Duel check(db_, scripts_);
+	check.set_declare_pool(declare_pool(sc_));
+	for(int attempt = 0; attempt < samples * 3 && static_cast<int>(roots.size()) < samples; ++attempt) {
+		std::vector<uint32_t> rest = pool;
+		std::shuffle(rest.begin(), rest.end(), rng_);
+		DuelSetup s = setup_;
+		auto& o = s.players[opp];
+		o.hand = used;
+		size_t need = ps.hand.size() - used.size();
+		o.hand.insert(o.hand.end(), rest.begin(), rest.begin() + static_cast<long>(need));
+		o.main.assign(rest.begin() + static_cast<long>(need), rest.end());
+		if(!check.replay(s, history_))
+			continue;
+		Board b = check.board();
+		if(multiset(b.hand[me]) != my_hand || public_of(b, opp) != their_public || public_of(b, me) != my_public ||
+		   b.hand[opp].size() != truth.hand[opp].size() || check.decision().player != duel_->decision().player ||
+		   check.decision().options.size() != duel_->decision().options.size())
+			continue;
+		roots.push_back({std::move(s), history_});
+	}
+	return roots;
+}
+
 int LiveDuel::choose(BotLevel level) {
 	const Decision& d = duel_->decision();
 	if(d.options.empty())
@@ -176,7 +240,8 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.horizon_turns = 1;
 	cfg.cancel = &cancel_;
 	cfg.guide = guides_[d.player];
-	std::vector<RootState> roots{{setup_, history_}};
+	// The bot does not see the other player's hand: on turn 1 its search samples it.
+	std::vector<RootState> roots = hidden_roots(d.player, 8);
 	auto out = searcher_->run(roots, d.player, cfg);
 	if(out.moves.empty())
 		return 0;
@@ -227,9 +292,10 @@ int LiveDuel::choose(BotLevel level) {
 	std::vector<std::pair<const MoveStats*, Trajectory>> repaired;
 	auto repair = [&](const MoveStats& m) {
 		Trajectory t = m.best.front();
-		searcher_->defer_sets(roots[0], t, d.player, cfg.horizon_turns);
-		searcher_->drop_idle_summons(roots[0], t, d.player, cfg.horizon_turns);
-		searcher_->drop_idle_responses(roots[0], t, d.player, cfg.horizon_turns);
+		const RootState& r = roots[std::min(t.root, roots.size() - 1)];
+		searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
+		searcher_->drop_idle_summons(r, t, d.player, cfg.horizon_turns);
+		searcher_->drop_idle_responses(r, t, d.player, cfg.horizon_turns);
 		return t;
 	};
 	const bool check_boards = level == BotLevel::Strong && d.type == DecisionType::Idle &&
@@ -246,7 +312,7 @@ int LiveDuel::choose(BotLevel level) {
 		double best_total = -1;
 		for(auto& [own, m] : ranked) {
 			Trajectory t = repair(*m);
-			RootState after{setup_, history_};
+			RootState after{roots[std::min(t.root, roots.size() - 1)].setup, history_};
 			after.history.insert(after.history.end(), t.responses.begin(), t.responses.end());
 			SearchConfig vc;
 			vc.iterations = 250;
@@ -287,7 +353,7 @@ int LiveDuel::choose(BotLevel level) {
 			for(auto& l : describe(t, d.player, true))
 				fprintf(stderr, "      %s\n", l.substr(0, 140).c_str());
 			Board fb;
-			if(searcher_->final_board(roots[0], t, fb)) {
+			if(searcher_->final_board(roots[std::min(t.root, roots.size() - 1)], t, fb)) {
 				auto ev = eval_->evaluate(fb, d.player, 1 - d.player, false, -1, true);
 				fprintf(stderr, "      values me %.2f opp %.2f\n", ev.value[d.player], ev.value[1 - d.player]);
 				for(int pl = 0; pl < 2; ++pl) {
@@ -314,6 +380,28 @@ int LiveDuel::choose(BotLevel level) {
 		plan_player_ = d.player;
 		if(!plan_.empty() && plan_.front().player == d.player)
 			want = plan_.front().label;
+		// Still setting first (the reordered line did not replay): play the plan's next
+		// non-Set action of this Main Phase now, and search again afterwards.
+		if(d.type == DecisionType::Idle && want.rfind("Set ", 0) == 0) {
+			for(size_t k = 1; k < plan_.size(); ++k) {
+				const Step& s = plan_[k];
+				if(s.player != d.player || s.type != DecisionType::Idle)
+					continue;
+				if(s.label.rfind("Go to ", 0) == 0)
+					break;
+				if(s.label.rfind("Set ", 0) == 0)
+					continue;
+				bool available = false;
+				for(const auto& o : d.options)
+					available |= o.label == s.label;
+				if(available) {
+					want = s.label;
+					plan_.clear();
+					plan_pos_ = 0;
+				}
+				break;
+			}
+		}
 	}
 	int index = 0;
 	for(size_t i = 0; i < d.options.size(); ++i)

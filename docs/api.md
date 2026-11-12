@@ -104,7 +104,10 @@ duel.close()
 - The bot comes in three levels:
   - **Easy:** playout priorities only.
   - **Normal** and **Strong:** search the rest of the turn from the exact current state (about 350 and 1200 iterations), then follow that plan until play differs from it.
-- The bot plays with full information.
+- **What the bot knows:**
+  - **Turn 1:** the bot does not see the other player's hand. Its search samples up to 8 possible hands from their deck, keeping the cards they have already used, and checks that each sample replays to the same public position.
+  - **Later turns:** it still searches the true position. Rebuilding a mid-duel position with a different hidden hand isn't reliable yet.
+- **Chain windows:** the bot uses a card only for a clear gain over not responding, and it never follows moves its own search imagined for the other side.
 - Each state carries the log lines since the previous one, `logPlayers` (who each line is about: 0, 1 or −1) and `moves`: every card that changed place, with `from`/`to` as player, location (ygopro `LOCATION_*` bits), slot and position, in order. The app uses them to colour the log and animate cards. `activations` lists each card or effect activated (`code`, `place`, and `after`: how many of `moves` happened before it).
 - On the desktop, `ygoe-cli duel a.ydk b.ydk --bot0 strong --bot1 easy` plays bots against each other and prints the log.
 
