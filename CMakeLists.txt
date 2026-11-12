@@ -46,6 +46,7 @@ add_library(ygoe STATIC
   engine/src/live.cpp
   engine/src/reference.cpp
   engine/src/replay.cpp
+  engine/src/policy.cpp
   engine/src/combo.cpp
   engine/src/pieces.cpp
   engine/src/api.cpp)

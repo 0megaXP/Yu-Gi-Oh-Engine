@@ -19,6 +19,7 @@
 namespace ygoe {
 
 class PieceGuide;
+class Policy;
 
 // One concrete state to search from: a duel setup plus the responses already played.
 struct RootState {
@@ -55,6 +56,8 @@ struct SearchConfig {
 	// is steered along a plan chained from these pieces, which the search then improves on.
 	std::shared_ptr<const PieceGuide> guide;
 	double guided_share = 0.7;
+	// Learned move policy (policy.h): multiplies the playout prior of every option.
+	std::shared_ptr<const Policy> policy;
 };
 
 struct MoveStats {

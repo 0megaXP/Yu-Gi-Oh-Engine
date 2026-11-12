@@ -27,6 +27,7 @@
 #include "side.h"
 #include "pieces.h"
 #include "reference.h"
+#include "policy.h"
 #include "search.h"
 
 using namespace ygoe;
@@ -264,6 +265,96 @@ int main(int argc, char** argv) {
 		return cmd_profile(db, a);
 	if(cmd == "side")
 		return cmd_side(db, scripts, a);
+	if(cmd == "policy-bench") {
+		// policy-bench train.ydk[,more.ydk] test.ydk [--train-hands N --train-iterations K --hands H
+		//   --iterations I --seed S --save policy.json --load policy.json]
+		// Learns a move policy from deep searches of the training decks, then searches the test
+		// deck's hands at a small budget with and without it.
+		if(a.pos.size() < 3)
+			return usage();
+		Policy policy(db);
+		if(a.has("load")) {
+			std::ifstream f(a.get("load", ""));
+			std::stringstream ss;
+			ss << f.rdbuf();
+			if(!policy.from_json(ss.str())) {
+				std::fprintf(stderr, "can't read %s\n", a.get("load", "").c_str());
+				return 1;
+			}
+		}
+		int train_hands = std::stoi(a.get("train-hands", "16"));
+		int train_iters = std::stoi(a.get("train-iterations", "1500"));
+		std::vector<PolicyExample> examples;
+		std::string list = a.pos[1];
+		for(size_t at = 0; at <= list.size();) {
+			size_t comma = list.find(',', at);
+			std::string path = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+			at = comma == std::string::npos ? list.size() + 1 : comma + 1;
+			if(path.empty() || train_hands <= 0)
+				continue;
+			Deck d;
+			if(!load_ydk(path, d, &err)) {
+				std::fprintf(stderr, "%s\n", err.c_str());
+				return 1;
+			}
+			auto ex = self_play_examples(db, scripts, d, policy, train_hands, train_iters, std::stoull(a.get("seed", "900")) + 17);
+			std::printf("%s: %zu decisions from %d hands\n", path.c_str(), ex.size(), train_hands);
+			examples.insert(examples.end(), ex.begin(), ex.end());
+		}
+		if(!examples.empty()) {
+			auto [before, after] = policy.train(examples);
+			std::printf("trained on %zu decisions: log-loss %.3f -> %.3f\n", examples.size(), before, after);
+		}
+		if(a.has("save")) {
+			std::ofstream o(a.get("save", ""));
+			o << policy.to_json();
+		}
+		Deck deck;
+		if(!load_ydk(a.pos[2], deck, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		auto shared = std::make_shared<Policy>(policy);
+		int hands = std::stoi(a.get("hands", "10"));
+		int iters = std::stoi(a.get("iterations", "300"));
+		uint64_t seed = std::stoull(a.get("seed", "900"));
+		Evaluator eval(db, deck, deck);
+		eval.set_profile(0, generic_profile());
+		eval.set_profile(1, generic_profile());
+		double sum[2] = {0, 0};
+		int wins = 0, ties = 0;
+		for(int h = 0; h < hands; ++h) {
+			Scenario sc;
+			sc.decks[0] = sc.decks[1] = deck;
+			sc.hand_known[0] = false;
+			sc.hand_size[0] = 5;
+			sc.hand_known[1] = true;
+			sc.seed = seed + 100003 + h * 7919;  // not the training hands
+			Searcher searcher(db, scripts, eval, declare_pool(sc));
+			RootState root{make_setup(sc, 0), {}};
+			double r[2];
+			for(int g = 0; g < 2; ++g) {
+				SearchConfig cfg;
+				cfg.iterations = iters;
+				cfg.seconds = 120;
+				cfg.horizon_turns = 1;
+				if(g)
+					cfg.policy = shared;
+				auto out = searcher.run({root}, 0, cfg);
+				r[g] = 0;
+				for(auto& m : out.my_moves)
+					for(auto& t : m.best)
+						r[g] = std::max(r[g], t.reward);
+				sum[g] += r[g];
+			}
+			std::printf("hand %2d: rules %.3f  learned %.3f\n", h, r[0], r[1]);
+			wins += r[1] > r[0] + 0.005;
+			ties += std::abs(r[1] - r[0]) <= 0.005;
+		}
+		std::printf("average: rules %.3f  learned %.3f; learned better on %d, equal %d, worse %d of %d\n", sum[0] / hands,
+		            sum[1] / hands, wins, ties, hands - wins - ties, hands);
+		return 0;
+	}
 	if(cmd == "pieces-bench") {
 		// pieces-bench deck.ydk reference.json [--hands N --iterations K --seed S]
 		// Searches random hands going first with and without the reference's combo pieces.

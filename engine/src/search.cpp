@@ -1,4 +1,5 @@
 #include "search.h"
+#include "policy.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -505,6 +506,9 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		// tried last (still possible: some lines need the body, e.g. as Synchro material).
 		auto weight = [&](const Decision& dd, const Option& o) {
 			double w = policy_weight(dd, o, duel.turn_player(), steps_this_turn);
+			// learned from this deck's own good lines, so only for the searching player's options
+			if(cfg.policy && dd.player == me)
+				w *= cfg.policy->factor(dd, o, PolicyContext{duel.turn_player(), steps_this_turn, duel.chain_depth()});
 			if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
 				w *= 0.1;
 			// The other player answering an open window (a phase change, nothing on the chain)
