@@ -520,6 +520,7 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 			events_.push_back({Event::Chaining, li.con, code, li.loc});
 			++chain_depth_;
 			chain_last_player_ = li.con;
+			chain_last_code_ = code;
 			break;
 		}
 		case MSG_CHAIN_NEGATED:

@@ -157,6 +157,8 @@ public:
 	int chain_depth() const { return chain_depth_; }
 	// Who activated the last link on the chain (-1 when empty).
 	int chain_last_player() const { return chain_depth_ ? chain_last_player_ : -1; }
+	// The card of the last link on the chain (script id, 0 when empty).
+	uint32_t chain_last_code() const { return chain_depth_ ? chain_last_code_ : 0; }
 
 	Board board(bool include_decks = false) const;
 	const CardDB& db() const { return db_; }
@@ -197,6 +199,7 @@ private:
 	std::array<std::vector<uint64_t>, 2> player_hints_;
 	int chain_depth_ = 0;
 	int chain_last_player_ = -1;
+	uint32_t chain_last_code_ = 0;
 	size_t steps_ = 0;
 };
 

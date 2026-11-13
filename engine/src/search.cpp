@@ -476,7 +476,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		Duel d(db_, scripts_);
 		d.set_declare_pool(pool_);
 		if(d.replay(roots[0].setup, roots[0].history))
-			resources = resources_of(d.board(), me);
+			resources = resources_of(db_, d.board(), me);
 	}
 
 	auto worker = [&](unsigned tid) {

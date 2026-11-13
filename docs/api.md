@@ -64,6 +64,7 @@ A line is split into sub-combos ("pieces"):
   - `leaves`: what stays at the end;
   - `stoppedBy`: the hand traps that can respond during it, each with the first step it can answer. These come from a second replay with the hand traps in the opponent's hand.
 - **Starters:** a piece that needs nothing from earlier pieces is a `starter`.
+- **Conditions:** a piece can carry `under` (`"mulcharmy"`, `"droll"`): it was played while the opponent's Mulcharmy (Fuwalos, Purulia...) or Droll & Lock Bird was active. Pass `under` on a `VideoLineInput` to tag its pieces. When the engine sees one of those in force (from its player hint), plans built from pieces made for it are tried first, and pieces for a condition that isn't there are tried less.
 - **Library:** reference end boards also return `ref.library`, the pieces merged across the sample lines by what they need: starters first, then the most common.
 - **Using the library:** pass `ref.libraryJson` as `library` to `analyze` (in `AnalysisRequest`) or `comboTree`, or per player as `libraries` to `newDuel`.
   - **How the search uses it:** in 70% of iterations the search is steered along a plan built by chaining pieces. A plan starts with a piece the current cards allow, then adds pieces whose needs are met by what is left in hand plus what earlier pieces gave. Pieces from different lines get recombined this way.
@@ -179,6 +180,9 @@ duel.close()
   - **Turn 1:** the bot does not see the other player's hand. Its search samples up to 8 possible hands from their deck, keeping the cards they have already used, and checks that each sample replays to the same public position.
   - **Later turns:** it still searches the true position. Rebuilding a mid-duel position with a different hidden hand isn't reliable yet.
 - **Chain windows:** the bot uses a card only for a clear gain over not responding, and it never follows moves its own search imagined for the other side.
+- **Deck knowledge:** `newDuel(knowledge = listOf(k0, k1))` describes each player's deck from past games (`DeckKnowledge(chokes, plays)`), and the other player's bot uses it to time its interruptions:
+  - on a **choke point** (a card where that deck is usually stopped), it interrupts even at a small cost;
+  - when its hand traps plus Set interruptions are at least the **activations that deck usually has left this turn**, it stops the first play instead of saving them for later.
 - Each state carries the log lines since the previous one, `logPlayers` (who each line is about: 0, 1 or −1) and `moves`: every card that changed place, with `from`/`to` as player, location (ygopro `LOCATION_*` bits), slot and position, in order. The app uses them to colour the log and animate cards. `activations` lists each card or effect activated (`code`, `place`, and `after`: how many of `moves` happened before it).
 - On the desktop, `ygoe-cli duel a.ydk b.ydk --bot0 strong --bot1 easy` plays bots against each other and prints the log.
 

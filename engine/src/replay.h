@@ -34,6 +34,7 @@ struct VideoLine {
 	std::vector<uint32_t> hand;        // official passcodes
 	std::vector<VideoStep> steps;
 	std::vector<uint32_t> end_board;   // the video's field cards at the end, official passcodes
+	uint8_t under = 0;                 // played under a Mulcharmy / Droll (kUnder* bits): its pieces carry it
 };
 
 struct LineCheck {

@@ -19,6 +19,15 @@
 
 namespace ygoe {
 
+// Conditions a line was played under (ComboPiece::under, PieceResources::under).
+enum : uint8_t {
+	kUnderMulcharmy = 1,  // the opponent's Mulcharmy (Fuwalos, Purulia...): they draw when you summon
+	kUnderDroll = 2,      // Droll & Lock Bird: no more adding cards from the Deck this turn
+};
+// The JSON names of those bits ("mulcharmy", "droll").
+std::vector<std::string> under_names(uint8_t under);
+uint8_t under_bits(const std::vector<std::string>& names);
+
 struct PieceCard {
 	uint32_t code = 0;    // script id (the JSON gives the official passcode)
 	std::string where;    // "hand", "field", "gy", "banished"
@@ -35,6 +44,9 @@ struct ComboPiece {
 	// Hand traps that can respond during it (script id, first step of the piece they can answer),
 	// earliest first.
 	std::vector<std::pair<uint32_t, int>> stopped_by;
+	// Played while the opponent's draw / search punisher was active (kUnder* bits): a line for
+	// those turns, e.g. one that plays through Mulcharmy Fuwalos or Droll & Lock Bird.
+	uint8_t under = 0;
 	bool starter() const { return needs_earlier.empty(); }
 };
 
@@ -74,8 +86,9 @@ struct PieceResources {
 	std::vector<uint32_t> hand;
 	std::vector<uint32_t> other;
 	bool normal_summon_used = false;
+	uint8_t under = 0;  // conditions active right now (kUnder* bits)
 };
-PieceResources resources_of(const Board& b, uint8_t player);
+PieceResources resources_of(const CardDB& db, const Board& b, uint8_t player);
 
 // Chains library pieces into plans for a search to try first.
 //

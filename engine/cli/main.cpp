@@ -408,7 +408,7 @@ int main(int argc, char** argv) {
 			}
 			Duel d(db, scripts);
 			d.replay(root.setup, {});
-			auto res = resources_of(d.board(), 0);
+			auto res = resources_of(db, d.board(), 0);
 			std::printf("hand %2d: plain %.3f  pieces %.3f  (%zu playable)\n", h, r[0], r[1], guide->playable(res).size());
 			wins += r[1] > r[0] + 0.005;
 			ties += std::abs(r[1] - r[0]) <= 0.005;

@@ -322,12 +322,24 @@ data class VideoLineInput(
     val hand: List<Long>,
     val steps: List<VideoStepInput>,
     val endBoard: List<Long>,
+    /** Played under the opponent's "mulcharmy" (Fuwalos, Purulia) or "droll": its pieces are then tried first in such turns. */
+    val under: List<String> = emptyList(),
 ) {
     internal fun toJson() = JSONObject()
         .put("id", id)
         .put("hand", JSONArray(hand))
         .put("steps", JSONArray(steps.map { JSONObject().put("action", it.action).put("code", it.code).put("detail", it.detail) }))
         .put("end_board", JSONArray(endBoard))
+        .put("under", JSONArray(under))
+}
+
+/**
+ * What is known about a deck from past games, for the other player's bot ([YgoEngine.newDuel]):
+ * the cards where it is usually stopped ([chokes], passcodes) and its average activations in a
+ * turn ([plays], 0 if unknown).
+ */
+data class DeckKnowledge(val chokes: List<Long>, val plays: Double) {
+    internal fun toJson() = JSONObject().put("chokes", JSONArray(chokes)).put("plays", plays)
 }
 
 /** A video line replayed by the rules. */

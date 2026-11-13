@@ -36,6 +36,15 @@ public:
 	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
 	// Learned move policy (policy.h) for both bots' searches.
 	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
+	// What is known about a player's deck from past games (replays): the cards where it is
+	// usually stopped, and how many plays it makes in a turn. The other bot uses it to time its
+	// interruptions: on a choke point, or straight away when it holds as many interruptions as
+	// that deck has plays left.
+	struct DeckKnowledge {
+		std::vector<uint32_t> chokes;  // script ids
+		double plays = 0;              // average activations in one of its turns; 0 = unknown
+	};
+	void set_knowledge(int player, DeckKnowledge k) { knowledge_[player & 1] = std::move(k); }
 
 	const Duel& duel() const { return *duel_; }
 
@@ -72,6 +81,7 @@ private:
 	int plan_player_ = -1;
 	std::shared_ptr<const PieceGuide> guides_[2];
 	std::shared_ptr<const class Policy> policy_;
+	DeckKnowledge knowledge_[2];
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

@@ -383,11 +383,35 @@ std::string piece_body(const CardDB& db, const ComboPiece& p) {
 		c.pop_back();
 		o << (i ? "," : "") << c << ",\"step\":" << p.stopped_by[i].second << "}";
 	}
+	o << "],\"under\":[";
+	auto names = under_names(p.under);
+	for(size_t i = 0; i < names.size(); ++i)
+		o << (i ? "," : "") << quote(names[i]);
 	o << "]";
 	return o.str();
 }
 
 }  // namespace
+
+std::vector<std::string> under_names(uint8_t under) {
+	std::vector<std::string> out;
+	if(under & kUnderMulcharmy)
+		out.push_back("mulcharmy");
+	if(under & kUnderDroll)
+		out.push_back("droll");
+	return out;
+}
+
+uint8_t under_bits(const std::vector<std::string>& names) {
+	uint8_t b = 0;
+	for(const auto& n : names) {
+		if(n == "mulcharmy" || n.rfind("mulcharmy", 0) == 0 || n == "fuwalos" || n == "purulia")
+			b |= kUnderMulcharmy;
+		if(n == "droll")
+			b |= kUnderDroll;
+	}
+	return b;
+}
 
 std::string pieces_json(const CardDB& db, const std::vector<ComboPiece>& pieces) {
 	std::string o = "[";
@@ -439,6 +463,12 @@ std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) 
 		p.leaves = placed(o["leaves"]);
 		for(const auto& c : o["stopped_by"].items())
 			p.stopped_by.push_back({sid(c), static_cast<int>(c["step"].integer())});
+		{
+			std::vector<std::string> u;
+			for(const auto& s : o["under"].items())
+				u.push_back(s.str());
+			p.under = under_bits(u);
+		}
 		lp.count = static_cast<int>(o["count"].integer(1));
 		lp.value = o["value"].num(0);
 		lp.best = lp.value;
@@ -448,8 +478,18 @@ std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) 
 	return out;
 }
 
-PieceResources resources_of(const Board& b, uint8_t p) {
+PieceResources resources_of(const CardDB& db, const Board& b, uint8_t p) {
 	PieceResources r;
+	// Draw / search punishers in force, from the player hints they leave: a Mulcharmy belongs to
+	// the opponent; Droll & Lock Bird hits both players.
+	for(int side = 0; side < 2; ++side)
+		for(uint64_t h : b.hints[side]) {
+			const std::string name = db.name(static_cast<uint32_t>(h >> 20));
+			if(side != p && name.rfind("Mulcharmy", 0) == 0)
+				r.under |= kUnderMulcharmy;
+			if(name.rfind("Droll", 0) == 0)
+				r.under |= kUnderDroll;
+		}
 	for(const auto& c : b.hand[p])
 		if(c.code)
 			r.hand.push_back(c.code);
@@ -519,6 +559,12 @@ std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt1993
 			double x = (1.0 + lp.count) * (1.0 + std::max(0.0, lp.value) / 5.0);
 			if(lp.piece.gives.empty() && lp.piece.leaves.empty())
 				x *= 0.2;
+			// Lines played under the same punisher first (they were made for it); lines for a
+			// punisher that isn't there are a fallback.
+			if(r.under)
+				x *= (lp.piece.under & r.under) ? 4.0 : lp.piece.under ? 0.5 : 0.6;
+			else if(lp.piece.under)
+				x *= 0.5;
 			// Use what earlier pieces gave before starting something unrelated.
 			if(n > 0 && !lp.piece.needs_earlier.empty())
 				x *= 3;

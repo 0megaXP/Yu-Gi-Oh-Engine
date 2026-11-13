@@ -742,6 +742,8 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 				if(pd.replay(r.setup(), part.responses)) {
 					pb = pd.board();
 					auto split = split_line(db, scripts, r.pool(), r.setup(), part, hand_traps);
+					for(auto& p : split.pieces)
+						p.under = line.under;
 					add_to_library(res.library, split, board_value(db, deck, pb, 0));
 					lc.pieces = std::move(split.pieces);
 					if(policy) {
@@ -755,6 +757,8 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 			++verified_lines;
 			lc.verified_steps = lc.steps_matched;
 			auto split = split_line(db, scripts, r.pool(), r.setup(), t, hand_traps);
+			for(auto& p : split.pieces)
+				p.under = line.under;
 			add_to_library(res.library, split, lc.value);
 			if(policy) {
 				auto ex = policy->examples_from_line(scripts, r.pool(), r.setup(), best.responses, 0, 2.0f);

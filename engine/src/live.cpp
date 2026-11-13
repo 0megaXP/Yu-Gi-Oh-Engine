@@ -273,6 +273,37 @@ int LiveDuel::choose(BotLevel level) {
 				if(o.label == use->label && ((o.loc & LOCATION_HAND) || d.player != duel_->turn_player()))
 					margin = 0.03;
 		}
+		// Answering the turn player's combo with what was learned about their deck: stop a known
+		// choke point now, and stop the first play when the interruptions in hand / set are as
+		// many as the plays that deck usually has left (they won't run out of plays first).
+		const uint8_t opp = static_cast<uint8_t>(1 - d.player);
+		const DeckKnowledge& know = knowledge_[opp];
+		const uint32_t top = duel_->chain_last_code();
+		if(use && d.type == DecisionType::Chain && duel_->turn_player() == opp && top &&
+		   duel_->chain_last_player() == opp) {
+			if(std::find(know.chokes.begin(), know.chokes.end(), top) != know.chokes.end()) {
+				margin = -0.01;
+			} else if(know.plays > 0) {
+				int theirs = 0;  // their activations this turn so far
+				const auto& ev = duel_->events();
+				for(size_t i = ev.size(); i-- > 0;) {
+					if(ev[i].kind == Event::NewTurn)
+						break;
+					if(ev[i].kind == Event::Chaining && ev[i].player == opp)
+						++theirs;
+				}
+				Board b = duel_->board();
+				int mine = 0;
+				for(const auto& c : b.hand[d.player])
+					if(c.code && eval_->role(d.player, c.code).hand_trap)
+						++mine;
+				for(const auto& c : b.szone[d.player])
+					if(c.code && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
+						++mine;
+				if(mine >= know.plays - theirs)
+					margin = 0.0;
+			}
+		}
 		pick = pass;
 		if(!pass || (use && use->mean > pass->mean + margin))
 			pick = use ? use : &out.moves.front();

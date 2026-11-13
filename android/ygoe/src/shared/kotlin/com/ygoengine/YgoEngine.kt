@@ -82,6 +82,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         human: Int = -1,
         /** Learned move policy for the bots' searches ([ReferenceResult.policyJson]), or null. */
         policy: String? = null,
+        /** Per player, what is known about their deck from past games (the other bot uses it), or null. */
+        knowledge: List<DeckKnowledge?> = listOf(null, null),
     ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
@@ -90,6 +92,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
                 .put("human", human)
                 .put("libraries", org.json.JSONArray(libraries.map { l -> l?.let { org.json.JSONArray(it) } ?: JSONObject.NULL }))
                 .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
+                .put("knowledge", org.json.JSONArray(knowledge.map { it?.toJson() ?: JSONObject.NULL }))
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
             LiveDuel(d)

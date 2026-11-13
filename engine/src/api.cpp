@@ -350,6 +350,17 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 		if(req["libraries"][p].is_array())
 			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p])));
 	live->set_policy(read_policy(req["policy"], db_));
+	// {"knowledge": [{"chokes": [passcodes], "plays": 6.5}, null]}: per player, about their deck
+	for(int p = 0; p < 2; ++p) {
+		const Value& k = req["knowledge"][p];
+		if(!k.is_object())
+			continue;
+		LiveDuel::DeckKnowledge dk;
+		for(const auto& c : k["chokes"].items())
+			dk.chokes.push_back(db_.script_id(static_cast<uint32_t>(c.integer())));
+		dk.plays = k["plays"].num(0);
+		live->set_knowledge(p, std::move(dk));
+	}
 	return live;
 }
 
@@ -400,6 +411,12 @@ std::string Engine::video_lines(const std::string& request) {
 			v.steps.push_back({s["action"].str(), static_cast<uint32_t>(s["code"].integer(0)), s["detail"].str()});
 		for(const auto& c : l["end_board"].items())
 			v.end_board.push_back(static_cast<uint32_t>(c.integer()));
+		{
+			std::vector<std::string> u;
+			for(const auto& s : l["under"].items())
+				u.push_back(s.str());
+			v.under = under_bits(u);
+		}
 		lines.push_back(std::move(v));
 	}
 	if(lines.empty())
