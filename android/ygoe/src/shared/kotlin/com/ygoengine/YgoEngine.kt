@@ -1,6 +1,5 @@
 package com.ygoengine
 
-import android.content.Context
 import java.io.Closeable
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -28,11 +27,6 @@ import org.json.JSONObject
 class YgoEngine private constructor(private var handle: Long) : Closeable {
 
     companion object {
-        /** Installs the bundled pack (first run only) and loads the engine. */
-        suspend fun open(context: Context): YgoEngine = withContext(Dispatchers.IO) {
-            open(EnginePack.install(context.applicationContext))
-        }
-
         /** Loads the engine from a folder holding scripts.pack and the .tsv data files. Blocking. */
         fun open(packDir: File): YgoEngine {
             val h = YgoNative.create(packDir.absolutePath, packDir.absolutePath)

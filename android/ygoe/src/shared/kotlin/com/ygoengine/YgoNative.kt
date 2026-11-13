@@ -3,7 +3,10 @@ package com.ygoengine
 /** Raw JNI bindings (engine/jni/ygoe_jni.cpp). Use [YgoEngine] instead. */
 internal object YgoNative {
     init {
-        System.loadLibrary("ygoe_jni")
+        // Android finds libygoe_jni.so in the APK. A desktop app sets ygoe.library to the full
+        // path of the library it ships (ygoe_jni.dll on Windows) before the engine is first used.
+        val path = System.getProperty("ygoe.library")
+        if (path != null) System.load(path) else System.loadLibrary("ygoe_jni")
     }
 
     @JvmStatic external fun create(dataDir: String, scriptsDir: String): Long

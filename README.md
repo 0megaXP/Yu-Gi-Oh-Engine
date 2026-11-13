@@ -152,3 +152,11 @@ data/passcode_map.tsv  official passcodes → EDOPro ids for cards still on pre-
 ## License note
 
 ygopro-core is AGPL-3.0, and the engine links it. Anything that ships this engine, including an Android app, must comply with the AGPL. ProjectIgnis card scripts and BabelCDB keep their own licenses.
+
+## Windows (desktop apps)
+
+`tools/build_windows.sh <out>` cross-compiles the engine for 64-bit Windows on Linux (MinGW-w64) and
+writes `<out>/ygoe_jni.dll` (needs only `KERNEL32.dll` and `msvcrt.dll`) and the asset pack
+`<out>/ygoe/`. The Kotlin API for desktop JVM apps is `android/ygoe-jvm` (same sources as the Android
+module, in `android/ygoe/src/shared/kotlin`): set the system property `ygoe.library` to the DLL's
+full path, then call `YgoEngine.open(packDir)`.

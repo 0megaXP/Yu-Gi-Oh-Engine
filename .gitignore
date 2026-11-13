@@ -10,3 +10,4 @@ android/.gradle/
 android/local.properties
 *.class
 result*.json
+build-win/

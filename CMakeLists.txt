@@ -75,9 +75,22 @@ if(YGOE_BUILD_JNI)
   add_library(ygoe_jni SHARED engine/jni/ygoe_jni.cpp)
   target_link_libraries(ygoe_jni PRIVATE ygoe)
   if(NOT ANDROID)
-    # Desktop build (tests): headers from the local JDK.
-    find_package(JNI REQUIRED COMPONENTS JVM)
-    target_include_directories(ygoe_jni PRIVATE ${JNI_INCLUDE_DIRS})
+    if(YGOE_JNI_INCLUDE_DIRS)
+      # Cross-compiling (e.g. for Windows): JDK headers given by hand.
+      target_include_directories(ygoe_jni PRIVATE ${YGOE_JNI_INCLUDE_DIRS})
+    else()
+      # Desktop build (tests, desktop app): headers from the local JDK.
+      find_package(JNI REQUIRED COMPONENTS JVM)
+      target_include_directories(ygoe_jni PRIVATE ${JNI_INCLUDE_DIRS})
+    endif()
+  endif()
+  if(WIN32)
+    # ygoe_jni.dll (no "lib" prefix, so System.loadLibrary("ygoe_jni") finds it), with the C++
+    # runtime linked in so the DLL needs nothing else installed.
+    set_target_properties(ygoe_jni PROPERTIES PREFIX "")
+    if(MINGW)
+      target_link_options(ygoe_jni PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--kill-at)
+    endif()
   endif()
   # Only the JNI entry points need to be visible.
   set_target_properties(ygoe_jni PROPERTIES CXX_VISIBILITY_PRESET hidden)

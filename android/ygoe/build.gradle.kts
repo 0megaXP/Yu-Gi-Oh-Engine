@@ -47,6 +47,8 @@ android {
     }
 
     sourceSets["main"].assets.srcDir(packDir)
+    // The Kotlin API is shared with the desktop (JVM) module, ygoe-jvm.
+    sourceSets["main"].java.srcDir("src/shared/kotlin")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
