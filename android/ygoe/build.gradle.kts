@@ -19,12 +19,17 @@ android {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
         ndk {
-            // Phones, plus the emulator.
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            // Phones, plus the emulator. A build can ask for fewer with -Pygoe.abis=arm64-v8a
+            // (the CI release build does: every native ABI is a full compile of the engine).
+            val abis = (findProperty("ygoe.abis") as String?)?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
+            abiFilters += abis ?: listOf("arm64-v8a", "x86_64")
         }
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DYGOE_BUILD_JNI=ON", "-DYGOE_BUILD_CLI=OFF", "-DANDROID_STL=c++_static")
+                // YGOE_CCACHE=1: compile through ccache, so an unchanged engine rebuilds in seconds on CI.
+                if (System.getenv("YGOE_CCACHE") != null)
+                    arguments += listOf("-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
             }
         }
     }
@@ -39,6 +44,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Optimised without debug info (the default RelWithDebInfo compiles slower and the
+            // debug info is stripped from the app anyway).
+            externalNativeBuild { cmake { arguments += "-DCMAKE_BUILD_TYPE=Release" } }
         }
         debug {
             // The search is far too slow unoptimised; build the native code optimised in debug too.
