@@ -135,6 +135,9 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			// will go back or be used up; it is not that player's engine.
 			if(cv.owner != p) {
 				v += 0.1;
+				// ...unless it gives them a way to remove one of the owner's cards
+				if((cv.pos & POS_FACEUP) && !(cv.status & kStatusDisabled))
+					v += role(cv.owner, cv.code).field_removal * (defending ? 0.4 : 1.0);
 				continue;
 			}
 			const bool live = (cv.pos & POS_FACEUP) && !(cv.status & kStatusDisabled);

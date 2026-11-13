@@ -91,6 +91,9 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 				if(where & LOCATION_SZONE)
 					role.reusable_szone = true;
 			}
+			if((e.type & (ET_IGNITION | ET_QUICK_O)) && (zones(e.range) & LOCATION_MZONE) &&
+			   (e.category & (CAT_REMOVE | CAT_DESTROY | CAT_TOGRAVE | CAT_TOHAND | CAT_TODECK | CAT_CONTROL)))
+				role.field_removal = std::max(role.field_removal, (e.category & (CAT_REMOVE | CAT_DESTROY)) ? 0.7 : 0.5);
 			// Effects used from the GY later, by choice (ignition / quick). "If this card is sent to
 			// the GY" triggers have already happened by the time a position is scored.
 			if((e.type & (ET_IGNITION | ET_QUICK_O)) && (zones(e.range) & LOCATION_GRAVE)) {

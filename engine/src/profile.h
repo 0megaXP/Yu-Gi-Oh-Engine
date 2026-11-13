@@ -50,6 +50,10 @@ struct CardRole {
 	// Worth of effects it can still use from the GY ("banish this card from your GY; ..."), as a
 	// resource for later: what a discard or a send to the GY gains by picking this card.
 	double gy_effect = 0;
+	// An effect its controller can start from the Monster Zone that removes a card (banish,
+	// destroy, send, bounce, take control): what the other player gets from this monster if it is
+	// handed to them (Angelechy Opposition giving Enlisted or Destrier is giving them a removal).
+	double field_removal = 0;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };
