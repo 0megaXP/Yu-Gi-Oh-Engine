@@ -79,11 +79,14 @@ data class AnalysisRequest(
     val library: String? = null,
     /** Learned move policy ([ReferenceResult.policyJson]): steers the search toward options good lines choose. */
     val policy: String? = null,
+    /** Replay choices the engine doesn't understand yet, for your side: followed unless the search finds better. */
+    val imitate: List<Imitation> = emptyList(),
 ) {
     internal fun toJson(): JSONObject {
         val sides = listOf(first, second)
         fun perSide(f: (SideState) -> Any?) = JSONArray(sides.map { f(it) ?: JSONObject.NULL })
         return JSONObject()
+            .put("imitate", JSONArray(imitate.map { it.toJson() }))
             .put("library", library?.let { JSONArray(it) } ?: JSONObject.NULL)
             .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("decks", perSide { it.deck.toJson() })
@@ -334,6 +337,38 @@ data class VideoLineInput(
 }
 
 /**
+ * One choice inside a person's line (what a card searched, discarded, summoned or placed),
+ * compared by the engine with every other option, each followed by its best continuation.
+ */
+data class LineChoice(
+    /** Index in the line's steps. */
+    val step: Int,
+    /** The action the choice belongs to, and its card. */
+    val action: String,
+    val actionCode: Long,
+    val chosen: String,
+    val chosenCode: Long,
+    /** Chosen value minus the best other option (negative: an option scores higher for the engine). */
+    val margin: Double,
+    /** The engine agrees with the choice (or finds it within a small margin). */
+    val understood: Boolean,
+    /** In plain words: what the choice ends with that the next best option doesn't, and what the card does next. */
+    val why: String,
+    /** Best first. */
+    val options: List<Alternative>,
+) {
+    data class Alternative(val label: String, val code: Long, val value: Double, val chosen: Boolean)
+}
+
+/**
+ * A choice players make in replays that the engine doesn't understand yet: inside the effect of
+ * [action], choose [choose] (passcodes). The engine's searches and bots then prefer it.
+ */
+data class Imitation(val action: Long, val choose: Long) {
+    internal fun toJson() = JSONObject().put("action", action).put("choose", choose)
+}
+
+/**
  * What is known about a deck from past games, for the other player's bot ([YgoEngine.newDuel]):
  * the cards where it is usually stopped ([chokes], passcodes) and its average activations in a
  * turn ([plays], 0 if unknown).
@@ -366,6 +401,8 @@ data class VideoLineCheck(
     val moves: List<String>,
     val board: List<EngineCard>,
     val pieces: List<ComboPiece>,
+    /** Why the line makes its choices ([YgoEngine.videoLines] with `explain`), on the part played by the rules. */
+    val choices: List<LineChoice> = emptyList(),
 )
 
 data class VideoLinesResult(
@@ -514,6 +551,16 @@ internal object Parse {
                     moves = l.optJSONArray("moves").strings(),
                     board = l.optJSONArray("board").map(::card),
                     pieces = l.optJSONArray("pieces").map(::piece),
+                    choices = l.optJSONArray("choices").map { c ->
+                        LineChoice(
+                            step = c.optInt("step"), action = c.optString("action"), actionCode = c.optLong("action_code"),
+                            chosen = c.optString("chosen"), chosenCode = c.optLong("chosen_code"),
+                            margin = c.optDouble("margin", 0.0), understood = c.optBoolean("understood"), why = c.optString("why"),
+                            options = c.optJSONArray("options").map { op ->
+                                LineChoice.Alternative(op.optString("label"), op.optLong("code"), op.optDouble("value", 0.0), op.optBoolean("chosen"))
+                            },
+                        )
+                    },
                 )
             },
             verified = o.optInt("verified"),

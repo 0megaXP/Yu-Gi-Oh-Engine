@@ -20,6 +20,7 @@
 #include "analyze.h"
 #include "deck.h"
 #include "pieces.h"
+#include "explain.h"
 
 namespace ygoe {
 
@@ -51,6 +52,7 @@ struct LineCheck {
 	std::vector<std::string> moves;    // the replayed line
 	std::vector<CardSummary> board;    // the replayed end board
 	std::vector<ComboPiece> pieces;    // for verified lines, and for the played start of partly verified ones
+	std::vector<ChoiceExplanation> choices;  // why its choices (ReplayConfig::explain), on the part played by the rules
 };
 
 struct LinesCheck {
@@ -67,6 +69,8 @@ struct ReplayConfig {
 	int window = 3;        // video steps that may be skipped to find a match (misread or merged steps)
 	double seconds = 60;   // time cap per line
 	uint64_t seed = 1;
+	// > 0: also explain the line's choices (explain.h), searching each alternative this much
+	int explain = 0;
 	const std::atomic<bool>* cancel = nullptr;
 };
 

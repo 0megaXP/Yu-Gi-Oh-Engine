@@ -746,6 +746,12 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 						p.under = line.under;
 					add_to_library(res.library, split, board_value(db, deck, pb, 0));
 					lc.pieces = std::move(split.pieces);
+					if(cfg.explain > 0) {
+						ExplainConfig ec;
+						ec.iterations = cfg.explain;
+						ec.cancel = cfg.cancel;
+						lc.choices = explain_line(db, scripts, deck, r.setup(), r.pool(), part, ec);
+					}
 					if(policy) {
 						auto ex = policy->examples_from_line(scripts, r.pool(), r.setup(), part.responses, 0, 1.0f);
 						examples.insert(examples.end(), ex.begin(), ex.end());
@@ -765,6 +771,12 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 				examples.insert(examples.end(), ex.begin(), ex.end());
 			}
 			lc.pieces = std::move(split.pieces);
+			if(cfg.explain > 0) {
+				ExplainConfig ec;
+				ec.iterations = cfg.explain;
+				ec.cancel = cfg.cancel;
+				lc.choices = explain_line(db, scripts, deck, r.setup(), r.pool(), t, ec);
+			}
 		}
 		res.lines.push_back(std::move(lc));
 	}
@@ -805,7 +817,7 @@ std::string LinesCheck::to_json(const CardDB& db) const {
 			o << (k ? "," : "") << "{\"code\":" << c.code << ",\"name\":" << quote(c.name) << ",\"where\":" << quote(c.where)
 			  << ",\"note\":" << quote(c.note) << "}";
 		}
-		o << "],\"pieces\":" << pieces_json(db, l.pieces) << "}";
+		o << "],\"pieces\":" << pieces_json(db, l.pieces) << ",\"choices\":" << choices_json(db, l.choices) << "}";
 	}
 	o << "],\"library\":" << library_json(db, library, std::max(1, verified));
 	if(!policy.empty())

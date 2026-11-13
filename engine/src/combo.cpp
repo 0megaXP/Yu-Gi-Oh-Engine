@@ -143,6 +143,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 	mc.horizon_turns = 1;
 	mc.cancel = cfg.cancel;
 	mc.guide = cfg.guide;
+	mc.imitate = cfg.imitate;
 	mc.policy = cfg.policy;
 	auto out = searcher.run({root}, 0, mc);
 	const Trajectory* best = nullptr;
@@ -279,6 +280,7 @@ ComboTree build_combo_tree(const CardDB& db, ScriptCache& scripts, const Deck& m
 			bc.horizon_turns = 1;
 			bc.cancel = cfg.cancel;
 			bc.guide = cfg.guide;
+			bc.imitate = cfg.imitate;
 			bc.policy = cfg.policy;
 			auto bo = searcher.run({r}, 0, bc);
 			double v = -1;

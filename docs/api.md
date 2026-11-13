@@ -64,6 +64,11 @@ A line is split into sub-combos ("pieces"):
   - `leaves`: what stays at the end;
   - `stoppedBy`: the hand traps that can respond during it, each with the first step it can answer. These come from a second replay with the hand traps in the opponent's hand.
 - **Starters:** a piece that needs nothing from earlier pieces is a `starter`.
+- **Why a line's choices:** `videoLines(..., explain = 250)` also explains each line's choices (`VideoLineCheck.choices`), on the part played by the rules:
+  - **Which choices:** what a card searched, discarded, summoned or placed, or which option of an effect it used, with 2 to 6 options.
+  - **How:** the engine replays the position with every other option, searches the best continuation after each, and compares the end positions with the line's own choice.
+  - **What it reports:** for each choice, `understood` (the line's choice comes out on top, or close) and `why` in plain words: what the choice ends with that the next best option doesn't, and what the chosen card does next in the line. Example: "Seneschal's effect: Special Summon 1 Fairy Synchro Monster (Angelechy Enlisted)".
+  - **Imitation:** choices the engine doesn't understand yet can be passed back as `imitate` (`Imitation(action, choose)`) to `analyze`, `comboTree` and per player to `newDuel`. Searches then strongly prefer that choice inside that card's effect, and the bot takes it unless its search finds something clearly better.
 - **Conditions:** a piece can carry `under` (`"mulcharmy"`, `"droll"`): it was played while the opponent's Mulcharmy (Fuwalos, Purulia...) or Droll & Lock Bird was active. Pass `under` on a `VideoLineInput` to tag its pieces. When the engine sees one of those in force (from its player hint), plans built from pieces made for it are tried first, and pieces for a condition that isn't there are tried less.
 - **Library:** reference end boards also return `ref.library`, the pieces merged across the sample lines by what they need: starters first, then the most common.
 - **Using the library:** pass `ref.libraryJson` as `library` to `analyze` (in `AnalysisRequest`) or `comboTree`, or per player as `libraries` to `newDuel`.

@@ -502,6 +502,18 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 			return -1;
 		};
 		std::uniform_real_distribution<double> unit(0, 1);
+		// The card whose effect this decision belongs to: the last one the searching player
+		// activated or summoned (or the chain's top card while it resolves).
+		uint32_t last_action = 0;
+		auto imitates = [&](const Decision& dd, const Option& o) {
+			if(dd.type == DecisionType::Idle || dd.type == DecisionType::Chain || dd.type == DecisionType::Battle)
+				return false;
+			const uint32_t ctx1 = last_action, ctx2 = duel.chain_last_code();
+			for(const auto& im : cfg.imitate)
+				if(im.choose == o.code && (im.action == ctx1 || im.action == ctx2))
+					return true;
+			return false;
+		};
 		// Playout prior. Summoning or setting a hand trap usually wastes it, so those are
 		// tried last (still possible: some lines need the body, e.g. as Synchro material).
 		auto weight = [&](const Decision& dd, const Option& o) {
@@ -523,6 +535,8 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				w *= 0.05;
 			if(dd.player == me && plan_ahead(o) >= 0)
 				w = std::max(w, 1.0) * 25;
+			if(dd.player == me && !cfg.imitate.empty() && o.code && imitates(dd, o))
+				w = std::max(w, 1.0) * 12;
 			return w;
 		};
 		while(true) {
@@ -539,6 +553,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 			steps_this_turn = 0;
 			plan.clear();
 			plan_pos = 0;
+			last_action = 0;
 			if(guided && unit(rng) < cfg.guided_share)
 				plan = cfg.guide->sample(resources, rng);
 			Trajectory traj;
@@ -701,6 +716,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 						responded = true;
 						traj.responses.push_back(opt.response);
 						traj.steps.push_back({dec.player, dec.type, opt.label, dec.minor});
+						if(dec.player == me && opt.code &&
+						   (dec.type == DecisionType::Idle || dec.type == DecisionType::Chain || dec.type == DecisionType::EffectYesNo) &&
+						   opt.kind != OptKind::Pass)
+							last_action = opt.code;
 						if(dec.player == me && plan_pos < plan.size()) {
 							int k = plan_ahead(opt);
 							if(k >= 0)

@@ -49,6 +49,7 @@ add_library(ygoe STATIC
   engine/src/policy.cpp
   engine/src/combo.cpp
   engine/src/pieces.cpp
+  engine/src/explain.cpp
   engine/src/api.cpp)
 target_include_directories(ygoe PUBLIC engine/src)
 target_link_libraries(ygoe PUBLIC ocgcore)

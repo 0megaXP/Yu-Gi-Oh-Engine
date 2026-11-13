@@ -22,6 +22,21 @@
 namespace ygoe {
 
 namespace {
+// [{"action": passcode, "choose": passcode}, ...] -> script ids
+std::vector<SearchConfig::Imitation> read_imitate(const json::Value& v, const CardDB& db) {
+	std::vector<SearchConfig::Imitation> out;
+	for(const auto& e : v.items()) {
+		SearchConfig::Imitation im;
+		im.action = db.script_id(static_cast<uint32_t>(e["action"].integer()));
+		im.choose = db.script_id(static_cast<uint32_t>(e["choose"].integer()));
+		if(im.action && im.choose)
+			out.push_back(im);
+	}
+	return out;
+}
+}  // namespace
+
+namespace {
 
 using json::quote;
 using json::Value;
@@ -248,6 +263,7 @@ std::string Engine::analyze(const std::string& request) {
 	cfg.search.cancel = &cancel_;
 	if(req["library"].is_array())
 		cfg.search.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+	cfg.search.imitate = read_imitate(req["imitate"], db_);
 	cfg.search.policy = read_policy(req["policy"], db_);
 	cfg.determinizations = static_cast<int>(c["samples"].integer(12));
 	cfg.lines = static_cast<int>(c["lines"].integer(3));
@@ -361,6 +377,8 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 		dk.plays = k["plays"].num(0);
 		live->set_knowledge(p, std::move(dk));
 	}
+	for(int p = 0; p < 2; ++p)
+		live->set_imitate(p, read_imitate(req["imitate"][p], db_));
 	return live;
 }
 
@@ -426,6 +444,7 @@ std::string Engine::video_lines(const std::string& request) {
 	cfg.tries = static_cast<int>(req["tries"].integer(cfg.tries));
 	cfg.seconds = req["seconds"].num(cfg.seconds);
 	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));
+	cfg.explain = static_cast<int>(req["explain"].integer(0));
 	cfg.cancel = &cancel_;
 	set_progress("video lines", 0, static_cast<int>(lines.size()));
 	// Verified lines also train the move policy (the one passed in, or a new one).
@@ -461,6 +480,7 @@ std::string Engine::combo_tree(const std::string& request) {
 	ComboTreeConfig cfg;
 	if(req["library"].is_array())
 		cfg.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+	cfg.imitate = read_imitate(req["imitate"], db_);
 	cfg.policy = read_policy(req["policy"], db_);
 	cfg.iterations = static_cast<int>(req["iterations"].integer(1500));
 	cfg.branch_iterations = static_cast<int>(req["branch_iterations"].integer(300));

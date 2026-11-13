@@ -48,6 +48,7 @@ struct ComboTreeConfig {
 	int max_choke_points = 4;       // per hand trap
 	uint64_t seed = 1;
 	std::shared_ptr<const PieceGuide> guide;  // your deck's combo pieces, if known
+	std::vector<SearchConfig::Imitation> imitate;  // replay choices the engine doesn't understand yet
 	std::shared_ptr<const class Policy> policy;  // learned move policy, if any
 	const std::atomic<bool>* cancel = nullptr;
 	std::function<void(const std::string& phase, int done, int total)> progress;

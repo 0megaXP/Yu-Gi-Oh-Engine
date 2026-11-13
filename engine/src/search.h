@@ -55,6 +55,12 @@ struct SearchConfig {
 	// Combo pieces to try (pieces.h): in `guided_share` of the iterations the searching player
 	// is steered along a plan chained from these pieces, which the search then improves on.
 	std::shared_ptr<const PieceGuide> guide;
+	// Choices players make in replays that the engine doesn't understand yet (explain.h): inside
+	// the effect of `action` (script id), choose `choose`. Strongly preferred for the searching player.
+	struct Imitation {
+		uint32_t action = 0, choose = 0;
+	};
+	std::vector<Imitation> imitate;
 	double guided_share = 0.7;
 	// Learned move policy (policy.h): multiplies the playout prior of every option.
 	std::shared_ptr<const Policy> policy;

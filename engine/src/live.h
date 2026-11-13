@@ -45,6 +45,9 @@ public:
 		double plays = 0;              // average activations in one of its turns; 0 = unknown
 	};
 	void set_knowledge(int player, DeckKnowledge k) { knowledge_[player & 1] = std::move(k); }
+	// Choices players make in replays that the engine doesn't understand yet, for a player's bot
+	// (SearchConfig::imitate): followed unless its search finds something clearly better.
+	void set_imitate(int player, std::vector<SearchConfig::Imitation> v) { imitate_[player & 1] = std::move(v); }
 
 	const Duel& duel() const { return *duel_; }
 
@@ -82,6 +85,8 @@ private:
 	std::shared_ptr<const PieceGuide> guides_[2];
 	std::shared_ptr<const class Policy> policy_;
 	DeckKnowledge knowledge_[2];
+	std::vector<SearchConfig::Imitation> imitate_[2];
+	uint32_t last_action_[2] = {0, 0};  // the last card each player activated or summoned
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

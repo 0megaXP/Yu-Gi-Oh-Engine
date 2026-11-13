@@ -109,8 +109,13 @@ bool LiveDuel::respond_internal(size_t index) {
 	if(duel_->ended() || index >= d.options.size())
 		return false;
 	Option opt = d.options[index];
+	const uint8_t who = d.player;
+	const DecisionType type = d.type;
 	if(!duel_->respond(opt.response))
 		return false;
+	if(who < 2 && opt.code && opt.kind != OptKind::Pass &&
+	   (type == DecisionType::Idle || type == DecisionType::Chain || type == DecisionType::EffectYesNo))
+		last_action_[who] = opt.code;
 	history_.push_back(opt.response);
 	last_move_ = opt.label;
 	// Keep the bot's plan while play follows it.
@@ -241,6 +246,7 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.horizon_turns = 1;
 	cfg.cancel = &cancel_;
 	cfg.guide = guides_[d.player];
+	cfg.imitate = imitate_[d.player];
 	cfg.policy = policy_;
 	// The bot does not see the other player's hand: on turn 1 its search samples it.
 	std::vector<RootState> roots = hidden_roots(d.player, 8);
@@ -317,6 +323,24 @@ int LiveDuel::choose(BotLevel level) {
 			if(score > best_score) {
 				best_score = score;
 				pick = &m;
+			}
+		}
+		// A choice players make that the engine doesn't understand yet: take it unless the search
+		// found something clearly better.
+		if(!imitate_[d.player].empty() && d.type != DecisionType::Idle && d.type != DecisionType::Battle) {
+			const uint32_t ctx1 = last_action_[d.player], ctx2 = duel_->chain_last_code();
+			for(const auto& m : out.moves) {
+				uint32_t code = 0;
+				for(const auto& o : d.options)
+					if(o.label == m.label)
+						code = o.code;
+				bool wanted = false;
+				for(const auto& im : imitate_[d.player])
+					wanted |= code && im.choose == code && (im.action == ctx1 || im.action == ctx2);
+				if(wanted && m.visits > 0 && m.mean >= pick->mean - 0.05) {
+					pick = &m;
+					break;
+				}
 			}
 		}
 	}
