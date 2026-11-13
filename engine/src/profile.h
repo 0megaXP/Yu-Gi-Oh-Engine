@@ -47,6 +47,9 @@ struct CardRole {
 	double passive_mzone = 0, passive_szone = 0;
 	// The card has effects its controller can use again from that zone on a later turn.
 	bool reusable_mzone = false, reusable_szone = false;
+	// Worth of effects it can still use from the GY ("banish this card from your GY; ..."), as a
+	// resource for later: what a discard or a send to the GY gains by picking this card.
+	double gy_effect = 0;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };

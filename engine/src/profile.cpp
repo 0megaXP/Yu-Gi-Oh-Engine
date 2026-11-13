@@ -91,6 +91,16 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 				if(where & LOCATION_SZONE)
 					role.reusable_szone = true;
 			}
+			// Effects used from the GY later, by choice (ignition / quick). "If this card is sent to
+			// the GY" triggers have already happened by the time a position is scored.
+			if((e.type & (ET_IGNITION | ET_QUICK_O)) && (zones(e.range) & LOCATION_GRAVE)) {
+				double v = 0.2;
+				if(e.category & (CAT_SEARCH | CAT_SPECIAL_SUMMON | CAT_TOHAND | CAT_DRAW))
+					v = 0.4;  // brings a card back into play: an extender
+				else if(e.category & (CAT_TOGRAVE | CAT_DECKDES))
+					v = 0.3;
+				role.gy_effect = std::max(role.gy_effect, v);
+			}
 		}
 		bool quick = e.type & (ET_QUICK_O | ET_QUICK_F);
 		bool set_card = (e.type & ET_ACTIVATE) && (is_trap || is_quickplay);

@@ -90,13 +90,16 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 					hit += by_attribute_[p][bit];
 			v -= 3.0 * std::min(1.0, double(hit) / effect_monsters_[p]);
 		}
+		auto locked_out = [&](const CardView& cv) {
+			if(!locked)
+				return false;
+			const CardInfo* c = db_.get(cv.code);
+			return c && (c->type & TYPE_MONSTER) && (c->attribute & locked) && !(cv.type & (TYPE_SPELL | TYPE_TRAP));
+		};
 		// Best interrupt a card offers from where it currently is.
 		auto interrupts_from = [&](const CardView& cv, uint32_t loc, const char* where) {
-			if(locked) {
-				const CardInfo* c = db_.get(cv.code);
-				if(c && (c->type & TYPE_MONSTER) && (c->attribute & locked) && !(cv.type & (TYPE_SPELL | TYPE_TRAP)))
-					return 0.0;
-			}
+			if(locked_out(cv))
+				return 0.0;
 			const CardRole& r = role(p, cv.code);
 			double best = 0, second = 0;
 			const Interrupt* best_in = nullptr;
@@ -160,8 +163,13 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			double worth = (cv.status & kStatusDisabled) ? 0 : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 : 0.0);
 			v += std::max(0.05, iv + worth);
 		}
-		for(const auto& cv : b.grave[p])
-			v += 0.03 + interrupts_from(cv, LOCATION_GRAVE, "GY");
+		for(const auto& cv : b.grave[p]) {
+			// A card with an effect to use from the GY is a resource there (Angelechy Verdict and
+			// Disturbance: what Angelechy Problem should discard); most others are spent.
+			double iv = interrupts_from(cv, LOCATION_GRAVE, "GY");
+			double later = locked_out(cv) ? 0.0 : role(p, cv.code).gy_effect * (defending ? 0.8 : 1.0);
+			v += 0.03 + std::max(iv, later);
+		}
 		v += 0.02 * b.extra[p].size();
 		// Life points: worth more the lower they get, so bots push damage and protect themselves.
 		if(b.lp[p] <= 0)
