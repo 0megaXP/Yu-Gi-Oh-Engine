@@ -63,7 +63,7 @@ bool read_deck(const Value& v, Deck& d, std::string& err, const CardDB& db) {
 	if(v["names"].is_object())
 		for(const auto& [k, n] : v["names"].entries())
 			if(!k.empty() && std::isdigit(static_cast<unsigned char>(k[0])))
-				db.learn_name(static_cast<uint32_t>(std::stoul(k)), n.str());
+				db.learn_name(static_cast<uint32_t>(std::stoull(k)), n.str());
 	if(d.main.empty()) {
 		err = "deck '" + d.name + "' has an empty main deck";
 		return false;

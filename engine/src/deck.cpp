@@ -100,7 +100,7 @@ bool load_ydk(const std::string& path, Deck& out, std::string* error) {
 		}
 		if(line[0] == '#' || line[0] == '!')
 			continue;
-		section->push_back(static_cast<uint32_t>(std::stoul(line)));
+		section->push_back(static_cast<uint32_t>(std::stoull(line)));
 	}
 	return true;
 }
@@ -110,7 +110,7 @@ uint32_t resolve_card(const CardDB& db, const std::string& raw, const std::vecto
 	if(text.empty())
 		return 0;
 	if(std::all_of(text.begin(), text.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
-		return static_cast<uint32_t>(std::stoul(text));
+		return static_cast<uint32_t>(std::stoull(text));
 	std::string want = lower(text);
 	auto match = [&](uint32_t code, bool exact) {
 		auto c = db.get(db.script_id(code));
@@ -220,14 +220,14 @@ bool load_scenario(const CardDB& db, const std::string& path, Scenario& sc, std:
 		} else if(key == "seed") {
 			sc.seed = std::stoull(value);
 		} else if(key == "lp" && p >= 0) {
-			sc.lp[p] = static_cast<uint32_t>(std::stoul(value));
+			sc.lp[p] = static_cast<uint32_t>(std::stoull(value));
 		} else if(key == "hand" && p >= 0) {
 			std::string l = lower(value);
 			if(l.rfind("proxy", 0) == 0 || l.rfind("hidden", 0) == 0) {
 				sc.hand_known[p] = false;
 				auto parts = split(value, ' ');
 				if(parts.size() > 1)
-					sc.hand_size[p] = std::stoul(parts[1]);
+					sc.hand_size[p] = std::stoull(parts[1]);
 			} else if(!cards(p, sc.hand[p])) {
 				return false;
 			}
@@ -247,7 +247,7 @@ bool load_scenario(const CardDB& db, const std::string& path, Scenario& sc, std:
 				return fail("field needs 'zone seq [pos]; card'");
 			PlacedCard pc;
 			pc.loc = parse_loc(where[0]);
-			pc.seq = static_cast<uint32_t>(std::stoul(where[1]));
+			pc.seq = static_cast<uint32_t>(std::stoull(where[1]));
 			pc.pos = where.size() > 2 ? parse_pos(where[2]) : 0;
 			pc.code = resolve_card(db, parts[1], deck_cards(p));
 			if(!pc.loc || !pc.code)
