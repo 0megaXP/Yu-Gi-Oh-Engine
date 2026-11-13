@@ -1,3 +1,4 @@
+#include <locale>
 #include "profile.h"
 
 #include <algorithm>
@@ -236,6 +237,7 @@ DeckProfile profile_deck(const CardDB& db, const Deck& deck) {
 
 std::string DeckProfile::summary() const {
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o.precision(0);
 	o << std::fixed;
 	auto pct = [](double v) { return v * 100; };

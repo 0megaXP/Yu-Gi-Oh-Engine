@@ -1,3 +1,4 @@
+#include <locale>
 #include "side.h"
 
 #include <algorithm>
@@ -103,6 +104,7 @@ CardValue value_of(const CardDB& db, uint32_t code, const std::vector<uint16_t>&
 	}
 	cv.value = std::max(inter, brk) + 0.25 * std::min(inter, brk);
 	std::ostringstream why;
+	why.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	if(inter >= brk && best) {
 		why << best->name();
 		switch(best->kind) {

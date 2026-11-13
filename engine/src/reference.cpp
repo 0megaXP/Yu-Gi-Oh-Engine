@@ -1,3 +1,4 @@
+#include <locale>
 #include "reference.h"
 
 #include <algorithm>
@@ -126,6 +127,7 @@ std::string ReferenceResult::to_json(const CardDB& db) const {
 		return std::string(b);
 	};
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"deck\":" << quote(deck) << ",\"iterations\":" << iterations << ",\"samples\":[";
 	for(size_t i = 0; i < samples.size(); ++i) {
 		const auto& s = samples[i];

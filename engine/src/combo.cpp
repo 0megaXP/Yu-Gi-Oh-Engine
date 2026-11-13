@@ -1,3 +1,4 @@
+#include <locale>
 #include "combo.h"
 
 #include <algorithm>
@@ -336,6 +337,7 @@ std::string ComboTree::to_json(const CardDB& db) const {
 		return o + "]";
 	};
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"opponent_known\":" << (opponent_known ? "true" : "false") << ",\"main\":{\"moves\":" << strings(main_moves)
 	  << ",\"board\":" << cards(main_board) << ",\"value\":" << num(main_value) << ",\"score\":" << num(main_score)
 	  << ",\"parts\":" << pieces_json(db, main_parts) << "},\"branches\":[";

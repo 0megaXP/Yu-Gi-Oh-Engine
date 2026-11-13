@@ -1,3 +1,4 @@
+#include <locale>
 #include "live.h"
 
 #include <algorithm>
@@ -441,6 +442,9 @@ std::string LiveDuel::card_json(uint32_t code) const {
 
 std::string LiveDuel::state_json() {
 	std::ostringstream o;
+	// Always the C locale: inside a desktop JVM app the process-wide C++ locale can lack the
+	// number facets (writing a number then crashed), and JSON needs plain digits anyway.
+	o.imbue(std::locale::classic());
 	if(!ok_) {
 		o << "{\"error\":" << quote(error_) << "}";
 		return o.str();

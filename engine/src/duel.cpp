@@ -1,3 +1,4 @@
+#include <locale>
 #include "duel.h"
 
 #include <algorithm>
@@ -195,6 +196,7 @@ bool ScriptCache::read_source(const std::string& name, std::string& out) {
 	if(!f)
 		return false;
 	std::stringstream ss;
+	ss.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	ss << f.rdbuf();
 	out = ss.str();
 	return true;

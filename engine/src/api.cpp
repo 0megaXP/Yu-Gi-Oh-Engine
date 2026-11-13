@@ -1,3 +1,4 @@
+#include <locale>
 #include <cctype>
 #include "api.h"
 
@@ -114,6 +115,7 @@ std::string profile_json(const CardDB& db, const Deck& d) {
 	auto p = profile_deck(db, d);
 	auto sets = dominant_setcodes(db, d);
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"name\":" << quote(d.name) << ",\"monster_effects\":" << num(p.monster_effects)
 	  << ",\"hand_effects\":" << num(p.hand_effects) << ",\"gy_effects\":" << num(p.gy_effects)
 	  << ",\"spell_trap\":" << num(p.spell_trap) << ",\"searches\":" << num(p.searches)
@@ -294,6 +296,7 @@ std::string Engine::side(const std::string& request) {
 		set_progress("idle", 0, 0);
 	}
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"opponent\":" << profile_json(db_, theirs) << ",\"board_shape\":{\"samples\":" << shape.samples
 	  << ",\"monsters\":" << num(shape.monsters, 2) << ",\"st_faceup\":" << num(shape.st_faceup, 2)
 	  << ",\"st_set\":" << num(shape.st_set, 2) << ",\"hand_traps\":" << num(shape.hand_traps, 2) << "}";

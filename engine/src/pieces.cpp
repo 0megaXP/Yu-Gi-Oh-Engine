@@ -1,3 +1,4 @@
+#include <locale>
 #include "pieces.h"
 
 #include <algorithm>
@@ -367,6 +368,7 @@ std::string piece_body(const CardDB& db, const ComboPiece& p) {
 		return o + "]";
 	};
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "\"first\":" << p.first << ",\"last\":" << p.last << ",\"starter\":" << (p.starter() ? "true" : "false")
 	  << ",\"steps\":[";
 	for(size_t i = 0; i < p.steps.size(); ++i)

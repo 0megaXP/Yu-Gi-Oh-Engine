@@ -1,3 +1,4 @@
+#include <locale>
 #include "deck.h"
 
 #include <algorithm>
@@ -33,6 +34,7 @@ std::string dir_of(const std::string& path) {
 std::vector<std::string> split(const std::string& s, char sep) {
 	std::vector<std::string> out;
 	std::stringstream ss(s);
+	ss.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	std::string item;
 	while(std::getline(ss, item, sep)) {
 		item = trim(item);

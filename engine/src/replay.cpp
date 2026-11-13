@@ -1,3 +1,4 @@
+#include <locale>
 #include "replay.h"
 
 #include <algorithm>
@@ -529,6 +530,7 @@ private:
 				++on_board;
 		n.score = matched * 10.0 - missed * 3.0 + on_board * 2.0 - (n.stuck ? 20 : 0);
 		std::ostringstream sig;
+		sig.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 		sig << n.next << '|';
 		auto zone = [&](const std::vector<CardView>& v, char tag) {
 			std::vector<uint32_t> c;
@@ -781,6 +783,7 @@ std::string LinesCheck::to_json(const CardDB& db) const {
 		return std::string(b);
 	};
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"verified\":" << verified << ",\"lines\":[";
 	for(size_t i = 0; i < lines.size(); ++i) {
 		const auto& l = lines[i];

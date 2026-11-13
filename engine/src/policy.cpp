@@ -1,3 +1,4 @@
+#include <locale>
 #include "policy.h"
 
 #include <algorithm>
@@ -250,6 +251,7 @@ std::vector<PolicyExample> self_play_examples(const CardDB& db, ScriptCache& scr
 
 std::string Policy::to_json() const {
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"version\":1,\"dim\":" << kDim << ",\"seen\":" << seen_ << ",\"w\":[";
 	bool first = true;
 	char buf[48];

@@ -1,3 +1,4 @@
+#include <locale>
 #include "analyze.h"
 
 #include <algorithm>
@@ -258,6 +259,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 
 std::string AnalysisResult::to_json() const {
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "{\"me\":" << int(me) << ",\"mode\":" << json_str(mode) << ",\"current_score\":" << fmt(current_score, 3)
 	  << ",\"current_interrupts\":" << json_cards(current_interrupts) << ",\"my_profile\":" << json_profile(my_profile)
 	  << ",\"opponent_profile\":" << json_profile(opp_profile) << ",\"iterations\":" << iterations
@@ -278,6 +280,7 @@ std::string AnalysisResult::to_json() const {
 
 std::string AnalysisResult::to_text() const {
 	std::ostringstream o;
+	o.imbue(std::locale::classic());  // C number format, whatever locale the host app set
 	o << "Mode: " << mode << " (" << (mode == "real" ? "own hand + public info only; opponent cards shown in lines are one sampled hand" : "both hands known") << ")\n";
 	o << "Opponent deck: " << opp_profile.name << "\n  " << opp_profile.summary() << "\n";
 	o << "Current position: " << fmt(current_score * 100, 0) << "/100 for you\n";
