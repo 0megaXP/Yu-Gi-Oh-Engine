@@ -45,7 +45,7 @@ const char* Interrupt::name() const {
 	case NegateSummon: return "negates a summon";
 	case Removal: return "removes a card";
 	case GyHate: return "stops the GY";
-	case DeckHate: return "stops a search/send from Deck";
+	case DeckHate: return "stops a search, summon or send from the Deck";
 	case Extender: return "summons as a quick effect";
 	case Draw: return "draws off their plays";
 	default: return "other quick effect";
@@ -206,6 +206,11 @@ DeckProfile profile_deck(const CardDB& db, const Deck& deck) {
 		if(!c || !role.engine || role.hand_trap)
 			return;
 		bool st = c->type & (TYPE_SPELL | TYPE_TRAP);
+		// Its summons come from the Deck ("Special Summon ... from your Deck", "from your hand or Deck")
+		std::string text = db.text(db.script_id(code));
+		const bool summons_from_deck = text.find("from your Deck") != std::string::npos ||
+		                               text.find("from your hand or Deck") != std::string::npos ||
+		                               text.find("from your hand, Deck") != std::string::npos;
 		for(const auto& e : c->effects) {
 			if(!activated(e))
 				continue;
@@ -221,6 +226,8 @@ DeckProfile profile_deck(const CardDB& db, const Deck& deck) {
 				p.monster_effects += w;
 			if(e.category & (CAT_SEARCH | CAT_DECKDES | CAT_DRAW))
 				p.searches += w;
+			if((e.category & (CAT_SEARCH | CAT_DECKDES)) || ((e.category & CAT_SPECIAL_SUMMON) && summons_from_deck))
+				p.deck_plays += w;
 			if(e.category & CAT_SPECIAL_SUMMON)
 				p.special_summons += w;
 			if(e.code == EV_SUMMON_SUCCESS)
@@ -235,7 +242,7 @@ DeckProfile profile_deck(const CardDB& db, const Deck& deck) {
 	for(auto code : deck.extra)
 		visit(code, 0.5);
 	if(total > 0) {
-		for(double* v : {&p.monster_effects, &p.hand_effects, &p.gy_effects, &p.spell_trap, &p.searches,
+		for(double* v : {&p.monster_effects, &p.hand_effects, &p.gy_effects, &p.spell_trap, &p.searches, &p.deck_plays,
 		                 &p.special_summons, &p.normal_summon})
 			*v /= total;
 	}
@@ -256,6 +263,7 @@ std::string DeckProfile::summary() const {
 	auto pct = [](double v) { return v * 100; };
 	o << "monster effects " << pct(monster_effects) << "%, hand " << pct(hand_effects) << "%, GY "
 	  << pct(gy_effects) << "%, spells/traps " << pct(spell_trap) << "%; searches/sends " << pct(searches)
+	  << "%, from the Deck (search/summon/send) " << pct(deck_plays)
 	  << "%, special summons " << pct(special_summons) << "%";
 	return o.str();
 }
@@ -268,6 +276,7 @@ DeckProfile generic_profile() {
 	g.gy_effects = 0.15;
 	g.spell_trap = 0.23;
 	g.searches = 0.35;
+	g.deck_plays = 0.4;
 	g.special_summons = 0.45;
 	return g;
 }
@@ -279,7 +288,7 @@ double interrupt_value(const Interrupt& in, const DeckProfile& o) {
 	case Interrupt::NegateEffect: f = 0.45 + 0.8 * (o.monster_effects + 0.5 * o.gy_effects + 0.5 * o.hand_effects); break;
 	case Interrupt::NegateSummon: f = 0.4 + 1.0 * o.special_summons; break;
 	case Interrupt::Removal: f = 0.75 + 0.3 * (o.monster_effects + o.spell_trap); break;
-	case Interrupt::DeckHate: f = 0.35 + 1.1 * o.searches; break;
+	case Interrupt::DeckHate: f = 0.35 + 1.1 * o.deck_plays; break;
 	case Interrupt::GyHate: f = 0.3 + 1.2 * o.gy_effects; break;
 	case Interrupt::Draw: f = 0.5 + 0.8 * o.special_summons; break;
 	default: break;

@@ -20,6 +20,9 @@ struct DeckProfile {
 	double gy_effects = 0;       // activated from the GY
 	double spell_trap = 0;       // spell/trap activations and spell/trap-zone effects
 	double searches = 0;         // add from Deck / send from Deck / draw
+	// What Ash Blossom-type hand traps stop: add from Deck, Special Summon from Deck, send from
+	// Deck to the GY (no draws).
+	double deck_plays = 0;
 	double special_summons = 0;  // effects that Special Summon
 	double extra_deck = 0;       // Extra Deck monsters per 15
 	double normal_summon = 0;    // monsters that want to be Normal Summoned

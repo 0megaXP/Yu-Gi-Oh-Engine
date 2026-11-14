@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <map>
 
 #include "ocgapi_constants.h"
 
@@ -124,8 +125,18 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 				held_off[p] += total;
 			return total;
 		};
+		// At low LP, while the other player is about to attack, any monster that can block one
+		// attack is worth more (a spare hand trap set or summoned as a wall).
+		const double wall = defending && b.lp[p] < 4000 ? 0.45 * (1.0 - std::max(0, b.lp[p]) / 4000.0) : 0.0;
+		std::map<uint32_t, int> copies;  // hand traps already counted in this hand
 		for(const auto& cv : b.hand[p]) {
 			double iv = interrupts_from(cv, LOCATION_HAND, "hand");
+			if(iv > 0 && role(p, cv.code).hand_trap) {
+				// A hand trap is worth most where it is: hidden in the hand, used when it counts.
+				// A second copy of the same one adds less.
+				int n = copies[cv.code]++;
+				iv = (iv + 0.15) * (n == 0 ? 1.0 : 0.55);
+			}
 			v += std::max(iv, defending ? 0.3 : 0.55);
 		}
 		for(const auto& cv : b.mzone[p]) {
@@ -143,6 +154,13 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			const bool live = (cv.pos & POS_FACEUP) && !(cv.status & kStatusDisabled);
 			double body = (cv.pos & POS_FACEUP) ? 0.35 + 0.35 * std::min(cv.atk, 4000) / 4000.0 : 0.3;
 			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_MZONE, "field");
+			if(role(p, cv.code).hand_trap) {
+				// On the field a hand trap is seen and can be dealt with before it is used, and a
+				// small body is all it adds.
+				body *= 0.5;
+				iv *= 0.5;
+			}
+			body += wall;
 			double extra = 0;
 			if(live) {
 				const CardRole& r = role(p, cv.code);

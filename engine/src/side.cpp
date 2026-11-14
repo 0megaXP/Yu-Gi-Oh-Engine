@@ -108,7 +108,7 @@ CardValue value_of(const CardDB& db, uint32_t code, const std::vector<uint16_t>&
 	if(inter >= brk && best) {
 		why << best->name();
 		switch(best->kind) {
-		case Interrupt::DeckHate: why << "; " << pct(opp.searches) << " of their plays search/send from Deck"; break;
+		case Interrupt::DeckHate: why << "; " << pct(opp.deck_plays) << " of their plays search, summon or send from the Deck"; break;
 		case Interrupt::NegateEffect: why << "; " << pct(opp.monster_effects + opp.hand_effects) << " of their plays are monster effects"; break;
 		case Interrupt::NegateSummon: why << "; " << pct(opp.special_summons) << " of their plays Special Summon"; break;
 		case Interrupt::GyHate: why << "; " << pct(opp.gy_effects) << " of their plays use the GY"; break;
