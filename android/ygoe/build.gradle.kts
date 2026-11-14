@@ -76,6 +76,7 @@ val ygoeEnginePack = tasks.register<Exec>("ygoeEnginePack") {
     val out = packDir.get().dir("ygoe").asFile
     workingDir = engineRoot
     inputs.file(File(engineRoot, "tools/bootstrap.sh"))
+    inputs.dir(File(engineRoot, "tools/patches"))
     inputs.file(File(engineRoot, "tools/make_pack.py"))
     inputs.file(File(engineRoot, "data/passcode_map.tsv"))
     outputs.dir(out)

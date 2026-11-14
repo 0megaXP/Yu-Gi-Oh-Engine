@@ -1,0 +1,17 @@
+diff --git a/processor.cpp b/processor.cpp
+index ab8a51d..3f72a6e 100644
+--- a/processor.cpp
++++ b/processor.cpp
+@@ -3260,9 +3260,9 @@ bool field::process(Processors::Turn& arg) {
+ 	case 0: {
+ 		//Pre Draw
+ 		core.used_event.clear();
+-		for(auto& peffect : core.reseted_effects) {
+-			pduel->delete_effect(peffect);
+-		}
++		// ygoe: reset effects stay allocated until the duel ends (the duel frees them then);
++		// a pending event can still name one as its reason effect, and freeing it here made
++		// condition checks read freed memory (heap corruption, a crash on Windows).
+ 		core.reseted_effects.clear();
+ 		core.effect_count_code.clear();
+ 		for(uint8_t p = 0; p < 2; ++p) {

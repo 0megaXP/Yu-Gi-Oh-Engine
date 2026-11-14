@@ -35,6 +35,22 @@ for d in "${DEPS[@]}"; do
   fetch "$name" "$url" "$commit"
 done
 
+# Our fixes to the fetched code: tools/patches/<dependency>/*.patch, applied in name order.
+# Each is applied once (skipped when it is already in place).
+for dir in "$ROOT"/tools/patches/*/; do
+  [ -d "$dir" ] || continue
+  dep="$(basename "$dir")"
+  for patch in "$dir"*.patch; do
+    [ -f "$patch" ] || continue
+    if git -C "$TP/$dep" apply --reverse --check "$patch" 2>/dev/null; then
+      echo "ok    patch $dep/$(basename "$patch")"
+    else
+      git -C "$TP/$dep" apply "$patch"
+      echo "patch $dep/$(basename "$patch")"
+    fi
+  done
+done
+
 python3 "$ROOT/tools/export_cards.py" "$TP/BabelCDB" "$ROOT/data/passcode_map.tsv" "$ROOT/data/cards.tsv"
 python3 "$ROOT/tools/analyze_scripts.py" "$ROOT/data/cards.tsv" "$TP/CardScripts" "$ROOT/data/effects.tsv"
 echo "done. Build with: cmake -S $ROOT -B $ROOT/build -DCMAKE_BUILD_TYPE=Release && cmake --build $ROOT/build -j"
