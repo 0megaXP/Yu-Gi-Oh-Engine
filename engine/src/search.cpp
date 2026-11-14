@@ -27,6 +27,7 @@ namespace {
 // gives new threads only about 1 MB (Linux 8 MB); a worker running out of it ends the app at
 // once, with no error anywhere.
 constexpr size_t WORKER_STACK = 32u << 20;
+constexpr unsigned MAX_DEFAULT_THREADS = 8;
 
 template<class F>
 void run_workers(unsigned n, F& work) {
@@ -836,7 +837,12 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		}
 	};
 
-	unsigned n = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads) : std::max(1u, std::thread::hardware_concurrency());
+	// At most 8 search threads by default: more add little, and 16 crashed the Windows app (each
+	// thread also holds a copy of the duel). YGOE_THREADS overrides it (for tests).
+	unsigned n = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)
+	                             : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
+	if(const char* e = std::getenv("YGOE_THREADS"))
+		n = static_cast<unsigned>(std::max(1, std::atoi(e)));
 	// Warm the script cache on one thread first so the others hit memory.
 	{
 		Duel warm(db_, scripts_);
