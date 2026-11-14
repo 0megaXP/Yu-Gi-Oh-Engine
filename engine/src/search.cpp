@@ -14,10 +14,50 @@
 #include <random>
 #include <thread>
 
+#include <pthread.h>
+
 #include "ocgapi_constants.h"
 #include "pieces.h"
 
 namespace ygoe {
+
+namespace {
+// Search workers get a large stack: card scripts can nest deeply (long chains, effects that
+// summon or move cards that trigger more effects). std::thread can't set the size, and Windows
+// gives new threads only about 1 MB (Linux 8 MB); a worker running out of it ends the app at
+// once, with no error anywhere.
+constexpr size_t WORKER_STACK = 32u << 20;
+
+template<class F>
+void run_workers(unsigned n, F& work) {
+	struct Arg {
+		F* work;
+		unsigned tid;
+	};
+	std::vector<Arg> args(n);
+	std::vector<pthread_t> ids(n);
+	std::vector<bool> started(n, false);
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, WORKER_STACK);
+	for(unsigned t = 0; t < n; ++t) {
+		args[t] = Arg{&work, t};
+		started[t] = pthread_create(&ids[t], &attr, [](void* p) -> void* {
+			auto* a = static_cast<Arg*>(p);
+			(*a->work)(a->tid);
+			return nullptr;
+		}, &args[t]) == 0;
+		// no thread (out of resources): do this share of the work here
+		if(!started[t])
+			work(t);
+	}
+	pthread_attr_destroy(&attr);
+	for(unsigned t = 0; t < n; ++t)
+		if(started[t])
+			pthread_join(ids[t], nullptr);
+}
+}  // namespace
+
 
 namespace {
 
@@ -802,11 +842,7 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 		Duel warm(db_, scripts_);
 		warm.replay(roots[0].setup, roots[0].history);
 	}
-	std::vector<std::thread> pool;
-	for(unsigned t = 0; t < n; ++t)
-		pool.emplace_back(worker, t);
-	for(auto& t : pool)
-		t.join();
+	run_workers(n, worker);
 
 	out.iterations = done.load();
 	if(std::getenv("YGOE_SEARCH_DEBUG"))
