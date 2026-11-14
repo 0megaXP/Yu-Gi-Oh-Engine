@@ -53,7 +53,8 @@ bool is_pass(const std::string& l) {
 }
 
 bool starts_action(const Step& s) {
-	return s.player == 0 && !s.minor && !is_pass(s.label) &&
+	// answers to the other player are interaction, not part of a piece of the combo
+	return s.player == 0 && !s.minor && !s.answer && !is_pass(s.label) &&
 	       (s.type == DecisionType::Idle || s.type == DecisionType::Chain || s.type == DecisionType::EffectYesNo);
 }
 

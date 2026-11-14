@@ -86,6 +86,7 @@ std::vector<ChoiceExplanation> explain_line(const CardDB& db, ScriptCache& scrip
 			return out;
 		std::string action;
 		uint32_t action_code = 0;
+		bool in_answer = false;  // inside an answer to the opponent: interaction, not the combo
 		for(size_t k = 0; k < line.responses.size() && k < line.steps.size(); ++k) {
 			if(d.ended())
 				break;
@@ -101,7 +102,8 @@ std::vector<ChoiceExplanation> explain_line(const CardDB& db, ScriptCache& scrip
 				if(action_type(s.type) && !pass_like(s.label) && s.type != DecisionType::EffectYesNo) {
 					action = s.label;
 					action_code = dec.options[picked].code;
-				} else if(choice_type(s.type) && !pass_like(s.label) && static_cast<int>(points.size()) < cfg.max_choices) {
+					in_answer = s.answer;
+				} else if(!in_answer && choice_type(s.type) && !pass_like(s.label) && static_cast<int>(points.size()) < cfg.max_choices) {
 					Point p;
 					p.step = k;
 					p.action = action;

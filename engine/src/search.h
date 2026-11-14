@@ -32,6 +32,9 @@ struct Step {
 	DecisionType type = DecisionType::None;
 	std::string label;
 	bool minor = false;
+	// An activation answering the other player's chain link: interaction, not part of the
+	// player's own combo (describe() marks it "Answer: ").
+	bool answer = false;
 };
 
 struct Trajectory {

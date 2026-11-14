@@ -232,6 +232,12 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 }
 
 namespace {
+// Is picking `o` at `d` an activation answering the other player's chain link?
+bool answering(const Duel& d, const Decision& dec, const Option& o) {
+	return dec.type == DecisionType::Chain && o.kind != OptKind::Pass && d.chain_depth() > 0 &&
+	       d.chain_last_player() >= 0 && d.chain_last_player() != dec.player;
+}
+
 bool is_pass_label(const std::string& l) {
 	return l == "Don't respond" || l.rfind("Don't use", 0) == 0 || l.rfind("No:", 0) == 0 || l == "Done selecting" ||
 	       l == "Cancel";
@@ -325,7 +331,7 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 	auto take = [&](size_t pick) {
 		const Decision& dec = d.decision();
 		auto resp = dec.options[pick].response;
-		Step done{dec.player, dec.type, dec.options[pick].label, dec.minor};
+		Step done{dec.player, dec.type, dec.options[pick].label, dec.minor, answering(d, dec, dec.options[pick])};
 		if(!d.respond(resp))
 			return false;
 		out.responses.push_back(std::move(resp));
@@ -392,7 +398,7 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 			return false;
 		}
 		auto resp = dec.options[pick].response;
-		Step done{dec.player, dec.type, dec.options[pick].label, dec.minor};
+		Step done{dec.player, dec.type, dec.options[pick].label, dec.minor, answering(d, dec, dec.options[pick])};
 		if(!d.respond(resp))
 			return false;
 		out.responses.push_back(std::move(resp));
@@ -712,10 +718,11 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 						break;  // nothing legal left
 					tried[idx] = 1;
 					const Option& opt = dec.options[idx];
+					const bool answer = answering(duel, dec, opt);
 					if(duel.respond(opt.response)) {
 						responded = true;
 						traj.responses.push_back(opt.response);
-						traj.steps.push_back({dec.player, dec.type, opt.label, dec.minor});
+						traj.steps.push_back({dec.player, dec.type, opt.label, dec.minor, answer});
 						if(dec.player == me && opt.code &&
 						   (dec.type == DecisionType::Idle || dec.type == DecisionType::Chain || dec.type == DecisionType::EffectYesNo) &&
 						   opt.kind != OptKind::Pass)
@@ -866,6 +873,8 @@ std::vector<std::string> describe(const Trajectory& t, uint8_t player, bool incl
 		std::string text = s.label;
 		if(s.type == DecisionType::YesNo && text.rfind("Yes: ", 0) == 0)
 			text = text.substr(5);
+		if(s.answer && mine)
+			text = "Answer: " + text;  // interaction with the other player, not the combo
 		if(starts || lines.empty() || mine != last_mine) {
 			lines.push_back((mine ? "" : other_prefix) + text);
 		} else {
