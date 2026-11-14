@@ -143,6 +143,7 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 		for(auto& mv : out.my_moves) {
 			for(auto& t : mv.best) {
 				searcher.defer_sets(roots[t.root], t, sc.me, a.horizon_turns);
+				searcher.defer_summons(roots[t.root], t, sc.me, a.horizon_turns);
 				searcher.drop_idle_summons(roots[t.root], t, sc.me, a.horizon_turns);
 				searcher.drop_idle_responses(roots[t.root], t, sc.me, a.horizon_turns);
 			}

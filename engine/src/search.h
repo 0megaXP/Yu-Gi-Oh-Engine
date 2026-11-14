@@ -99,6 +99,9 @@ public:
 	// Removes Normal Summons / monster Sets that add nothing (the line scores as well without
 	// them), e.g. summoning a hand trap with no use for the body.
 	bool drop_idle_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
+	// Moves each Normal Summon (and monster Set) to the latest point of its Main Phase where the
+	// line still works as well: just before the first action that needs that monster.
+	bool defer_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
 	// Replays t.steps by their labels from `root`, filling in responses and reward. Fails if a
 	// step is no longer available or the result scores below `min_reward`.
 	// With `lenient`, chain windows the steps don't answer are passed, and a "__decline__" step

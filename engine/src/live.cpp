@@ -219,6 +219,32 @@ std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
 	return roots;
 }
 
+namespace {
+bool holds_back(const std::string& l) { return l.rfind("Set ", 0) == 0 || l.rfind("Normal Summon ", 0) == 0; }
+}  // namespace
+
+int LiveDuel::later_play(const Decision& d, size_t at) const {
+	// When plan_[at] is a Set or a Normal Summon: the option of the plan's next other play of this
+	// Main Phase, if it can be made now; -1 otherwise (or when plan_[at] is neither). A summon the
+	// next play needs (its own effect, a Synchro using it) isn't skipped: that play isn't offered yet.
+	if(at >= plan_.size() || !holds_back(plan_[at].label))
+		return -1;
+	for(size_t k = at + 1; k < plan_.size(); ++k) {
+		const Step& s = plan_[k];
+		if(s.player != d.player || s.type != DecisionType::Idle)
+			continue;
+		if(s.label.rfind("Go to ", 0) == 0)
+			return -1;
+		if(holds_back(s.label))
+			continue;
+		for(size_t o = 0; o < d.options.size(); ++o)
+			if(d.options[o].label == s.label)
+				return static_cast<int>(o);
+		return -1;
+	}
+	return -1;
+}
+
 int LiveDuel::choose(BotLevel level) {
 	const Decision& d = duel_->decision();
 	if(d.options.empty())
@@ -229,8 +255,19 @@ int LiveDuel::choose(BotLevel level) {
 	if(level != BotLevel::Easy && plan_pos_ < plan_.size() && plan_[plan_pos_].player == d.player &&
 	   plan_player_ == d.player) {
 		for(size_t i = 0; i < d.options.size(); ++i)
-			if(d.options[i].label == plan_[plan_pos_].label)
+			if(d.options[i].label == plan_[plan_pos_].label) {
+				// A Set or a Normal Summon waits while another play of this Main Phase in the plan
+				// can be made now (it is only played once the next play needs it).
+				if(d.type == DecisionType::Idle) {
+					int later = later_play(d, plan_pos_);
+					if(later >= 0) {
+						plan_.clear();
+						plan_pos_ = 0;
+						return later;
+					}
+				}
 				return static_cast<int>(i);
+			}
 	}
 	if(level == BotLevel::Easy) {
 		std::vector<double> w(d.options.size());
@@ -351,6 +388,7 @@ int LiveDuel::choose(BotLevel level) {
 		Trajectory t = m.best.front();
 		const RootState& r = roots[std::min(t.root, roots.size() - 1)];
 		searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
+		searcher_->defer_summons(r, t, d.player, cfg.horizon_turns);
 		searcher_->drop_idle_summons(r, t, d.player, cfg.horizon_turns);
 		searcher_->drop_idle_responses(r, t, d.player, cfg.horizon_turns);
 		return t;
@@ -437,26 +475,18 @@ int LiveDuel::choose(BotLevel level) {
 		plan_player_ = d.player;
 		if(!plan_.empty() && plan_.front().player == d.player)
 			want = plan_.front().label;
-		// Still setting first (the reordered line did not replay): play the plan's next
-		// non-Set action of this Main Phase now, and search again afterwards.
-		if(d.type == DecisionType::Idle && want.rfind("Set ", 0) == 0) {
-			for(size_t k = 1; k < plan_.size(); ++k) {
-				const Step& s = plan_[k];
-				if(s.player != d.player || s.type != DecisionType::Idle)
-					continue;
-				if(s.label.rfind("Go to ", 0) == 0)
-					break;
-				if(s.label.rfind("Set ", 0) == 0)
-					continue;
-				bool available = false;
-				for(const auto& o : d.options)
-					available |= o.label == s.label;
-				if(available) {
-					want = s.label;
-					plan_.clear();
-					plan_pos_ = 0;
-				}
-				break;
+		// A Set or a Normal Summon goes as late as it can: if the plan has another play of this
+		// Main Phase available now, make that one first and search again afterwards. The card
+		// stays in the hand until it is really the next thing to do, and if the opponent
+		// interrupts in between, the bot decides again with the new position. (A summon the next
+		// play needs, like a starter whose effect comes next, isn't skipped: that play isn't
+		// available yet.)
+		if(d.type == DecisionType::Idle && !plan_.empty() && plan_.front().label == want) {
+			int later = later_play(d, 0);
+			if(later >= 0) {
+				want = d.options[static_cast<size_t>(later)].label;
+				plan_.clear();
+				plan_pos_ = 0;
 			}
 		}
 	}

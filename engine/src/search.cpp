@@ -264,12 +264,80 @@ bool Searcher::defer_sets(const RootState& root, Trajectory& t, uint8_t player, 
 		reordered.steps.push_back(t.steps[k]);
 	double before = t.reward;
 	Trajectory saved = t;
-	t = std::move(reordered);
-	if(!replay_labels(root, t, player, horizon_turns, before)) {
-		t = std::move(saved);
-		return false;
+	Trajectory strict = reordered;
+	if(replay_labels(root, strict, player, horizon_turns, before)) {
+		t = std::move(strict);
+		return true;
 	}
-	return true;
+	// Moving a Set changes some later choices (which zone a card goes to, a window that now
+	// opens or not): replay tolerantly, keeping the order only if the board is as good.
+	if(replay_labels(root, reordered, player, horizon_turns, before, true)) {
+		t = std::move(reordered);
+		return true;
+	}
+	t = std::move(saved);
+	return false;
+}
+
+bool Searcher::defer_summons(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns) {
+	// Each Normal Summon (or monster Set) moves to the latest point of its Main Phase where the
+	// line still works with a board as good: just before the first action that needs it. If the
+	// turn is interrupted before that point, the card is still in the hand. One that nothing
+	// needs ends just before the phase ends (drop_idle_summons can then take it out).
+	auto idle_mine = [&](const Trajectory& x, size_t k) {
+		return x.steps[k].player == player && x.steps[k].type == DecisionType::Idle;
+	};
+	auto is_summon = [&](const Trajectory& x, size_t i) {
+		const Step& s = x.steps[i];
+		if(!idle_mine(x, i))
+			return false;
+		if(s.label.rfind("Normal Summon ", 0) == 0)
+			return true;
+		return s.label.rfind("Set ", 0) == 0 && i + 1 < x.steps.size() && x.steps[i + 1].type == DecisionType::Position;
+	};
+	bool changed = false;
+	int tries = 0;
+	for(size_t i = 0; i < t.steps.size() && tries < 24; ++i) {
+		if(!is_summon(t, i))
+			continue;
+		size_t j = i + 1;  // the summon plus its choices and windows, up to the next Idle step
+		while(j < t.steps.size() && t.steps[j].type != DecisionType::Idle)
+			++j;
+		// The player's later Main Phase actions it could move in front of (this phase only).
+		std::vector<size_t> spots;
+		for(size_t k = j; k < t.steps.size(); ++k) {
+			if(t.steps[k].type == DecisionType::Idle && t.steps[k].player != player)
+				break;
+			if(!idle_mine(t, k))
+				continue;
+			spots.push_back(k);
+			if(t.steps[k].label.rfind("Go to ", 0) == 0)
+				break;
+		}
+		if(spots.size() < 2)
+			continue;  // the next action is the first spot: it is already as late as it can be
+		bool moved = false;
+		for(size_t s = spots.size(); s-- > 1 && tries < 24;) {  // latest first; spots[0] = where it is now
+			++tries;
+			Trajectory cand = t;
+			std::vector<Step> block(t.steps.begin() + static_cast<long>(i), t.steps.begin() + static_cast<long>(j));
+			cand.steps.erase(cand.steps.begin() + static_cast<long>(i), cand.steps.begin() + static_cast<long>(j));
+			const size_t at = spots[s] - (j - i);
+			cand.steps.insert(cand.steps.begin() + static_cast<long>(at), block.begin(), block.end());
+			const bool ok = replay_labels(root, cand, player, horizon_turns, t.reward - 0.002, true);
+			if(std::getenv("YGOE_SUMMON_DEBUG"))
+				std::fprintf(stderr, "defer summon '%s' before '%s': %s (%.3f vs %.3f)\n", t.steps[i].label.c_str(),
+				             t.steps[spots[s]].label.substr(0, 50).c_str(), ok ? "ok" : "no", cand.reward, t.reward);
+			if(ok) {
+				t = std::move(cand);
+				changed = moved = true;
+				break;
+			}
+		}
+		if(moved)
+			i = static_cast<size_t>(-1);  // positions changed: look again from the start (each move goes later)
+	}
+	return changed;
 }
 
 namespace {
@@ -309,7 +377,14 @@ bool Searcher::drop_idle_summons(const RootState& root, Trajectory& t, uint8_t p
 			continue;
 		Trajectory candidate = t;
 		candidate.steps.erase(candidate.steps.begin() + static_cast<long>(i), candidate.steps.begin() + static_cast<long>(j));
-		if(replay_labels(root, candidate, player, horizon_turns, t.reward - 0.002)) {
+		// Strict first; tolerant when taking the summon out shifts later choices (zones).
+		Trajectory strict = candidate;
+		bool ok = replay_labels(root, strict, player, horizon_turns, t.reward - 0.002);
+		if(ok)
+			candidate = std::move(strict);
+		else
+			ok = replay_labels(root, candidate, player, horizon_turns, t.reward - 0.002, true);
+		if(ok) {
 			t = std::move(candidate);
 			changed = true;
 			--i;  // the next step now sits at index i

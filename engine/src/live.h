@@ -55,6 +55,8 @@ private:
 	bool respond_internal(size_t index);
 	void auto_resolve();
 	int choose(BotLevel level);
+	// The plan's next non-Set, non-Normal-Summon play available now, when plan_[at] is one of those (-1: none).
+	int later_play(const Decision& d, size_t at) const;
 	// Roots for the bot's search that hide the other player's hand: on turn 1 the cards still in
 	// their hand are re-drawn from their deck (keeping what they already used), each sample
 	// checked to replay to the same public position. Falls back to the true state.

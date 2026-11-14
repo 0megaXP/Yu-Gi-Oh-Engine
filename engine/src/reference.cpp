@@ -71,6 +71,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 			continue;
 		Trajectory t = *best;
 		searcher.defer_sets(root, t, 0, 1);
+		searcher.defer_summons(root, t, 0, 1);
 		searcher.drop_idle_summons(root, t, 0, 1);
 		searcher.drop_idle_responses(root, t, 0, 1);
 		Board end;

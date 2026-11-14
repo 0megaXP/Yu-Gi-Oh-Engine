@@ -165,9 +165,10 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			double body = (cv.pos & POS_FACEUP) ? 0.35 + 0.35 * std::min(cv.atk, 4000) / 4000.0 : 0.3;
 			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_MZONE, "field");
 			if(role(p, cv.code).hand_trap) {
-				// On the field a hand trap is seen and can be dealt with before it is used, and a
-				// small body is all it adds.
-				body *= 0.5;
+				// On the field a hand trap is seen and can be dealt with before it is used, and its
+				// body adds next to nothing: its ATK doesn't matter before the owner's next turn, and
+				// a card left there is one less in the hand. (At low LP the wall below still counts.)
+				body = 0.05;
 				iv *= 0.5;
 			}
 			body += wall;
