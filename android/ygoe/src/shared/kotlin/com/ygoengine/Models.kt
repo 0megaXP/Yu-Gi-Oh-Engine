@@ -320,6 +320,7 @@ class EngineException(message: String) : Exception(message)
  * [optional]: may be left out (a step of the player's own turn that also removes an opponent's card);
  * played when it can be, never a miss. [byOpponent]: the opponent's own step during the combo (what they
  * Special Summoned with Angelechy Seneschal's effect): not checked, it steers their choices there.
+ * [zone]: where the card went in the log; the checker places it there.
  */
 data class VideoStepInput(
     val action: String,
@@ -327,6 +328,8 @@ data class VideoStepInput(
     val detail: String = "",
     val optional: Boolean = false,
     val byOpponent: Boolean = false,
+    /** Where the card went, "mzone:2" / "szone:0" (sequence as its controller numbers it), ":other" for the other player's field. */
+    val zone: String = "",
 )
 
 /** A combo read from a video: its opening hand, steps and end-board field cards (official passcodes). */
@@ -346,6 +349,9 @@ data class VideoLineInput(
             JSONObject().put("action", s.action).put("code", s.code).put("detail", s.detail).also {
                 if (s.optional) it.put("optional", true)
                 if (s.byOpponent) it.put("by", 1)
+                val z = s.zone.split(":")
+                if (z.size >= 2 && (z[0] == "mzone" || z[0] == "szone") && z[1].toIntOrNull() != null)
+                    it.put("zone", JSONObject().put("loc", z[0]).put("seq", z[1].toInt()).put("other", z.getOrNull(2) == "other"))
             }
         }))
         .put("end_board", JSONArray(endBoard))

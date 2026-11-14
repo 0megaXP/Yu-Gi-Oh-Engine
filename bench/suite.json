@@ -21,21 +21,41 @@
    "steps": [
     {
      "action": "activate",
-     "code": 86457955
+     "code": 86457955,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
-     "code": 50284408
+     "code": 50284408,
+     "zone": {
+      "loc": "szone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "send_to_gy",
@@ -43,12 +63,22 @@
     },
     {
      "action": "special_summon",
-     "code": 28904860
+     "code": 28904860,
+     "zone": {
+      "loc": "mzone",
+      "seq": 3,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 73104892,
-     "by": 1
+     "by": 1,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
@@ -60,23 +90,48 @@
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
-     "code": 81797573
+     "code": 81797573,
+     "zone": {
+      "loc": "mzone",
+      "seq": 6,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 28904860
+     "code": 28904860,
+     "zone": {
+      "loc": "szone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 42410161
+     "code": 42410161,
+     "zone": {
+      "loc": "szone",
+      "seq": 2,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -88,7 +143,12 @@
     },
     {
      "action": "activate",
-     "code": 55393975
+     "code": 55393975,
+     "zone": {
+      "loc": "szone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -97,15 +157,48 @@
     {
      "action": "activate",
      "code": 81797573,
-     "optional": true
+     "optional": true,
+     "zone": {
+      "loc": "mzone",
+      "seq": 6,
+      "other": false
+     }
     },
     {
      "action": "synchro_summon",
-     "code": 73218989
+     "code": 73218989,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 12845564
+     "code": 12845564,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
+    },
+    {
+     "action": "set",
+     "code": 48340269,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
+    },
+    {
+     "action": "set",
+     "code": 40366667,
+     "zone": {
+      "loc": "szone",
+      "seq": 3,
+      "other": false
+     }
     },
     {
      "action": "activate",
@@ -136,7 +229,12 @@
    "steps": [
     {
      "action": "activate",
-     "code": 13068112
+     "code": 13068112,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -144,21 +242,41 @@
     },
     {
      "action": "activate",
-     "code": 86457955
+     "code": 86457955,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
-     "code": 55393975
+     "code": 55393975,
+     "zone": {
+      "loc": "szone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -166,28 +284,58 @@
     },
     {
      "action": "special_summon",
-     "code": 28904860
+     "code": 28904860,
+     "zone": {
+      "loc": "mzone",
+      "seq": 3,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 73104892,
-     "by": 1
+     "by": 1,
+     "zone": {
+      "loc": "mzone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
-     "code": 81797573
+     "code": 81797573,
+     "zone": {
+      "loc": "mzone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 50284408
+     "code": 50284408,
+     "zone": {
+      "loc": "szone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "send_to_gy",
@@ -195,11 +343,21 @@
     },
     {
      "action": "activate",
-     "code": 81797573
+     "code": 81797573,
+     "zone": {
+      "loc": "mzone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "synchro_summon",
-     "code": 73218989
+     "code": 73218989,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
@@ -207,15 +365,34 @@
     },
     {
      "action": "activate",
-     "code": 28904860
+     "code": 28904860,
+     "zone": {
+      "loc": "szone",
+      "seq": 2,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 42410161
+     "code": 42410161,
+     "zone": {
+      "loc": "szone",
+      "seq": 3,
+      "other": false
+     }
     },
     {
      "action": "search",
      "code": 48340269
+    },
+    {
+     "action": "set",
+     "code": 48340269,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     }
    ],
    "end_board": [
@@ -241,25 +418,50 @@
    "steps": [
     {
      "action": "normal_summon",
-     "code": 15397015
+     "code": 15397015,
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 86457955
+     "code": 86457955,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
      "code": 86673403,
-     "detail": "on the opponent's field"
+     "detail": "on the opponent's field",
+     "zone": {
+      "loc": "mzone",
+      "seq": 2,
+      "other": true
+     }
     },
     {
      "action": "activate",
-     "code": 55393975
+     "code": 55393975,
+     "zone": {
+      "loc": "szone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -267,16 +469,31 @@
     },
     {
      "action": "special_summon",
-     "code": 42410161
+     "code": 42410161,
+     "zone": {
+      "loc": "mzone",
+      "seq": 3,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
      "code": 73104892,
-     "by": 1
+     "by": 1,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 13068112
+     "code": 13068112,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -284,23 +501,48 @@
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 17782288
+     "code": 17782288,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
     },
     {
      "action": "special_summon",
-     "code": 81797573
+     "code": 81797573,
+     "zone": {
+      "loc": "mzone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 28904860
+     "code": 28904860,
+     "zone": {
+      "loc": "szone",
+      "seq": 1,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 42410161
+     "code": 42410161,
+     "zone": {
+      "loc": "szone",
+      "seq": 2,
+      "other": false
+     }
     },
     {
      "action": "search",
@@ -316,15 +558,39 @@
     },
     {
      "action": "synchro_summon",
-     "code": 15982593
+     "code": 15982593,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 15982593
+     "code": 15982593,
+     "zone": {
+      "loc": "mzone",
+      "seq": 0,
+      "other": false
+     }
     },
     {
      "action": "activate",
-     "code": 12845564
+     "code": 12845564,
+     "zone": {
+      "loc": "szone",
+      "seq": 5,
+      "other": false
+     }
+    },
+    {
+     "action": "set",
+     "code": 48340269,
+     "zone": {
+      "loc": "szone",
+      "seq": 4,
+      "other": false
+     }
     }
    ],
    "end_board": [

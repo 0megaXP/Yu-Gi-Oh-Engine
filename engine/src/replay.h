@@ -34,6 +34,12 @@ struct VideoStep {
 	// 1: the opponent's own step during the combo (what they Special Summoned with Angelechy
 	// Seneschal's effect). Not checked; it steers the opponent's choices inside the combo's effects.
 	uint8_t by = 0;
+	// Where the card went, when the log says (0: not given): LOCATION_MZONE or LOCATION_SZONE,
+	// the zone's sequence as its controller numbers it, and whether that is the other player's
+	// field (Seneschal summoned to the opponent's field). The checker places the card there.
+	uint8_t zone_loc = 0;
+	uint8_t zone_seq = 0;
+	bool zone_other = false;
 };
 
 struct VideoLine {

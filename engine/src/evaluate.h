@@ -48,6 +48,7 @@ private:
 	mutable std::unordered_map<uint64_t, uint32_t> lock_cache_;
 	mutable std::mutex mu_;
 	mutable std::unordered_map<uint32_t, CardRole> roles_[2];
+	double column_threat_[2] = {0, 0};  // chance each deck opens with a column interruption (Imperm)
 };
 
 }  // namespace ygoe

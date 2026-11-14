@@ -27,6 +27,7 @@ struct CardSummary {
 	std::string name;
 	std::string where;
 	std::string note;  // e.g. "negates an effect (0.82)"
+	int column = 0;    // field cards: column 1-5 from the owner's left (Extra Monster Zones: 2 and 4); 0 otherwise
 };
 
 struct LineReport {

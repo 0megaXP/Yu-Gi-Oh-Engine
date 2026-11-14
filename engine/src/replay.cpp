@@ -117,6 +117,7 @@ struct Node {
 	double score = 0;
 	std::string sig;
 	size_t events_seen = 0;           // duel events already looked at for activations
+	std::vector<char> zone_used;      // steps whose logged zone was already used
 	std::vector<uint32_t> chosen;     // activations chosen by a decision, not yet seen starting
 };
 
@@ -455,6 +456,12 @@ private:
 			if(std::getenv("YGOE_REPLAY_TRACE") && dec.player != 0 && dec.type != DecisionType::Chain)
 				std::fprintf(stderr, "opp decision type %d depth %d owner %d chooser %d: %s\n", static_cast<int>(dec.type), d.chain_depth(),
 				             d.chain_last_owner(), chooser ? 1 : 0, dec.options.empty() ? "" : dec.options[0].label.substr(0, 60).c_str());
+			// A zone to pick: the one the log shows for the card being placed.
+			if(dec.type == DecisionType::Place && zone_pick(dec, n, pick)) {
+				if(!take(d, n, pick))
+					return sampled;
+				continue;
+			}
 			if(dec.player != 0 && !chooser && dec.type != DecisionType::Chain && d.chain_depth() > 0 &&
 			   d.chain_last_owner() == 0 && opponent_hint_pick(dec, n, pick)) {
 				if(!take(d, n, pick))
@@ -508,6 +515,29 @@ private:
 				return sampled;
 		}
 		return sampled;
+	}
+
+	// The zone the log gives for a step around here (the action just taken, or the next few),
+	// if it is offered. Each step's zone is used once.
+	bool zone_pick(const Decision& dec, Node& n, size_t& pick) const {
+		if(n.zone_used.size() < line_.steps.size())
+			n.zone_used.resize(line_.steps.size(), 0);
+		const size_t from = n.next > 2 ? n.next - 2 : 0;
+		for(size_t k = from; k < line_.steps.size() && k < n.next + 5; ++k) {
+			const VideoStep& s = line_.steps[k];
+			if(!s.zone_loc || n.zone_used[k])
+				continue;
+			const uint8_t pl = static_cast<uint8_t>((s.by == 1 ? 1 : 0) ^ (s.zone_other ? 1 : 0));
+			for(size_t o = 0; o < dec.options.size(); ++o) {
+				const auto& r = dec.options[o].response;
+				if(r.size() == 3 && r[0] == pl && r[1] == s.zone_loc && r[2] == s.zone_seq) {
+					n.zone_used[k] = 1;
+					pick = o;
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	// The option naming the opponent's logged step closest to the next step, if any.

@@ -313,6 +313,14 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	player_hints_[1].clear();
 	chain_depth_ = 0;
 	given_.clear();
+	zone_choices_ = false;
+	for(const auto& ps : setup.players) {
+		for(const auto* v : {&ps.main, &ps.extra, &ps.hand})
+			for(uint32_t c : *v)
+				zone_choices_ = zone_choices_ || db_.cares_about_columns(c);
+		for(const auto& pc : ps.placed)
+			zone_choices_ = zone_choices_ || db_.cares_about_columns(pc.code);
+	}
 	turn_ = 0;
 	turn_player_ = 0;
 	phase_ = 0;
@@ -1017,6 +1025,81 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 			if(count == 1)
 				for(size_t z = 1; z < zones.size(); ++z)
 					add(OptKind::Choose, {zones[z][0], zones[z][1], zones[z][2]}, zone_label(zones[z]));
+			// Where a card in the duel cares about columns, the zone is a real decision. Only zones
+			// that differ in what shares their column are offered (the first free zone first): one
+			// per mix of "a card of yours / of the opponent in this column / next to it".
+			if(count == 1 && zone_choices_ && d.options.size() > 1) {
+				d.minor = false;
+				auto column = [](uint8_t pl, uint8_t loc, uint8_t seq) -> int {
+					// absolute column 0..4 seen from player 0 (Extra Monster Zones: 1 and 3)
+					int c = loc == LOCATION_MZONE && seq == 5 ? 1 : loc == LOCATION_MZONE && seq == 6 ? 3 : seq;
+					if(loc == LOCATION_SZONE && seq >= 5)
+						return -1;
+					return pl == 0 ? c : 4 - c;
+				};
+				// What sits in each column now.
+				int own[5] = {0, 0, 0, 0, 0}, opp[5] = {0, 0, 0, 0, 0};
+				const Board b = board();
+				for(uint8_t pl = 0; pl < 2; ++pl) {
+					for(const auto& c : b.mzone[pl])
+						if(c.code && c.seq < 7)
+							++(pl == d.player ? own : opp)[column(pl, LOCATION_MZONE, c.seq)];
+					for(const auto& c : b.szone[pl])
+						if(c.code && c.seq < 5)
+							++(pl == d.player ? own : opp)[column(pl, LOCATION_SZONE, c.seq)];
+				}
+				std::vector<Option> kept;
+				std::vector<int> seen;
+				for(const auto& o : d.options) {
+					if(o.response.size() != 3)
+						continue;
+					int c = column(o.response[0], o.response[1], o.response[2]);
+					int sig = o.response[1] * 1000 + (o.response[0] == d.player ? 0 : 500);
+					if(c >= 0)
+						sig += (own[c] > 0) + 2 * (opp[c] > 0) + 4 * ((c > 0 && opp[c - 1]) || (c < 4 && opp[c + 1])) +
+						       8 * ((c > 0 && own[c - 1]) || (c < 4 && own[c + 1]));
+					else
+						sig += 100 + o.response[2];
+					if(std::find(seen.begin(), seen.end(), sig) != seen.end())
+						continue;
+					seen.push_back(sig);
+					kept.push_back(o);
+					if(kept.size() >= 4)
+						break;
+				}
+				// The default (first) zone keeps cards apart from one's own cards in the same column: a
+				// Spell/Trap away from your monsters, a monster away from your Spell/Trap cards. One
+				// column interruption (Infinite Impermanence) then can't stop both. The search still
+				// weighs the other zones where a column effect wants them.
+				auto apart = [&](const Option& o) {
+					const uint8_t pl = o.response[0], loc = o.response[1], seq = o.response[2];
+					if(pl != d.player)
+						return 0;
+					int mine_other = 0;  // own cards of the other row in this column
+					const int c = column(pl, loc, seq);
+					if(c < 0)
+						return 0;
+					for(const auto& x : loc == LOCATION_MZONE ? b.szone[pl] : b.mzone[pl])
+						if(x.code && column(pl, loc == LOCATION_MZONE ? LOCATION_SZONE : LOCATION_MZONE, static_cast<uint8_t>(x.seq)) == c)
+							++mine_other;
+					return mine_other > 0 ? 1 : 0;
+				};
+				std::stable_sort(kept.begin(), kept.end(), [&](const Option& a, const Option& b2) { return apart(a) < apart(b2); });
+				// A real choice only while a column card is in play (on the field, or in the deciding
+				// player's hand); otherwise the safe default is taken without branching the search.
+				bool live = false;
+				for(uint8_t pl = 0; pl < 2 && !live; ++pl)
+					for(const auto* z : {&b.mzone[pl], &b.szone[pl]})
+						for(const auto& x : *z)
+							live = live || (x.code && db_.cares_about_columns(x.code));
+				for(const auto& x : b.hand[d.player])
+					live = live || db_.cares_about_columns(x.code);
+				const size_t offered = kept.size();
+				if(offered > 1)
+					d.options = std::move(kept);
+				if(offered <= 1 || !live)
+					d.minor = true;
+			}
 		}
 		break;
 	}

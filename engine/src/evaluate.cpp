@@ -30,6 +30,24 @@ Evaluator::Evaluator(const CardDB& db, const Deck& d0, const Deck& d1) : db_(db)
 					if(c->attribute & (1u << bit))
 						++by_attribute_[p][bit];
 			}
+	// Interruptions that hit a whole column (Infinite Impermanence: negate a monster, and the
+	// Spell/Trap Zone cards in its column can't be activated that turn): how likely each deck
+	// holds one in its opening six cards.
+	for(int p = 0; p < 2; ++p) {
+		int k = 0;
+		for(uint32_t code : decks[p]->main) {
+			const uint32_t sid = db.script_id(code);
+			if(!db.cares_about_columns(sid))
+				continue;
+			const CardRole& r = role(static_cast<uint8_t>(p), sid);
+			bool hits = false;
+			for(const auto& in : r.interrupts)
+				hits = hits || in.kind == Interrupt::NegateEffect;
+			k += hits;
+		}
+		const double n = std::max<size_t>(decks[p]->main.size(), 40);
+		column_threat_[p] = k ? 1.0 - std::pow(1.0 - k / n, 6.0) : 0.0;
+	}
 }
 
 uint32_t Evaluator::locked_attributes(uint64_t hint) const {
@@ -194,6 +212,28 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			const CardRole& r = role(p, cv.code);
 			double worth = (cv.status & kStatusDisabled) ? 0 : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 : 0.0);
 			v += std::max(0.05, iv + worth);
+		}
+		// Facing a deck with a column interruption (Infinite Impermanence): a Set or face-up
+		// Spell/Trap that can interrupt, in the same column as a monster that can, is lost with it
+		// to one card. Spread them out.
+		if(defending && column_threat_[1 - p] > 0) {
+			auto col = [](const CardView& c, bool monster) -> int {
+				if(monster)
+					return c.seq == 5 ? 1 : c.seq == 6 ? 3 : static_cast<int>(c.seq);
+				return c.seq < 5 ? static_cast<int>(c.seq) : -1;
+			};
+			bool key_monster[5] = {false, false, false, false, false};
+			for(const auto& cv : b.mzone[p])
+				if(cv.code && cv.owner == p && (cv.pos & POS_FACEUP) && !role(p, cv.code).interrupts.empty()) {
+					int c = col(cv, true);
+					if(c >= 0 && c < 5)
+						key_monster[c] = true;
+				}
+			for(const auto& cv : b.szone[p]) {
+				int c = cv.code ? col(cv, false) : -1;
+				if(c >= 0 && key_monster[c] && !role(p, cv.code).interrupts.empty())
+					v -= 0.15 * column_threat_[1 - p];
+			}
 		}
 		for(const auto& cv : b.grave[p]) {
 			// A card with an effect to use from the GY is a resource there (Angelechy Verdict and

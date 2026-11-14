@@ -101,6 +101,9 @@ std::string key_of(const Option& o) {
 double policy_weight(const Decision& d, const Option& o, uint8_t turn_player, int steps_this_turn) {
 	const bool own_turn = d.player == turn_player;
 	switch(d.type) {
+	case DecisionType::Place:
+		// Zones: the first one offered is the safe default (apart from one's own cards in the column).
+		return !d.options.empty() && &o == &d.options.front() ? 3.0 : 1.0;
 	case DecisionType::Idle: {
 		bool developing = false, can_set = false;
 		for(const auto& other : d.options) {
@@ -367,7 +370,8 @@ bool Searcher::drop_idle_summons(const RootState& root, Trajectory& t, uint8_t p
 		size_t j = i + 1;
 		bool quiet = true;  // nothing but zone/position choices and passes follow
 		while(j < t.steps.size() && t.steps[j].type != DecisionType::Idle) {
-			if(!t.steps[j].minor && t.steps[j].type != DecisionType::Position && t.steps[j].label != "Don't respond")
+			if(!t.steps[j].minor && t.steps[j].type != DecisionType::Position && t.steps[j].type != DecisionType::Place &&
+			   t.steps[j].label != "Don't respond")
 				quiet = false;
 			++j;
 		}

@@ -425,9 +425,17 @@ std::string Engine::video_lines(const std::string& request) {
 		v.id = l["id"].str();
 		for(const auto& c : l["hand"].items())
 			v.hand.push_back(static_cast<uint32_t>(c.integer()));
-		for(const auto& s : l["steps"].items())
+		for(const auto& s : l["steps"].items()) {
 			v.steps.push_back({s["action"].str(), static_cast<uint32_t>(s["code"].integer(0)), s["detail"].str(),
 			                   s["optional"].boolean(false), static_cast<uint8_t>(s["by"].integer(0) == 1 ? 1 : 0)});
+			if(s.has("zone")) {
+				const auto& z = s["zone"];
+				const std::string loc = z["loc"].str();
+				v.steps.back().zone_loc = loc == "mzone" ? 0x04 : loc == "szone" ? 0x08 : 0;
+				v.steps.back().zone_seq = static_cast<uint8_t>(z["seq"].integer(0));
+				v.steps.back().zone_other = z["other"].boolean(false);
+			}
+		}
 		for(const auto& c : l["end_board"].items())
 			v.end_board.push_back(static_cast<uint32_t>(c.integer()));
 		{

@@ -1,173 +1,173 @@
 {
  "suite": "bench/suite.json",
  "iterations": 1500,
- "seconds": 1130,
+ "seconds": 497.2773,
  "totals": {
-  "hands.engine_value": 7.9866,
-  "interrupts.engine_value": 7.0483,
-  "interrupts.kept": 0.9548,
-  "lines.engine_value": 7.7223,
-  "lines.followed": 0.9491,
-  "lines.gap": 0.2073,
-  "lines.reached": 0.6667,
-  "lines.verified": 0.3333,
+  "hands.engine_value": 8.0598,
+  "interrupts.engine_value": 6.901,
+  "interrupts.kept": 0.9541,
+  "lines.engine_value": 7.5697,
+  "lines.followed": 0.9855,
+  "lines.gap": -0.8267,
+  "lines.reached": 0.0,
+  "lines.verified": 1.0,
   "duels.ang-vs-elf": 1.0
  },
  "cases": [
   {
    "kind": "line",
    "id": "f96fb807",
-   "engine_moves": 9.0,
+   "engine_moves": 10.0,
    "engine_value": 7.989,
-   "followed": 0.9,
-   "gap": 0.994,
-   "player_value": 6.995,
-   "verified": 0.0
+   "followed": 0.9565,
+   "gap": -0.606,
+   "player_value": 8.595,
+   "verified": 1.0
   },
   {
    "kind": "line",
    "id": "7151cd9c",
    "engine_moves": 7.0,
    "engine_value": 6.947,
-   "followed": 0.9474,
-   "gap": -0.952,
-   "player_value": 7.899,
-   "verified": 0.0
+   "followed": 1.0,
+   "gap": -1.509,
+   "player_value": 8.456,
+   "verified": 1.0
   },
   {
    "kind": "line",
    "id": "75bfbb01",
-   "engine_moves": 14.0,
-   "engine_value": 8.231,
+   "engine_moves": 9.0,
+   "engine_value": 7.773,
    "followed": 1.0,
-   "gap": 0.58,
-   "player_value": 7.651,
+   "gap": -0.365,
+   "player_value": 8.138,
    "verified": 1.0
   },
   {
    "kind": "interrupt",
    "id": "f96fb807-ash",
-   "engine_value": 8.066,
+   "engine_value": 7.779,
    "free_value": 7.989,
-   "kept": 1.0096
+   "kept": 0.9737
   },
   {
    "kind": "interrupt",
    "id": "7151cd9c-ghost",
-   "engine_value": 6.947,
+   "engine_value": 6.737,
    "free_value": 6.947,
-   "kept": 1.0
+   "kept": 0.9698
   },
   {
    "kind": "interrupt",
    "id": "6ec44ec1-ghost",
-   "engine_value": 6.8,
-   "free_value": 7.315,
-   "kept": 0.9296
+   "engine_value": 7.359,
+   "free_value": 6.96,
+   "kept": 1.0573
   },
   {
    "kind": "interrupt",
    "id": "d18bc860-dominus",
    "engine_value": 6.417,
-   "free_value": 7.273,
-   "kept": 0.8823
+   "free_value": 7.047,
+   "kept": 0.9106
   },
   {
    "kind": "interrupt",
    "id": "d8e26a06-droll",
-   "engine_value": 7.904,
-   "free_value": 7.445,
-   "kept": 1.0617
+   "engine_value": 6.705,
+   "free_value": 7.05,
+   "kept": 0.9511
   },
   {
    "kind": "interrupt",
    "id": "66478904-ghost",
-   "engine_value": 6.384,
-   "free_value": 6.982,
-   "kept": 0.9144
+   "engine_value": 7.046,
+   "free_value": 6.97,
+   "kept": 1.0109
   },
   {
    "kind": "interrupt",
    "id": "d368e25c-ghost",
-   "engine_value": 6.254,
-   "free_value": 6.51,
-   "kept": 0.9607
+   "engine_value": 6.444,
+   "free_value": 6.86,
+   "kept": 0.9394
   },
   {
    "kind": "interrupt",
    "id": "57d6272c-ghost",
-   "engine_value": 7.704,
-   "free_value": 7.226,
-   "kept": 1.0662
+   "engine_value": 7.365,
+   "free_value": 7.999,
+   "kept": 0.9207
   },
   {
    "kind": "interrupt",
    "id": "cadbd4a1-infinite",
-   "engine_value": 7.358,
-   "free_value": 7.678,
-   "kept": 0.9583
+   "engine_value": 7.087,
+   "free_value": 6.892,
+   "kept": 1.0283
   },
   {
    "kind": "interrupt",
    "id": "b2e689b8-droll",
-   "engine_value": 7.49,
-   "free_value": 7.725,
-   "kept": 0.9696
+   "engine_value": 6.995,
+   "free_value": 7.684,
+   "kept": 0.9103
   },
   {
    "kind": "interrupt",
    "id": "50b074f0-mulcharmy",
-   "engine_value": 6.207,
-   "free_value": 8.27,
-   "kept": 0.7505
+   "engine_value": 5.977,
+   "free_value": 7.265,
+   "kept": 0.8227
   },
   {
    "kind": "hand",
    "id": "angelechy#0",
-   "engine_moves": 7.0,
-   "engine_value": 7.484
+   "engine_moves": 9.0,
+   "engine_value": 7.801
   },
   {
    "kind": "hand",
    "id": "angelechy#1",
    "engine_moves": 15.0,
-   "engine_value": 8.149
+   "engine_value": 7.583
   },
   {
    "kind": "hand",
    "id": "angelechy#2",
-   "engine_moves": 9.0,
-   "engine_value": 6.316
+   "engine_moves": 14.0,
+   "engine_value": 6.913
   },
   {
    "kind": "hand",
    "id": "angelechy#3",
-   "engine_moves": 13.0,
-   "engine_value": 8.212
+   "engine_moves": 12.0,
+   "engine_value": 7.12
   },
   {
    "kind": "hand",
    "id": "elfnote#0",
-   "engine_moves": 21.0,
-   "engine_value": 6.981
+   "engine_moves": 16.0,
+   "engine_value": 7.788
   },
   {
    "kind": "hand",
    "id": "elfnote#1",
-   "engine_moves": 25.0,
-   "engine_value": 8.755
+   "engine_moves": 20.0,
+   "engine_value": 8.593
   },
   {
    "kind": "hand",
    "id": "elfnote#2",
-   "engine_moves": 20.0,
-   "engine_value": 9.827
+   "engine_moves": 16.0,
+   "engine_value": 8.575
   },
   {
    "kind": "hand",
    "id": "elfnote#3",
-   "engine_moves": 9.0,
-   "engine_value": 8.169
+   "engine_moves": 14.0,
+   "engine_value": 10.105
   },
   {
    "kind": "duel",

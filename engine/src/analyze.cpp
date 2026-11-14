@@ -44,7 +44,8 @@ std::string json_cards(const std::vector<CardSummary>& v) {
 		if(i)
 			o += ",";
 		o += "{\"code\":" + std::to_string(v[i].code) + ",\"name\":" + json_str(v[i].name) +
-		     ",\"where\":" + json_str(v[i].where) + ",\"note\":" + json_str(v[i].note) + "}";
+		     ",\"where\":" + json_str(v[i].where) + ",\"note\":" + json_str(v[i].note) +
+		     (v[i].column ? ",\"column\":" + std::to_string(v[i].column) : std::string()) + "}";
 	}
 	return o + "]";
 }
@@ -81,10 +82,12 @@ std::vector<CardSummary> summarize_cards(const CardDB& db, const Board& b, uint8
 		if(c.code)
 			out.push_back({db.official_id(c.code), db.name(c.code), "Monster Zone",
 			               (c.pos & POS_FACEDOWN) ? "face-down" : (std::to_string(c.atk) + " ATK") +
-			                   (c.overlay.empty() ? "" : ", " + std::to_string(c.overlay.size()) + " material")});
+			                   (c.overlay.empty() ? "" : ", " + std::to_string(c.overlay.size()) + " material"),
+			               c.seq == 5 ? 2 : c.seq == 6 ? 4 : static_cast<int>(c.seq) + 1});
 	for(const auto& c : b.szone[p])
 		if(c.code)
-			out.push_back({db.official_id(c.code), db.name(c.code), c.seq == 5 ? "Field Zone" : "S/T Zone", (c.pos & POS_FACEDOWN) ? "set" : "face-up"});
+			out.push_back({db.official_id(c.code), db.name(c.code), c.seq == 5 ? "Field Zone" : "S/T Zone", (c.pos & POS_FACEDOWN) ? "set" : "face-up",
+			               c.seq < 5 ? static_cast<int>(c.seq) + 1 : 0});
 	if(include_hand)
 		for(const auto& c : b.hand[p])
 			out.push_back({db.official_id(c.code), db.name(c.code), "hand", ""});

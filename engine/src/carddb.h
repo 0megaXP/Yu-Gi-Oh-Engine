@@ -5,6 +5,7 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ygoe {
@@ -56,6 +57,8 @@ public:
 	// Text for an effect description value (aux.Stringid(code, n) == (code << 20) | n).
 	std::string description(uint64_t desc) const;
 	std::string text(uint32_t code) const;  // full card text
+	// Its text mentions columns: where cards are placed matters to it.
+	bool cares_about_columns(uint32_t code) const { return columns_.count(code) > 0; }
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
 
 private:
@@ -68,6 +71,7 @@ private:
 	mutable std::atomic<bool> has_learned_{false};
 	std::unordered_map<uint64_t, std::string> strings_;  // key: code*16+idx
 	std::unordered_map<uint32_t, std::string> texts_;
+	std::unordered_set<uint32_t> columns_;
 };
 
 }  // namespace ygoe

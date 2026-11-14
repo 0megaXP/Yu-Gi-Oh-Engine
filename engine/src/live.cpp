@@ -66,8 +66,9 @@ bool trivial(const Decision& d, int human) {
 		return true;
 	switch(d.type) {
 	case DecisionType::Place:
-		// A person picks their own zones (columns matter); bots take the first free one.
-		return d.player != human;
+		// A person picks their own zones. Bots take the first free one, unless a card in the duel
+		// cares about columns (then the zone is a real choice and the bot plans it).
+		return d.player != human && d.minor;
 	case DecisionType::Sort:
 	case DecisionType::Counter:
 	case DecisionType::RockPaperScissors: return true;
