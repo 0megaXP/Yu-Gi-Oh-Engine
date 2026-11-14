@@ -27,6 +27,12 @@ import org.json.JSONObject
 class YgoEngine private constructor(private var handle: Long) : Closeable {
 
     companion object {
+        /**
+         * Before an error inside the engine ends the app, the engine appends a line to [path]:
+         * the time (seconds), the engine call that was running and the error message.
+         */
+        fun crashFile(path: String) = YgoNative.crashFile(path)
+
         /** Loads the engine from a folder holding scripts.pack and the .tsv data files. Blocking. */
         fun open(packDir: File): YgoEngine {
             val h = YgoNative.create(packDir.absolutePath, packDir.absolutePath)

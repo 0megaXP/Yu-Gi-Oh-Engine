@@ -24,6 +24,8 @@ internal object YgoNative {
 
     // Live duels
     @JvmStatic external fun liveCreate(handle: Long, request: String): Long
+    /** Where the engine notes an error that ends the app, before it does (see ygoe_jni.cpp). */
+    @JvmStatic external fun crashFile(path: String)
     @JvmStatic external fun lastError(): String
     @JvmStatic external fun liveState(duel: Long): String
     @JvmStatic external fun liveRespond(duel: Long, index: Int): Boolean

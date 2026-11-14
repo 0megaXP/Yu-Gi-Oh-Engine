@@ -2,6 +2,11 @@
 // to ygoe::Engine; requests and results are JSON strings (docs/api.md).
 #include <jni.h>
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <exception>
 #include <string>
 
 #include "api.h"
@@ -60,11 +65,45 @@ ygoe::Engine* engine(jlong handle) { return reinterpret_cast<ygoe::Engine*>(hand
 ygoe::LiveDuel* live(jlong handle) { return reinterpret_cast<ygoe::LiveDuel*>(handle); }
 thread_local std::string last_error;
 
+// ---- crash notes ----
+// An error the engine doesn't catch ends the whole app (std::terminate), before the app can write
+// anything. With a crash file set, the engine first appends one line there: when, which engine
+// call was running, and the error's message, so the app can explain the crash when it restarts.
+std::string crash_file;
+std::atomic<const char*> last_call{"none"};
+
+[[noreturn]] void on_terminate() {
+	std::string what = "no error message";
+	if(auto e = std::current_exception()) {
+		try {
+			std::rethrow_exception(e);
+		} catch(const std::exception& x) {
+			what = x.what();
+		} catch(...) {
+			what = "an error that isn't a std::exception";
+		}
+	}
+	if(!crash_file.empty()) {
+		if(FILE* f = std::fopen(crash_file.c_str(), "ab")) {
+			std::fprintf(f, "%lld\tengine call: %s\t%s\n", static_cast<long long>(std::time(nullptr)), last_call.load(), what.c_str());
+			std::fclose(f);
+		}
+	}
+	std::abort();
+}
+
 }  // namespace
 
 extern "C" {
 
+// Where to note an engine crash (see on_terminate); also installs the handler.
+JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_crashFile(JNIEnv* env, jclass, jstring path) {
+	crash_file = to_string(env, path);
+	std::set_terminate(on_terminate);
+}
+
 JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_create(JNIEnv* env, jclass, jstring data_dir, jstring scripts_dir) {
+	last_call.store("create");
 	auto* e = new ygoe::Engine(to_string(env, data_dir), to_string(env, scripts_dir));
 	return reinterpret_cast<jlong>(e);
 }
@@ -74,30 +113,37 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_error(JNIEnv* env, jclass
 }
 
 JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_destroy(JNIEnv*, jclass, jlong h) {
+	last_call.store("destroy");
 	delete engine(h);
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_analyze(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("analyze");
 	return to_jstring(env, engine(h)->analyze(to_string(env, request)));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_profile(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("profile");
 	return to_jstring(env, engine(h)->profile(to_string(env, request)));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_side(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("side");
 	return to_jstring(env, engine(h)->side(to_string(env, request)));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_reference(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("reference");
 	return to_jstring(env, engine(h)->reference(to_string(env, request)));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_videoLines(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("videoLines");
 	return to_jstring(env, engine(h)->video_lines(to_string(env, request)));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_comboTree(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("comboTree");
 	return to_jstring(env, engine(h)->combo_tree(to_string(env, request)));
 }
 
@@ -114,6 +160,7 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_progress(JNIEnv* env, jcl
 // ---- live duels ----
 
 JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_liveCreate(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("liveCreate");
 	last_error.clear();
 	auto* d = engine(h)->create_live(to_string(env, request), last_error);
 	return reinterpret_cast<jlong>(d);
@@ -124,15 +171,18 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_lastError(JNIEnv* env, jc
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_liveState(JNIEnv* env, jclass, jlong d) {
+	last_call.store("liveState");
 	return to_jstring(env, live(d)->state_json());
 }
 
 JNIEXPORT jboolean JNICALL Java_com_ygoengine_YgoNative_liveRespond(JNIEnv*, jclass, jlong d, jint index) {
+	last_call.store("liveRespond");
 	return index >= 0 && live(d)->respond(static_cast<size_t>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
 // level: 0 easy, 1 normal, 2 strong. Returns the chosen move's label ("" if none).
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_liveBot(JNIEnv* env, jclass, jlong d, jint level) {
+	last_call.store("liveBot");
 	auto lv = level <= 0 ? ygoe::BotLevel::Easy : level == 1 ? ygoe::BotLevel::Normal : ygoe::BotLevel::Strong;
 	return to_jstring(env, live(d)->bot_move(lv));
 }
@@ -142,6 +192,7 @@ JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_liveCancel(JNIEnv*, jclass, 
 }
 
 JNIEXPORT void JNICALL Java_com_ygoengine_YgoNative_liveDestroy(JNIEnv*, jclass, jlong d) {
+	last_call.store("liveDestroy");
 	delete live(d);
 }
 
