@@ -790,6 +790,8 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 	};
 
 	unsigned n = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads) : std::max(1u, std::thread::hardware_concurrency());
+	if(const char* e = std::getenv("YGOE_THREADS"))  // DEBUG: force the number of search threads
+		n = static_cast<unsigned>(std::max(1, std::atoi(e)));
 	// Warm the script cache on one thread first so the others hit memory.
 	{
 		Duel warm(db_, scripts_);
