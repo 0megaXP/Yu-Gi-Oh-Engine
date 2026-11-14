@@ -149,6 +149,10 @@ res.libraryJson  // the verified lines' pieces, merged; pass as `library` (alone
 - **Request:** `{"deck", "lines": [{"id", "hand", "steps": [{"action", "code", "detail"}], "end_board"}], "beam", "tries", "seconds", "seed"}`. The actions are the ones the video reader writes (`activate`, `normal_summon`, `link_summon`, `search`, `send_to_gy`, ...).
 - **Desktop:** `ygoe-cli json lines examples/request_lines.json`.
 
+### Benchmark
+
+- **Desktop:** `ygoe-cli bench bench/suite.json --out new.json --baseline bench/baseline.json` runs a fixed set of test positions and prints each number against the last accepted run: replay lines (can the checker follow them, how close the engine's own search gets to the player's board), the same hands under the opponent's hand trap, random hands, and bot duels. See `bench/README.md`.
+
 ### Reference end boards
 
 ```kotlin

@@ -30,6 +30,9 @@ echo "== video lines (one playable line, one that isn't)"
 build/ygoe-cli json lines examples/request_lines.json > "$OUT/lines.json"
 grep -q '"verified":1,' "$OUT/lines.json"
 
+echo "== benchmark (replay lines, small budget: the checker must still follow them)"
+build/ygoe-cli bench bench/suite.json --only lines --iterations 150 --out "$OUT/bench.json" > "$OUT/bench.txt"
+python3 -c "import json,sys; t=json.load(open(sys.argv[1]))['totals']; sys.exit(0 if t['lines.followed'] >= 0.85 else 'replay lines followed: %.2f' % t['lines.followed'])" "$OUT/bench.json"
 echo "== asset pack + JNI"
 python3 tools/make_pack.py third_party/CardScripts data "$OUT/pack" > /dev/null
 mkdir -p "$OUT/classes"

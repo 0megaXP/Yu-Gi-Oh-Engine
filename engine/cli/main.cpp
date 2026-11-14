@@ -32,6 +32,11 @@
 
 using namespace ygoe;
 
+namespace ygoe {
+int run_bench(const std::string& suite, const std::string& data, const std::string& scripts,
+              const std::map<std::string, std::string>& opt);
+}
+
 namespace {
 
 struct Args {
@@ -71,6 +76,7 @@ int usage() {
 	             "  ygoe-cli side <mine.ydk> <theirs.ydk> [--simulate N] [--iterations N]\n"
 	             "  ygoe-cli proxy <deck.ydk> [count]\n"
 	             "  ygoe-cli json <analyze|profile|side> <request.json>   (the app API, see docs/api.md)\n"
+	             "  ygoe-cli bench <suite.json> [--out result.json] [--baseline old.json] [--only lines,interrupts,hands,duels]\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
@@ -240,6 +246,11 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	const std::string& cmd = a.pos[0];
+	if(cmd == "bench") {
+		if(a.pos.size() < 2)
+			return usage();
+		return run_bench(a.pos[1], a.get("data", "data"), a.get("scripts", "third_party/CardScripts"), a.opt);
+	}
 	if(cmd == "json") {
 		if(a.pos.size() < 3)
 			return usage();

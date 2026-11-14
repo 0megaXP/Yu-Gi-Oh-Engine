@@ -1,0 +1,534 @@
+{
+ "about": "Angelechy going first from YGO Omega replays (Nov 2026), against Elfnote. Values are board values (deck-neutral, the scale of Play engine lines and reference boards).",
+ "budget": {
+  "iterations": 1500,
+  "seconds": 90,
+  "line_seconds": 45
+ },
+ "opponent": "decks/elfnote_koller_wien_2026-11.ydk",
+ "lines": [
+  {
+   "id": "f96fb807",
+   "note": "uninterrupted, ends Angelechy Bastion, Angelechy Shatranga, Angelechy Destrier, Black-Winged Assault Dragon, Angelechy Endgame Problem, Angelechy Verdict, Dominus Impulse",
+   "deck": "decks/angelechy_replay_f96fb807.ydk",
+   "hand": [
+    48340269,
+    40366667,
+    59438930,
+    86457955,
+    14558127
+   ],
+   "steps": [
+    {
+     "action": "activate",
+     "code": 86457955
+    },
+    {
+     "action": "special_summon",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 50284408
+    },
+    {
+     "action": "send_to_gy",
+     "code": 54171327
+    },
+    {
+     "action": "special_summon",
+     "code": 28904860
+    },
+    {
+     "action": "special_summon",
+     "code": 73104892,
+     "by": 1
+    },
+    {
+     "action": "activate",
+     "code": 54171327
+    },
+    {
+     "action": "search",
+     "code": 17782288
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "special_summon",
+     "code": 81797573
+    },
+    {
+     "action": "activate",
+     "code": 28904860
+    },
+    {
+     "action": "activate",
+     "code": 42410161
+    },
+    {
+     "action": "search",
+     "code": 48340269
+    },
+    {
+     "action": "activate",
+     "code": 48340269
+    },
+    {
+     "action": "activate",
+     "code": 55393975
+    },
+    {
+     "action": "search",
+     "code": 12845564
+    },
+    {
+     "action": "activate",
+     "code": 81797573,
+     "optional": true
+    },
+    {
+     "action": "synchro_summon",
+     "code": 73218989
+    },
+    {
+     "action": "activate",
+     "code": 12845564
+    },
+    {
+     "action": "activate",
+     "code": 86457955
+    }
+   ],
+   "end_board": [
+    28904860,
+    42410161,
+    55393975,
+    73218989,
+    12845564,
+    48340269,
+    40366667
+   ]
+  },
+  {
+   "id": "7151cd9c",
+   "note": "uninterrupted, ends Angelechy Destrier, Angelechy Castellan, Black-Winged Assault Dragon, Angelechy Bastion, Angelechy Shatranga, Angelechy Verdict",
+   "deck": "decks/angelechy_replay_7151cd9c.ydk",
+   "hand": [
+    94145022,
+    14558127,
+    6325660,
+    42141493,
+    13068112
+   ],
+   "steps": [
+    {
+     "action": "activate",
+     "code": 13068112
+    },
+    {
+     "action": "search",
+     "code": 86457955
+    },
+    {
+     "action": "activate",
+     "code": 86457955
+    },
+    {
+     "action": "special_summon",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 55393975
+    },
+    {
+     "action": "search",
+     "code": 17782288
+    },
+    {
+     "action": "special_summon",
+     "code": 28904860
+    },
+    {
+     "action": "special_summon",
+     "code": 73104892,
+     "by": 1
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "special_summon",
+     "code": 81797573
+    },
+    {
+     "action": "activate",
+     "code": 50284408
+    },
+    {
+     "action": "send_to_gy",
+     "code": 48340269
+    },
+    {
+     "action": "activate",
+     "code": 81797573
+    },
+    {
+     "action": "synchro_summon",
+     "code": 73218989
+    },
+    {
+     "action": "activate",
+     "code": 48340269
+    },
+    {
+     "action": "activate",
+     "code": 28904860
+    },
+    {
+     "action": "activate",
+     "code": 42410161
+    },
+    {
+     "action": "search",
+     "code": 48340269
+    }
+   ],
+   "end_board": [
+    55393975,
+    50284408,
+    73218989,
+    28904860,
+    42410161,
+    48340269
+   ]
+  },
+  {
+   "id": "75bfbb01",
+   "note": "uninterrupted, ends Inspector Boarder, Angelechy Destrier, Angelechy Bastion, Angelechy Shatranga, Centur-Ion Legatia, Angelechy Endgame Problem, Angelechy Verdict",
+   "deck": "decks/angelechy_replay_75bfbb01.ydk",
+   "hand": [
+    48340269,
+    6325660,
+    15397015,
+    54171327,
+    86457955
+   ],
+   "steps": [
+    {
+     "action": "normal_summon",
+     "code": 15397015
+    },
+    {
+     "action": "activate",
+     "code": 86457955
+    },
+    {
+     "action": "special_summon",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 86673403,
+     "detail": "on the opponent's field"
+    },
+    {
+     "action": "activate",
+     "code": 55393975
+    },
+    {
+     "action": "search",
+     "code": 13068112
+    },
+    {
+     "action": "special_summon",
+     "code": 42410161
+    },
+    {
+     "action": "special_summon",
+     "code": 73104892,
+     "by": 1
+    },
+    {
+     "action": "activate",
+     "code": 13068112
+    },
+    {
+     "action": "search",
+     "code": 17782288
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "activate",
+     "code": 17782288
+    },
+    {
+     "action": "special_summon",
+     "code": 81797573
+    },
+    {
+     "action": "activate",
+     "code": 28904860
+    },
+    {
+     "action": "activate",
+     "code": 42410161
+    },
+    {
+     "action": "search",
+     "code": 80565021
+    },
+    {
+     "action": "activate",
+     "code": 54171327
+    },
+    {
+     "action": "search",
+     "code": 12845564
+    },
+    {
+     "action": "synchro_summon",
+     "code": 15982593
+    },
+    {
+     "action": "activate",
+     "code": 15982593
+    },
+    {
+     "action": "activate",
+     "code": 12845564
+    }
+   ],
+   "end_board": [
+    15397015,
+    55393975,
+    28904860,
+    42410161,
+    15982593,
+    12845564,
+    48340269
+   ]
+  }
+ ],
+ "interrupts": [
+  {
+   "id": "f96fb807-ash",
+   "note": "Ash Blossom & Joyous Spring",
+   "deck": "decks/angelechy_replay_f96fb807.ydk",
+   "hand": [
+    48340269,
+    40366667,
+    59438930,
+    86457955,
+    14558127
+   ],
+   "opponent_hand": [
+    14558127
+   ],
+   "line": "f96fb807"
+  },
+  {
+   "id": "7151cd9c-ghost",
+   "note": "Ghost Ogre & Snow Rabbit",
+   "deck": "decks/angelechy_replay_7151cd9c.ydk",
+   "hand": [
+    94145022,
+    14558127,
+    6325660,
+    42141493,
+    13068112
+   ],
+   "opponent_hand": [
+    59438930
+   ],
+   "line": "7151cd9c"
+  },
+  {
+   "id": "6ec44ec1-ghost",
+   "note": "Ghost Ogre & Snow Rabbit",
+   "deck": "decks/angelechy_replay_6ec44ec1.ydk",
+   "hand": [
+    12845564,
+    40366667,
+    80565021,
+    73628505,
+    13068112
+   ],
+   "opponent_hand": [
+    59438930
+   ]
+  },
+  {
+   "id": "d18bc860-dominus",
+   "note": "Dominus Impulse",
+   "deck": "decks/angelechy_replay_d18bc860.ydk",
+   "hand": [
+    73628505,
+    40366667,
+    14558127,
+    97268402,
+    35726888
+   ],
+   "opponent_hand": [
+    40366667
+   ]
+  },
+  {
+   "id": "d8e26a06-droll",
+   "note": "Droll & Lock Bird",
+   "deck": "decks/angelechy_replay_d8e26a06.ydk",
+   "hand": [
+    54171327,
+    32236916,
+    13068112,
+    17782288,
+    86457955
+   ],
+   "opponent_hand": [
+    94145021
+   ]
+  },
+  {
+   "id": "66478904-ghost",
+   "note": "Ghost Ogre & Snow Rabbit",
+   "deck": "decks/angelechy_replay_66478904.ydk",
+   "hand": [
+    80565021,
+    40366667,
+    86457955,
+    17782288,
+    97045737
+   ],
+   "opponent_hand": [
+    59438930
+   ]
+  },
+  {
+   "id": "d368e25c-ghost",
+   "note": "Ghost Ogre & Snow Rabbit",
+   "deck": "decks/angelechy_replay_d368e25c.ydk",
+   "hand": [
+    80565021,
+    35726888,
+    40366667,
+    35726888,
+    40366667
+   ],
+   "opponent_hand": [
+    59438930
+   ]
+  },
+  {
+   "id": "57d6272c-ghost",
+   "note": "Ghost Ogre & Snow Rabbit",
+   "deck": "decks/angelechy_replay_7151cd9c.ydk",
+   "hand": [
+    40366667,
+    80565021,
+    94145022,
+    13068112,
+    86457955
+   ],
+   "opponent_hand": [
+    59438930
+   ]
+  },
+  {
+   "id": "cadbd4a1-infinite",
+   "note": "Infinite Impermanence",
+   "deck": "decks/angelechy_replay_75bfbb01.ydk",
+   "hand": [
+    97045737,
+    14558127,
+    17782288,
+    12845564,
+    17782288
+   ],
+   "opponent_hand": [
+    10045474
+   ]
+  },
+  {
+   "id": "b2e689b8-droll",
+   "note": "Droll & Lock Bird",
+   "deck": "decks/angelechy_replay_b2e689b8.ydk",
+   "hand": [
+    54171327,
+    59438930,
+    13068112,
+    40366667,
+    97045737
+   ],
+   "opponent_hand": [
+    94145021
+   ]
+  },
+  {
+   "id": "50b074f0-mulcharmy",
+   "note": "Mulcharmy Fuwalos",
+   "deck": "decks/angelechy_replay_7151cd9c.ydk",
+   "hand": [
+    42141493,
+    35726888,
+    59438930,
+    17782288,
+    86457955
+   ],
+   "opponent_hand": [
+    42141493
+   ]
+  }
+ ],
+ "hands": [
+  {
+   "id": "angelechy",
+   "deck": "decks/angelechy_luna_mardelplata_2026-11.ydk",
+   "count": 4,
+   "seed": 11
+  },
+  {
+   "id": "elfnote",
+   "deck": "decks/elfnote_koller_wien_2026-11.ydk",
+   "count": 4,
+   "seed": 11
+  }
+ ],
+ "duels": [
+  {
+   "id": "ang-vs-elf",
+   "deck0": "decks/angelechy_luna_mardelplata_2026-11.ydk",
+   "deck1": "decks/elfnote_koller_wien_2026-11.ydk",
+   "games": 2,
+   "bot": "normal",
+   "turns": 6
+  }
+ ]
+}
