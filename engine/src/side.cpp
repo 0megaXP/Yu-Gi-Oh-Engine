@@ -56,6 +56,11 @@ CardValue value_of(const CardDB& db, uint32_t code, const std::vector<uint16_t>&
 		}
 	}
 	inter += 0.3 * second;
+	// "If you control no cards" (Mulcharmy cards): going first you end your turn with a board,
+	// so from the hand it is usually a dead card.
+	const bool dead_first = going_first && role.needs_empty_field && !(best && (best->range & LOCATION_SZONE));
+	if(dead_first)
+		inter *= 0.15;
 	const bool needs_set = best && (best->range & LOCATION_SZONE) && !(c->type & TYPE_MONSTER);
 	if(!going_first && needs_set)
 		inter *= 0.45;  // a trap you draw going second is a turn late
@@ -117,6 +122,8 @@ CardValue value_of(const CardDB& db, uint32_t code, const std::vector<uint16_t>&
 		}
 		if(!going_first && needs_set)
 			why << "; slow going second";
+		if(dead_first)
+			why << "; going first you rarely control no cards, so it is usually dead";
 	} else if(brk > 0) {
 		why << brk_why;
 		if(shape.samples)

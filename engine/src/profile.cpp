@@ -1,6 +1,8 @@
 #include <locale>
 #include "profile.h"
 
+#include <cctype>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -57,6 +59,12 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 	auto c = db.get(db.script_id(code));
 	if(!c)
 		return role;
+	{
+		std::string t = db.text(db.script_id(code));
+		for(auto& ch : t)
+			ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		role.needs_empty_field = t.find("if you control no cards") != std::string::npos;
+	}
 	const bool is_trap = c->type & TYPE_TRAP;
 	const bool is_quickplay = (c->type & TYPE_SPELL) && (c->type & TYPE_QUICKPLAY);
 	const bool is_monster = c->type & TYPE_MONSTER;

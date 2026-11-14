@@ -129,7 +129,17 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		// attack is worth more (a spare hand trap set or summoned as a wall).
 		const double wall = defending && b.lp[p] < 4000 ? 0.45 * (1.0 - std::max(0, b.lp[p]) / 4000.0) : 0.0;
 		std::map<uint32_t, int> copies;  // hand traps already counted in this hand
+		bool controls = false;  // any card on this player's field
+		for(const auto* z : {&b.mzone[p], &b.szone[p]})
+			for(const auto& c : *z)
+				controls |= c.code != 0;
 		for(const auto& cv : b.hand[p]) {
+			// "If you control no cards": with a board it can't be used from the hand. A dead card,
+			// worth little (the one to discard or shuffle away for a cost).
+			if(controls && role(p, cv.code).needs_empty_field) {
+				v += defending ? 0.12 : 0.3;
+				continue;
+			}
 			double iv = interrupts_from(cv, LOCATION_HAND, "hand");
 			if(iv > 0 && role(p, cv.code).hand_trap) {
 				// A hand trap is worth most where it is: hidden in the hand, used when it counts.

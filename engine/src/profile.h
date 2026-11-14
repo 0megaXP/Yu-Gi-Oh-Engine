@@ -57,6 +57,10 @@ struct CardRole {
 	// destroy, send, bounce, take control): what the other player gets from this monster if it is
 	// handed to them (Angelechy Opposition giving Enlisted or Destrier is giving them a removal).
 	double field_removal = 0;
+	// From the hand it can only be activated while its controller controls no cards (Mulcharmy
+	// cards, Infinite Impermanence from the hand): with a board it is a dead card there, the
+	// one to pay a discard or "from your hand" cost with.
+	bool needs_empty_field = false;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };
