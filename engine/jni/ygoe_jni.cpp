@@ -161,6 +161,15 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_progress(JNIEnv* env, jcl
 
 JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_liveCreate(JNIEnv* env, jclass, jlong h, jstring request) {
 	last_call.store("liveCreate");
+	if(const char* dir = std::getenv("YGOE_DUMP_DIR")) {  // DEBUG: keep each live duel's request
+		static int n = 0;
+		std::string path = std::string(dir) + "/live-request-" + std::to_string(++n) + ".json";
+		if(FILE* f = std::fopen(path.c_str(), "wb")) {
+			std::string r = to_string(env, request);
+			std::fwrite(r.data(), 1, r.size(), f);
+			std::fclose(f);
+		}
+	}
 	last_error.clear();
 	auto* d = engine(h)->create_live(to_string(env, request), last_error);
 	return reinterpret_cast<jlong>(d);
