@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -157,6 +158,10 @@ public:
 	int chain_depth() const { return chain_depth_; }
 	// Who activated the last link on the chain (-1 when empty).
 	int chain_last_player() const { return chain_depth_ ? chain_last_player_ : -1; }
+	// Whose play the last link is: its controller, or the player who put that card on the
+	// controller's field (Angelechy Seneschal summoned to the opponent's field by Opposition: its
+	// forced effect is part of the summoning player's combo, not the opponent's answer). -1 when empty.
+	int chain_last_owner() const { return chain_depth_ ? chain_last_owner_ : -1; }
 	// The card of the last link on the chain (script id, 0 when empty).
 	uint32_t chain_last_code() const { return chain_depth_ ? chain_last_code_ : 0; }
 
@@ -199,6 +204,9 @@ private:
 	std::array<std::vector<uint64_t>, 2> player_hints_;
 	int chain_depth_ = 0;
 	int chain_last_player_ = -1;
+	int chain_last_owner_ = -1;
+	// field slots (controller << 16 | location << 8 | sequence) holding a card another player put there
+	std::map<uint32_t, uint8_t> given_;
 	uint32_t chain_last_code_ = 0;
 	size_t steps_ = 0;
 };

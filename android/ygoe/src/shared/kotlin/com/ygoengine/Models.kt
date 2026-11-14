@@ -315,8 +315,19 @@ class EngineException(message: String) : Exception(message)
 
 // ------------------------------------------------------------------ parsing
 
-/** One step of a combo read from a video. [code] is the official passcode, 0 when unknown. */
-data class VideoStepInput(val action: String, val code: Long, val detail: String = "")
+/**
+ * One step of a combo read from a video. [code] is the official passcode, 0 when unknown.
+ * [optional]: may be left out (a step of the player's own turn that also removes an opponent's card);
+ * played when it can be, never a miss. [byOpponent]: the opponent's own step during the combo (what they
+ * Special Summoned with Angelechy Seneschal's effect): not checked, it steers their choices there.
+ */
+data class VideoStepInput(
+    val action: String,
+    val code: Long,
+    val detail: String = "",
+    val optional: Boolean = false,
+    val byOpponent: Boolean = false,
+)
 
 /** A combo read from a video: its opening hand, steps and end-board field cards (official passcodes). */
 data class VideoLineInput(
@@ -331,7 +342,12 @@ data class VideoLineInput(
     internal fun toJson() = JSONObject()
         .put("id", id)
         .put("hand", JSONArray(hand))
-        .put("steps", JSONArray(steps.map { JSONObject().put("action", it.action).put("code", it.code).put("detail", it.detail) }))
+        .put("steps", JSONArray(steps.map { s ->
+            JSONObject().put("action", s.action).put("code", s.code).put("detail", s.detail).also {
+                if (s.optional) it.put("optional", true)
+                if (s.byOpponent) it.put("by", 1)
+            }
+        }))
         .put("end_board", JSONArray(endBoard))
         .put("under", JSONArray(under))
 }

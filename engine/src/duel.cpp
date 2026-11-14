@@ -312,6 +312,7 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	player_hints_[0].clear();
 	player_hints_[1].clear();
 	chain_depth_ = 0;
+	given_.clear();
 	turn_ = 0;
 	turn_player_ = 0;
 	phase_ = 0;
@@ -479,6 +480,28 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 				last_hint_[player] = value;
 			break;
 		}
+		case MSG_MOVE: {
+			m.get<uint32_t>();
+			auto from = read_loc(m);
+			auto to = read_loc(m);
+			auto field = [](const LocInfo& l) { return !(l.loc & LOCATION_OVERLAY) && (l.loc & (LOCATION_MZONE | LOCATION_SZONE)); };
+			auto key = [](const LocInfo& l) { return static_cast<uint32_t>(l.con) << 16 | static_cast<uint32_t>(l.loc) << 8 | (l.seq & 0xff); };
+			uint8_t giver = to.con;
+			if(field(from)) {
+				auto g = given_.find(key(from));
+				if(g != given_.end()) {
+					giver = g->second;
+					given_.erase(g);
+				}
+			} else if(from.loc) {
+				giver = from.con;  // from a hand, Deck, Extra Deck, GY or banishment
+			}
+			// from one's own piles onto the other field it stays the putting player's card; moved
+			// between fields (a control change) the taker plays it
+			if(field(to) && giver != to.con && (!field(from) || from.con == to.con))
+				given_[key(to)] = giver;
+			break;
+		}
 		case MSG_CHAIN_END:
 			chain_depth_ = 0;
 			break;
@@ -520,6 +543,10 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 			events_.push_back({Event::Chaining, li.con, code, li.loc});
 			++chain_depth_;
 			chain_last_player_ = li.con;
+			{
+				auto g = given_.find(static_cast<uint32_t>(li.con) << 16 | static_cast<uint32_t>(li.loc) << 8 | (li.seq & 0xff));
+				chain_last_owner_ = g != given_.end() ? g->second : li.con;
+			}
 			chain_last_code_ = code;
 			break;
 		}

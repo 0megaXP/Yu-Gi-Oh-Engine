@@ -28,6 +28,12 @@ struct VideoStep {
 	std::string action;   // "activate", "normal_summon", "link_summon", "search", "send_to_gy", ...
 	uint32_t code = 0;    // official passcode, 0 when the card wasn't identified
 	std::string detail;   // free text: materials, targets, what was searched
+	// May be left out: a step of the player's own turn that also removes an opponent's card
+	// (Angelechy Enlisted banishing a monster). Played when it can be, never counted as a miss.
+	bool optional = false;
+	// 1: the opponent's own step during the combo (what they Special Summoned with Angelechy
+	// Seneschal's effect). Not checked; it steers the opponent's choices inside the combo's effects.
+	uint8_t by = 0;
 };
 
 struct VideoLine {

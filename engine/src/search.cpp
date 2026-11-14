@@ -235,7 +235,7 @@ namespace {
 // Is picking `o` at `d` an activation answering the other player's chain link?
 bool answering(const Duel& d, const Decision& dec, const Option& o) {
 	return dec.type == DecisionType::Chain && o.kind != OptKind::Pass && d.chain_depth() > 0 &&
-	       d.chain_last_player() >= 0 && d.chain_last_player() != dec.player;
+	       d.chain_last_owner() >= 0 && d.chain_last_owner() != dec.player;
 }
 
 bool is_pass_label(const std::string& l) {

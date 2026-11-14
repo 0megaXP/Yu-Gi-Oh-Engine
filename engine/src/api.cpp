@@ -426,7 +426,8 @@ std::string Engine::video_lines(const std::string& request) {
 		for(const auto& c : l["hand"].items())
 			v.hand.push_back(static_cast<uint32_t>(c.integer()));
 		for(const auto& s : l["steps"].items())
-			v.steps.push_back({s["action"].str(), static_cast<uint32_t>(s["code"].integer(0)), s["detail"].str()});
+			v.steps.push_back({s["action"].str(), static_cast<uint32_t>(s["code"].integer(0)), s["detail"].str(),
+			                   s["optional"].boolean(false), static_cast<uint8_t>(s["by"].integer(0) == 1 ? 1 : 0)});
 		for(const auto& c : l["end_board"].items())
 			v.end_board.push_back(static_cast<uint32_t>(c.integer()));
 		{

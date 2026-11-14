@@ -39,7 +39,7 @@ struct StepInfo {
 
 StepInfo classify(const CardDB& db, const VideoStep& s) {
 	StepInfo i;
-	if(!s.code)
+	if(!s.code || s.by != 0)
 		return i;
 	i.sid = db.script_id(s.code);
 	const std::string& a = s.action;
@@ -75,7 +75,7 @@ int count_in(const Board& b, uint32_t sid, Zone z) {
 	};
 	switch(z) {
 	case Zone::Hand: return n(b.hand[0]);
-	case Zone::Field: return n(b.mzone[0]) + n(b.szone[0]);
+	case Zone::Field: return n(b.mzone[0]) + n(b.szone[0]) + n(b.mzone[1]);
 	case Zone::Grave: return n(b.grave[0]);
 	case Zone::Banished: return n(b.banished[0]);
 	case Zone::SetZone: return n(b.szone[0]) + n(b.mzone[0]);
@@ -116,6 +116,8 @@ struct Node {
 	bool stuck = false;            // no option matched the next steps: the rest of the turn was skipped
 	double score = 0;
 	std::string sig;
+	size_t events_seen = 0;           // duel events already looked at for activations
+	std::vector<uint32_t> chosen;     // activations chosen by a decision, not yet seen starting
 };
 
 class Replayer {
@@ -143,6 +145,8 @@ public:
 
 	// A logged repeat that couldn't be played isn't counted as a miss.
 	bool repeat(size_t k) const { return k < repeat_.size() && repeat_[k]; }
+	// A step that may be left out: not a miss, and skipping it doesn't use up the skip window.
+	bool optional(size_t k) const { return k < line_.steps.size() && line_.steps[k].optional; }
 
 	const DuelSetup& setup() const { return setup_; }
 	const std::vector<uint32_t>& pool() const { return pool_; }
@@ -308,7 +312,7 @@ private:
 				if(!out.empty())
 					break;
 			}
-			if(i.kind != Kind::Ignored && n.match[k] != 1)
+			if(i.kind != Kind::Ignored && n.match[k] != 1 && !optional(k))
 				++skipped;
 			++k;
 		}
@@ -325,7 +329,8 @@ private:
 			if((i.kind == Kind::Action || i.kind == Kind::Use) && i.sid == sid &&
 			   (line_.steps[k].action == "activate" || line_.steps[k].action == "chain" || line_.steps[k].action == "use"))
 				return k;
-			++skipped;
+			if(!optional(k))
+				++skipped;
 		}
 		return SIZE_MAX;
 	}
@@ -355,6 +360,30 @@ private:
 		return !name.empty() && name.size() > 3 && text.find(name) != std::string::npos;
 	}
 
+	// Activations the rules start without a decision (a mandatory trigger: Angelechy Seneschal
+	// summoned to the opponent's field by the combo) count as the logged step they are.
+	void absorb_activations(const Duel& d, Node& n) const {
+		const auto& ev = d.events();
+		for(; n.events_seen < ev.size(); ++n.events_seen) {
+			const Event& e = ev[n.events_seen];
+			if(e.kind != Event::Chaining || !e.code)
+				continue;
+			auto c = std::find(n.chosen.begin(), n.chosen.end(), e.code);
+			if(c != n.chosen.end()) {
+				n.chosen.erase(c);  // chosen by a decision: matched (or not) where it was chosen
+				continue;
+			}
+			size_t step = pending_activation(e.code, n);
+			if(step == SIZE_MAX)
+				continue;
+			n.match[step] = 1;
+			if(step == n.next) {
+				n.next = step + 1;
+				skipped_ahead(n);
+			}
+		}
+	}
+
 	// Plays every decision that isn't one of the player's actions. Returns true if any choice
 	// was sampled (so trying again could give a different result).
 	bool advance(Duel& d, Node& n, bool sample) {
@@ -364,11 +393,17 @@ private:
 		bool opponent_acting = false;
 		auto h = hints(n);
 		for(int guard = 0; guard < 400; ++guard) {
+			absorb_activations(d, n);
 			if(d.ended() || d.turn() > 1)
 				return sampled;
 			const Decision& dec = d.decision();
 			if(dec.options.empty())
 				return sampled;
+			// a chain window inside the action: what it has summoned, searched or sent so far
+			// counts already, so the trigger the video logs next can be chained
+			if(dec.player == 0 && dec.type == DecisionType::Chain && dec.options.size() > 1 && n.next < info_.size() &&
+			   info_[n.next].kind != Kind::Action)
+				absorb_seen(n, d.board());
 			if(is_action_point(dec, n))
 				return sampled;
 			size_t pick = 0;
@@ -415,6 +450,17 @@ private:
 				}
 			}
 			bool chooser = dec.player == 0 || (opponent_acting && pass_index(dec) == SIZE_MAX);
+			// The opponent choosing inside an effect of the combo's own card on their field (Angelechy
+			// Seneschal: "each player can Special Summon ..."): what the log shows them doing, else pass.
+			if(std::getenv("YGOE_REPLAY_TRACE") && dec.player != 0 && dec.type != DecisionType::Chain)
+				std::fprintf(stderr, "opp decision type %d depth %d owner %d chooser %d: %s\n", static_cast<int>(dec.type), d.chain_depth(),
+				             d.chain_last_owner(), chooser ? 1 : 0, dec.options.empty() ? "" : dec.options[0].label.substr(0, 60).c_str());
+			if(dec.player != 0 && !chooser && dec.type != DecisionType::Chain && d.chain_depth() > 0 &&
+			   d.chain_last_owner() == 0 && opponent_hint_pick(dec, n, pick)) {
+				if(!take(d, n, pick))
+					return sampled;
+				continue;
+			}
 			if(dec.player != 0 && !chooser) {
 				// goldfish: the opponent passes whenever it can
 				opponent_acting = false;
@@ -464,6 +510,30 @@ private:
 		return sampled;
 	}
 
+	// The option naming the opponent's logged step closest to the next step, if any.
+	bool opponent_hint_pick(const Decision& dec, const Node& n, size_t& pick) const {
+		const size_t from = n.next > 3 ? n.next - 3 : 0;
+		for(size_t k = from; k < line_.steps.size() && k < n.next + 8; ++k) {
+			const VideoStep& s = line_.steps[k];
+			if(s.by != 1 || !s.code)
+				continue;
+			const std::string nm = db_.name(db_.script_id(s.code));
+			for(size_t o = 0; o < dec.options.size(); ++o)
+				if(dec.options[o].code == db_.script_id(s.code) || mentions(dec.options[o].label, nm)) {
+					pick = o;
+					return true;
+				}
+			// a yes/no ("Special Summon ...?") before the card itself is picked
+			if(dec.type == DecisionType::EffectYesNo || dec.type == DecisionType::YesNo)
+				for(size_t o = 0; o < dec.options.size(); ++o)
+					if(dec.options[o].kind == OptKind::Yes) {
+						pick = o;
+						return true;
+					}
+		}
+		return false;
+	}
+
 	static size_t pass_index(const Decision& dec) {
 		for(size_t o = 0; o < dec.options.size(); ++o)
 			if(dec.options[o].kind == OptKind::Pass || dec.options[o].kind == OptKind::No)
@@ -492,8 +562,13 @@ private:
 		const Decision& dec = d.decision();
 		auto resp = dec.options[pick].response;
 		Step s{dec.player, dec.type, dec.options[pick].label, dec.minor};
+		const Option& op = dec.options[pick];
+		const bool activation = op.code && (op.kind == OptKind::Activate || (op.kind == OptKind::Yes && dec.type == DecisionType::EffectYesNo));
+		const uint32_t code = op.code;
 		if(!d.respond(resp))
 			return false;
+		if(activation)
+			n.chosen.push_back(code);
 		n.responses.push_back(std::move(resp));
 		n.steps.push_back(std::move(s));
 		return true;
@@ -501,6 +576,7 @@ private:
 
 	// After an advance: count what the video said would happen, score, sign.
 	void finish_node(Duel& d, Node& n) {
+		absorb_activations(d, n);
 		Board now = d.board();
 		absorb_seen(n, now);
 		// steps found since the last point: the line is consistent up to here
@@ -675,7 +751,7 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 		Replayer r(db, scripts, deck, line, cfg);
 		Node best = r.run();
 		for(size_t k = 0; k < best.match.size(); ++k) {
-			if(best.match[k] == 0 && r.repeat(k))
+			if(best.match[k] == 0 && (r.repeat(k) || r.optional(k)))
 				best.match[k] = -1;
 			lc.step_match.push_back(best.match[k]);
 			if(best.match[k] >= 0)
