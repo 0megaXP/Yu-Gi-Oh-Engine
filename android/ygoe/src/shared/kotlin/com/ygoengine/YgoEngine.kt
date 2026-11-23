@@ -33,6 +33,19 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
          */
         fun crashFile(path: String) = YgoNative.crashFile(path)
 
+        /**
+         * Which calls (and answers) this Kotlin API expects of the native library. An app only
+         * loads engine builds with the same number (engine/API_COMPAT): bump both when a native
+         * call changes or goes away; adding calls doesn't need it.
+         */
+        const val API_COMPAT = 1
+
+        /** The loaded library's git commit and API number, or null for a library older than this call. */
+        fun nativeVersion(): Pair<String, Int>? = runCatching {
+            val (sha, compat) = YgoNative.version().split('\t')
+            sha to compat.trim().toInt()
+        }.getOrNull()
+
         /** Loads the engine from a folder holding scripts.pack and the .tsv data files. Blocking. */
         fun open(packDir: File): YgoEngine {
             val h = YgoNative.create(packDir.absolutePath, packDir.absolutePath)

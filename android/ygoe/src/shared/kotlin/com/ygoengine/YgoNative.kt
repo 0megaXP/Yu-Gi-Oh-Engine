@@ -11,6 +11,8 @@ internal object YgoNative {
 
     @JvmStatic external fun create(dataDir: String, scriptsDir: String): Long
     @JvmStatic external fun error(handle: Long): String
+    /** "<git commit>\t<api compat>" (engines built before Nov 2026 don't have it). */
+    @JvmStatic external fun version(): String
     @JvmStatic external fun destroy(handle: Long)
     @JvmStatic external fun analyze(handle: Long, request: String): String
     @JvmStatic external fun profile(handle: Long, request: String): String

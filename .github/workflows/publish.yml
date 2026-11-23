@@ -1,0 +1,118 @@
+name: Publish engine
+
+# The latest engine for apps that download it themselves (YGO Sandbox): the native library for
+# Windows and Android, and the asset pack (card scripts, card data, the trained value network).
+# Every push to main replaces the files of the "engine-latest" release; manifest.json, uploaded
+# last, names the commit, the API number (engine/API_COMPAT) and each file's size and SHA-256.
+# An app only takes a build with its own API number, checks every file and keeps its bundled
+# engine to fall back on.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - engine/**
+      - data/**
+      - tools/**
+      - android/**
+      - CMakeLists.txt
+      - .github/workflows/publish.yml
+  workflow_dispatch:
+
+concurrency:
+  group: publish-engine
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build the engine for Windows (MinGW-w64)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q g++-mingw-w64-x86-64-posix
+          tools/build_windows.sh "$PWD/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            out/ygoe_jni.dll
+            out/ygoe/
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build the Android library
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :ygoe:assembleRelease --no-daemon -Pygoe.abis=arm64-v8a,x86_64
+      - name: Take the native libraries out of the AAR
+        run: |
+          mkdir -p out
+          unzip -o -q android/ygoe/build/outputs/aar/*release*.aar 'jni/*' -d aar
+          for abi in arm64-v8a x86_64; do cp "aar/jni/$abi/libygoe_jni.so" "out/libygoe_jni-$abi.so"; done
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: out/
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Files and manifest
+        run: |
+          mkdir -p files
+          cp art/windows/ygoe_jni.dll files/
+          cp art/windows/ygoe/* files/
+          cp art/android/*.so files/
+          python3 - <<'EOF'
+          import hashlib, json, os, subprocess, time
+          files = {}
+          for name in sorted(os.listdir("files")):
+              data = open(os.path.join("files", name), "rb").read()
+              files[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+          sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          when = subprocess.check_output(["git", "show", "-s", "--format=%cI", "HEAD"], text=True).strip()
+          manifest = {
+              "engine": sha,
+              "committed": when,
+              "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "compat": int(open("engine/API_COMPAT").read().strip()),
+              "pack": open("files/VERSION").read().strip(),
+              "files": files,
+          }
+          json.dump(manifest, open("manifest.json", "w"), indent=1)
+          print(json.dumps(manifest, indent=1))
+          EOF
+      - name: Publish to the engine-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view engine-latest > /dev/null 2>&1; then
+            gh release create engine-latest --title "Engine (latest)" --latest=false \
+              --notes "The latest engine build, downloaded by YGO Sandbox (see .github/workflows/publish.yml). Not an app release."
+          fi
+          # the manifest goes last: an app that reads it finds the files it names (and checks them)
+          gh release upload engine-latest files/* --clobber
+          gh release upload engine-latest manifest.json --clobber

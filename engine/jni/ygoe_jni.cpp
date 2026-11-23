@@ -118,6 +118,17 @@ JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_create(JNIEnv* env, jclass,
 	return reinterpret_cast<jlong>(e);
 }
 
+#ifndef YGOE_GIT_SHA
+#define YGOE_GIT_SHA "unknown"
+#endif
+#ifndef YGOE_API_COMPAT
+#define YGOE_API_COMPAT 1
+#endif
+// "<git commit>\t<api compat>": which engine this library is.
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_version(JNIEnv* env, jclass) {
+	return to_jstring(env, std::string(YGOE_GIT_SHA) + "\t" + std::to_string(YGOE_API_COMPAT));
+}
+
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_error(JNIEnv* env, jclass, jlong h) {
 	return to_jstring(env, engine(h)->ok() ? std::string() : engine(h)->error());
 }

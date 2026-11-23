@@ -23,6 +23,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write  # to start "Publish engine" after a new network (a push by this token starts no workflow)
 
 env:
   ITERATIONS: "200"
@@ -179,6 +180,8 @@ jobs:
             git commit -m "Value network night-${{ github.run_id }}: arena score $score" \
               -m "$(cat report.json)"
             for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+            # the apps download the new network with the next published engine
+            gh workflow run publish.yml --ref main || echo "couldn't start Publish engine"
           else
             echo "arena score $score < 0.55: keeping the current network"
           fi
