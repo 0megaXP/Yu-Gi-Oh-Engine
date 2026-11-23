@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "analyze.h"
+#include "evaluate.h"
 #include "json.h"
 #include "live.h"
 #include "pieces.h"
@@ -523,6 +524,82 @@ std::string Engine::combo_tree(const std::string& request) {
 		decks.push_back(&theirs);
 	out += ",\"missing_cards\":" + missing_json(decks) + "}";
 	return out;
+}
+
+// Training positions from a recorded game (a YGO Omega replay rebuilt by the app), in the same
+// form as `ygoe-cli selfplay` writes them, so the value network also learns from real games.
+std::string Engine::replay_positions(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	Value req = Value::parse(request);
+	const int winner = static_cast<int>(req["winner"].integer(-1));
+	if(winner != 0 && winner != 1)
+		return error_json("the game has no winner");
+	auto sid = [&](int64_t c) { return c > 0 ? db_.script_id(static_cast<uint32_t>(c)) : 0u; };
+	Deck decks[2];
+	for(int p = 0; p < 2; ++p) {
+		const Value& d = req["decks"][static_cast<size_t>(p)];
+		for(const auto& x : d["main"].items())
+			decks[p].main.push_back(sid(x.integer()));
+		for(const auto& x : d["extra"].items())
+			decks[p].extra.push_back(sid(x.integer()));
+	}
+	Evaluator base(db_, decks[0], decks[1]);
+	base.set_value_net(nullptr);  // the network learns a correction to the hand-written value
+	auto view = [&](int64_t code, uint32_t pos, uint8_t p, uint8_t loc, uint32_t seq) {
+		CardView v;
+		v.code = sid(code);
+		v.pos = pos;
+		v.con = v.owner = p;
+		v.loc = loc;
+		v.seq = seq;
+		if(const CardInfo* ci = v.code ? db_.get(v.code) : nullptr) {
+			v.type = ci->type;
+			v.atk = ci->atk;
+			v.def = ci->def;
+			v.level = ci->lv();
+		}
+		return v;
+	};
+	const std::string game = req["game"].str();
+	const bool finished = req["finished"].boolean(true);
+	std::ostringstream o;
+	int n = 0;
+	for(const auto& bj : req["boards"].items()) {
+		Board b;
+		b.turn = static_cast<uint32_t>(bj["turn"].integer());
+		b.turn_player = static_cast<uint8_t>(bj["turn_player"].integer() & 1);
+		for(uint8_t p = 0; p < 2; ++p) {
+			const Value& s = bj["players"][p];
+			b.lp[p] = static_cast<int32_t>(s["lp"].integer(8000));
+			for(const auto& c : s["hand"].items())
+				b.hand[p].push_back(view(c.integer(), POS_FACEUP, p, LOCATION_HAND, 0));
+			for(const auto& c : s["grave"].items())
+				b.grave[p].push_back(view(c.integer(), POS_FACEUP, p, LOCATION_GRAVE, 0));
+			for(const auto& c : s["banished"].items())
+				b.banished[p].push_back(view(c.integer(), POS_FACEUP, p, LOCATION_REMOVED, 0));
+			b.deck[p].resize(static_cast<size_t>(std::max<int64_t>(0, s["deck"].integer())));
+			b.extra[p].resize(static_cast<size_t>(std::max<int64_t>(0, s["extra"].integer())));
+			for(const auto& c : s["mzone"].items())
+				b.mzone[p].push_back(view(c["c"].integer(), static_cast<uint32_t>(c["p"].integer(POS_FACEUP_ATTACK)), p,
+				                          LOCATION_MZONE, static_cast<uint32_t>(c["s"].integer())));
+			for(const auto& c : s["szone"].items())
+				b.szone[p].push_back(view(c["c"].integer(), static_cast<uint32_t>(c["p"].integer(POS_FACEUP)), p,
+				                          LOCATION_SZONE, static_cast<uint32_t>(c["s"].integer())));
+		}
+		const uint8_t next = static_cast<uint8_t>(1 - b.turn_player);
+		for(uint8_t me = 0; me < 2; ++me) {
+			auto ev = base.evaluate(b, me, next);
+			auto f = base.features(b, me, next, ev.value);
+			o << "{\"z\":" << (winner == me ? 1 : 0) << ",\"fin\":" << (finished ? 1 : 0) << ",\"raw\":" << ev.raw
+			  << ",\"turn\":" << b.turn << ",\"game\":" << quote(game) << ",\"src\":\"replay\",\"f\":[";
+			for(size_t i = 0; i < f.size(); ++i)
+				o << (i ? "," : "") << f[i];
+			o << "]}\n";
+			++n;
+		}
+	}
+	return "{\"count\":" + std::to_string(n) + ",\"jsonl\":" + quote(o.str()) + "}";
 }
 
 std::string Engine::card_names(const std::string& request) {

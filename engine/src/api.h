@@ -40,6 +40,10 @@ public:
 	//  "beam", "tries", "seconds", "seed"} -> each line replayed and checked by the rules, plus the
 	// combo pieces of the verified ones (docs/api.md, Video lines)
 	std::string video_lines(const std::string& request);
+	// {"decks":[{main,extra},{main,extra}], "winner":0|1, "finished":bool, "game":id, "boards":[{"turn",
+	//  "turn_player", "players":[{lp, hand:[ids], grave, banished, deck:n, extra:n, mzone:[{c,p,s}], szone}]}]}
+	// -> {"count", "jsonl"}: value-network training positions (tools/ml), both sides of each board.
+	std::string replay_positions(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
 	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and

@@ -29,6 +29,12 @@ do, not by name, so the network works for cards it never saw.
    hours, with the current network. Each Main Phase decision is written from both sides.
 2. **Train**: `train.py` learns from tonight's positions plus the last 7 nights' (stored in the
    `ml-data` release), continuing from the current network. 15% of the games are held out.
+   Real games join them: the YGO Sandbox app turns the player's YGO Omega replays into positions
+   (the board after the actions of each Main Phase, from both sides, with who won; the engine's
+   `replay_positions` call writes them like self-play does, marked `"src":"replay"`) and uploads
+   them to the `ml-data` release as `replays-*.jsonl.gz`. All of them are kept and counted three
+   times. They are numbers only: no card names, players or accounts. In a replay the opponent's
+   hand is hidden, so their hand features count unknown cards.
 3. **Check**: the new network must predict the held-out results better than the plain evaluator
    (validation log-loss lower by 0.002).
 4. **Arena**: 40 bot games, the new network against the current one, both seats and decks in

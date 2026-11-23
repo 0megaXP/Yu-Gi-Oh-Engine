@@ -152,6 +152,11 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_videoLines(JNIEnv* env, j
 	return to_jstring(env, engine(h)->video_lines(to_string(env, request)));
 }
 
+JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_replayPositions(JNIEnv* env, jclass, jlong h, jstring request) {
+	last_call.store("replayPositions");
+	return to_jstring(env, engine(h)->replay_positions(to_string(env, request)));
+}
+
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_comboTree(JNIEnv* env, jclass, jlong h, jstring request) {
 	last_call.store("comboTree");
 	return to_jstring(env, engine(h)->combo_tree(to_string(env, request)));

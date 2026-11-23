@@ -272,6 +272,7 @@ int main(int argc, char** argv) {
 		                  : what == "reference" ? engine.reference(ss.str())
 		                  : what == "tree" ? engine.combo_tree(ss.str())
 		                  : what == "lines" ? engine.video_lines(ss.str())
+		                  : what == "positions" ? engine.replay_positions(ss.str())
 		                  : std::string("{\"error\":\"unknown call\"}");
 		std::printf("%s\n", out.c_str());
 		return out.rfind("{\"error\"", 0) == 0 ? 1 : 0;

@@ -55,6 +55,16 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
     }
 
     /**
+     * Value-network training positions from a recorded game: [request] holds both decks, the
+     * winner and the boards ([com.ygoengine] docs: Engine::replay_positions). Returns the
+     * positions as JSON lines (the form tools/ml/train.py reads) and how many there are.
+     */
+    suspend fun replayPositions(request: JSONObject): Pair<String, Int> = withContext(Dispatchers.Default) {
+        val o = Parse.checked(YgoNative.replayPositions(live(), request.toString()))
+        o.optString("jsonl") to o.optInt("count")
+    }
+
+    /**
      * Side-deck plan for [mine] against [theirs], going first and going second.
      * With [simulateTurns] > 0 the engine first plays that many opening turns for the opponent
      * and rates your board breakers against what their boards actually contain (slower).

@@ -117,6 +117,15 @@ jobs:
           gzip -kf "night-${{ github.run_id }}.jsonl"
           for f in history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
           ls -la history || true
+          # real games: positions the YGO Sandbox app made from players' YGO Omega replays
+          # (replays-*.jsonl.gz, all kept), counted 3 times next to the self-play ones
+          mkdir -p replays
+          gh release download ml-data --pattern 'replays-*.jsonl.gz' --dir replays 2>/dev/null || true
+          for f in replays/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
+          if ls replays/*.jsonl > /dev/null 2>&1; then
+            for k in 1 2 3; do cat replays/*.jsonl; done > history/replays.jsonl
+            echo "replay positions: $(cat replays/*.jsonl | wc -l)"
+          fi
       - name: Train
         run: |
           python3 -m pip install --quiet --break-system-packages numpy || sudo apt-get install -y python3-numpy
