@@ -73,7 +73,8 @@ jobs:
           chmod +x build/ygoe-cli
           hours="${{ github.event.inputs.hours || '4.5' }}"
           secs=$(python3 -c "print(int(float('$hours') * 3600))")
-          decks=$(ls decks/*.ydk bench/decks/*.ydk | sort -u)
+          # the top decks of the current format (decks/: YCS and regional top cuts)
+          decks=$(ls decks/*.ydk | sort -u)
           mkdir -p out
           # one process per core; each stops after its time (a cut game's positions are not written)
           for core in 1 2 3 4; do

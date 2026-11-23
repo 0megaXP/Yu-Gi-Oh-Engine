@@ -198,8 +198,9 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 	double points = 0;
 	int played = 0;
 	for(int gi = 0; gi < games; ++gi) {
-		// deck pairs in turn; the new network sits first, then second, with the same deck pair
-		const size_t pair = static_cast<size_t>(gi / 2);
+		// deck pairs in turn (each --seed starts further along, so parallel arenas cover different
+		// pairs); the new network sits first, then second, with the same deck pair
+		const size_t pair = static_cast<size_t>(gi / 2) + static_cast<size_t>((seed - 1) * static_cast<uint64_t>((games + 1) / 2));
 		const Deck& da = decks[pair % decks.size()];
 		const Deck& db2 = decks[(pair / decks.size() + 1 + pair) % decks.size()];
 		const bool new_first = gi % 2 == 0;

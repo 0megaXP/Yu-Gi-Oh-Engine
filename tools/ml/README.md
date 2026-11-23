@@ -24,8 +24,8 @@ do, not by name, so the network works for cards it never saw.
 
 ## The nightly pipeline (`.github/workflows/ml.yml`, "Learn")
 
-1. **Self-play**: 8 runners × 4 processes play bot games (all decks in `decks/` and
-   `bench/decks/`, random pairs, Normal bots at 200 iterations, games cut at turn 12) for 4.5
+1. **Self-play**: 8 runners × 4 processes play bot games (the top decks of the current format
+   in `decks/`, random pairs including mirrors, Normal bots at 200 iterations, games cut at turn 12) for 4.5
    hours, with the current network. Each Main Phase decision is written from both sides.
 2. **Train**: `train.py` learns from tonight's positions plus the last 7 nights' (stored in the
    `ml-data` release), continuing from the current network. 15% of the games are held out.
@@ -40,6 +40,17 @@ quick try. Reports (`learn-report` artifact): validation log-loss, arena games, 
 network even when it was not kept.
 
 The app uses a new network once its engine is updated to that commit (the usual engine bump).
+
+## Decks
+
+`decks/` holds the best decks of the current format, from recent top cuts: YCS Orlando
+(November 2026) winner Angelechy (Kite), runner-up Elfnote Ars Magna (Bellafiore), Radiant
+Typhoon (Dupee, Top 8), Power Patron Ars Magna (Shepard, Top 16) and Witchcrafter Fairy Tail
+Magistus (Rodriguez Monzon, Top 32), plus the regional lists
+of Angelechy (Luna, Mar del Plata) and Elfnote Ars Magna (Koller, Wien). Angelechy and
+Elfnote Ars Magna made 21 of Orlando's 32 top decks, so they get two lists each. When the
+format changes, replace them: the network learns from these games, so it learns the format
+it plays.
 
 ## By hand
 
