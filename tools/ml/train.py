@@ -14,6 +14,7 @@ better), which the nightly pipeline uses as a first check before the arena.
 import argparse
 import json
 import math
+import os
 import sys
 
 import numpy as np
@@ -24,6 +25,9 @@ T = 2.5  # the evaluator's temperature: score = sigmoid(raw / T)
 def load(paths):
     F, R, Z, G = [], [], [], []
     for p in paths:
+        if not os.path.isfile(p):
+            print(f"skipping {p}: no such file", file=sys.stderr)
+            continue
         with open(p) as fh:
             for line in fh:
                 line = line.strip()

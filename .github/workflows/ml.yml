@@ -129,6 +129,7 @@ jobs:
       - name: Train
         run: |
           python3 -m pip install --quiet --break-system-packages numpy || sudo apt-get install -y python3-numpy
+          shopt -s nullglob  # the first night has no history: the pattern must vanish, not stay as text
           init=""
           [ -f data/value_net.json ] && init="--init data/value_net.json"
           python3 tools/ml/train.py "night-${{ github.run_id }}.jsonl" history/*.jsonl $init \
