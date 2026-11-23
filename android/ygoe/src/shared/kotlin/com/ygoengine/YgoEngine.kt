@@ -59,6 +59,36 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
      * winner and the boards ([com.ygoengine] docs: Engine::replay_positions). Returns the
      * positions as JSON lines (the form tools/ml/train.py reads) and how many there are.
      */
+    /**
+     * Follows a YGO Omega replay in the rules core (engine/src/follow.h): [messages] are its duel
+     * messages as the saving player got them, [decks] the players' lists when the replay keeps
+     * them (main and extra, official passcodes). Gives how far it could follow the game and the
+     * value-network training positions taken along the way (JSON lines, tools/ml).
+     */
+    suspend fun followReplay(
+        messages: List<ByteArray>,
+        decks: List<Pair<List<Long>, List<Long>>?>,
+        game: String,
+        perTurn: Int = 6,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): FollowResult {
+        val enc = java.util.Base64.getEncoder()
+        val req = JSONObject()
+            .put("messages", JSONArray(messages.map { enc.encodeToString(it) }))
+            .put("decks", JSONArray(decks.map { d ->
+                d?.let { JSONObject().put("main", JSONArray(it.first)).put("extra", JSONArray(it.second)) } ?: JSONObject.NULL
+            }))
+            .put("game", game)
+            .put("per_turn", perTurn)
+        val o = Parse.checked(runNative(onProgress) { YgoNative.followReplay(it, req.toString()) })
+        return FollowResult(
+            positions = o.optInt("positions"), jsonl = o.optString("jsonl"),
+            events = o.optInt("events"), followed = o.optInt("followed"),
+            turns = o.optInt("turns"), turnsFollowed = o.optInt("turns_followed"),
+            complete = o.optBoolean("complete"), winner = o.optInt("winner", -1), stopped = o.optString("stopped"),
+        )
+    }
+
     suspend fun replayPositions(request: JSONObject): Pair<String, Int> = withContext(Dispatchers.Default) {
         val o = Parse.checked(YgoNative.replayPositions(live(), request.toString()))
         o.optString("jsonl") to o.optInt("count")

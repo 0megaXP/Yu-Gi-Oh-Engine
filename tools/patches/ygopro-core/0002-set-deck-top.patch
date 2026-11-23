@@ -1,0 +1,45 @@
+diff --git a/ocgapi.cpp b/ocgapi.cpp
+index 26dc09c..49a0594 100644
+--- a/ocgapi.cpp
++++ b/ocgapi.cpp
+@@ -299,3 +299,26 @@ void* OCG_DuelQueryField(OCG_Duel ocg_duel, uint32_t* length) {
+ 		*length = static_cast<uint32_t>(query.size());
+ 	return query.data();
+ }
++
++void OCG_DuelSetDeckTop(OCG_Duel ocg_duel, uint8_t team, const uint32_t* codes, uint32_t count) {
++	auto* pduel = static_cast<duel*>(ocg_duel);
++	if(!pduel || team > 1 || !codes)
++		return;
++	auto& deck = pduel->game_field->player[team].list_main;
++	size_t placed = 0;  // cards already put on top (the back of the list)
++	for(uint32_t k = 0; k < count; ++k) {
++		const size_t limit = deck.size() - placed;
++		for(size_t i = limit; i-- > 0;) {
++			card* c = deck[i];
++			if(c->data.code == codes[k] || (c->data.alias && c->data.alias == codes[k])) {
++				deck.erase(deck.begin() + static_cast<std::ptrdiff_t>(i));
++				deck.insert(deck.end() - static_cast<std::ptrdiff_t>(placed), c);
++				// each one goes under the ones placed before it: codes[0] stays on top
++				++placed;
++				break;
++			}
++		}
++	}
++	pduel->game_field->reset_sequence(team, LOCATION_DECK);
++}
++
+diff --git a/ocgapi.h b/ocgapi.h
+index b95a2cf..9082d7a 100644
+--- a/ocgapi.h
++++ b/ocgapi.h
+@@ -38,6 +38,9 @@ OCGAPI int OCG_DuelProcess(OCG_Duel ocg_duel);
+ OCGAPI void* OCG_DuelGetMessage(OCG_Duel ocg_duel, uint32_t* length);
+ OCGAPI void OCG_DuelSetResponse(OCG_Duel ocg_duel, const void* buffer, uint32_t length);
+ OCGAPI int OCG_LoadScript(OCG_Duel ocg_duel, const char* buffer, uint32_t length, const char* name);
++/* ygoe: puts the Main Deck cards with these codes on top, codes[0] topmost (for following a
++   recorded duel: the recorded draws come next). Cards not found are skipped. No message. */
++OCGAPI void OCG_DuelSetDeckTop(OCG_Duel ocg_duel, uint8_t team, const uint32_t* codes, uint32_t count);
+ 
+ OCGAPI uint32_t OCG_DuelQueryCount(OCG_Duel ocg_duel, uint8_t team, uint32_t loc);
+ OCGAPI void* OCG_DuelQuery(OCG_Duel ocg_duel, uint32_t* length, const OCG_QueryInfo* info_ptr);

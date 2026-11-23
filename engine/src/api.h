@@ -44,6 +44,9 @@ public:
 	//  "turn_player", "players":[{lp, hand:[ids], grave, banished, deck:n, extra:n, mzone:[{c,p,s}], szone}]}]}
 	// -> {"count", "jsonl"}: value-network training positions (tools/ml), both sides of each board.
 	std::string replay_positions(const std::string& request);
+	// {"messages": [base64 message], "decks": [{main, extra}|null x2], "game", "per_turn"} -> a YGO Omega
+	// replay followed by the rules core (follow.h): how far it got, and value-network positions.
+	std::string follow_replay(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
 	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and
@@ -55,6 +58,7 @@ public:
 	Progress progress() const;
 
 private:
+	std::string follow_replay_impl(const struct FollowInput& in);
 	void set_progress(const std::string& phase, int done, int total);
 	std::string missing_json(const std::vector<const Deck*>& decks);
 

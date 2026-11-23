@@ -658,3 +658,21 @@ internal object Parse {
         )
     }
 }
+
+/** A YGO Omega replay followed by the rules core ([YgoEngine.followReplay]). */
+data class FollowResult(
+    /** Value-network training positions (JSON lines). */
+    val positions: Int,
+    val jsonl: String,
+    /** What the replay shows (moves, summons, activations, ...) and how much of it was reproduced. */
+    val events: Int,
+    val followed: Int,
+    val turns: Int,
+    val turnsFollowed: Int,
+    val complete: Boolean,
+    /** The recorded winner (0/1), -1 when the replay doesn't say. */
+    val winner: Int,
+    /** Why it stopped ("" when complete). */
+    val stopped: String,
+)
+

@@ -20,6 +20,7 @@
 #include "analyze.h"
 #include "json.h"
 #include "api.h"
+#include "follow.h"
 #include "live.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
@@ -288,6 +289,23 @@ int main(int argc, char** argv) {
 			return usage();
 		std::vector<std::string> decks(a.pos.begin() + 1, a.pos.end());
 		return cmd == "selfplay" ? run_selfplay(decks, db, scripts, a.opt) : run_arena(decks, db, scripts, a.opt);
+	}
+	if(cmd == "followtest") {
+		// ygoe-cli followtest a.ydk b.ydk [--seed N] [--turns T] [--games G]: random games, recorded
+		// as YGO Omega would have, followed back (follow.h)
+		if(a.pos.size() < 3)
+			return usage();
+		Deck d0, d1;
+		std::string err;
+		if(!load_ydk(a.pos[1], d0, &err) || !load_ydk(a.pos[2], d1, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		const uint64_t seed = std::stoull(a.get("seed", "1"));
+		const int games = std::stoi(a.get("games", "1"));
+		for(int g = 0; g < games; ++g)
+			std::printf("%s\n", follow_selftest(db, scripts, d0, d1, seed + static_cast<uint64_t>(g), std::stoi(a.get("turns", "6"))).c_str());
+		return 0;
 	}
 	if(cmd == "analyze")
 		return cmd_analyze(db, scripts, a);

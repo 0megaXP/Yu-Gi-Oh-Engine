@@ -29,12 +29,18 @@ do, not by name, so the network works for cards it never saw.
    hours, with the current network. Each Main Phase decision is written from both sides.
 2. **Train**: `train.py` learns from tonight's positions plus the last 7 nights' (stored in the
    `ml-data` release), continuing from the current network. 15% of the games are held out.
-   Real games join them: the YGO Sandbox app turns the player's YGO Omega replays into positions
-   (the board after the actions of each Main Phase, from both sides, with who won; the engine's
-   `replay_positions` call writes them like self-play does, marked `"src":"replay"`) and uploads
-   them to the `ml-data` release as `replays-*.jsonl.gz`. All of them are kept and counted three
-   times. They are numbers only: no card names, players or accounts. In a replay the opponent's
-   hand is hidden, so their hand features count unknown cards.
+   Real games join them: the YGO Sandbox app has the engine **follow** the player's YGO Omega
+   replays in the rules core (`engine/src/follow.{h,cpp}`, `Engine::follow_replay`): the Decks are
+   stacked so the recorded draws come in order, hidden cards are known in hindsight, and at each
+   decision of either player the option is chosen whose result matches what the replay shows next
+   (backing up a few decisions when needed). Positions are taken along the way exactly as
+   self-play takes them (the turn player's Main and Battle Phase decisions, and answers with an
+   activation, up to 6 per turn), with the rules core's own board. Where a game can't be followed
+   any further (a card that works differently in Omega, a coin flip) it stops and keeps what came
+   before. The app uploads them to the `ml-data` release as `replays-*.jsonl.gz`, marked
+   `"src":"replay"`; all are kept and counted three times. Numbers only: no card names, players or
+   accounts. `ygoe-cli followtest a.ydk b.ydk --games N` checks the follower on random games
+   recorded the way Omega records them (`YGOE_FOLLOW_DEBUG=1` shows where one stops).
 3. **Check**: the new network must predict the held-out results better than the plain evaluator
    (validation log-loss lower by 0.002).
 4. **Arena**: 40 bot games, the new network against the current one, both seats and decks in

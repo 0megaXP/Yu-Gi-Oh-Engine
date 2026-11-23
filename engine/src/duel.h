@@ -4,6 +4,7 @@
 // (DuelSetup, list of responses given so far). Duel::replay() rebuilds any state
 // deterministically from that pair; the search uses this to branch.
 #pragma once
+#include <functional>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -64,6 +65,10 @@ struct Option {
 	uint64_t desc = 0;         // effect description id
 	std::vector<uint8_t> response;
 	std::string label;
+	// The cards a selection picks (Card, Tribute and Sum choices): codes, locations and sequences.
+	std::vector<uint32_t> codes;
+	std::vector<uint8_t> locs;
+	std::vector<uint32_t> seqs;
 };
 
 struct Decision {
@@ -178,6 +183,10 @@ public:
 	const CardDB& db() const { return db_; }
 	// Cards each player is known to play, used to restrict "declare a card name" choices.
 	void set_declare_pool(std::vector<uint32_t> pool) { declare_pool_ = std::move(pool); }
+	// Every raw message batch the rules core sends, as it comes (null: none). For following recorded duels.
+	void set_tap(std::function<void(const uint8_t*, uint32_t)> tap) { tap_ = std::move(tap); }
+	// Puts these Main Deck cards (script ids) on top of `player`'s Deck, codes[0] topmost.
+	void set_deck_top(uint8_t player, const std::vector<uint32_t>& codes);
 
 private:
 	void process();
@@ -191,6 +200,7 @@ private:
 	// can be continued from any thread (it used to be per thread, see duel.cpp).
 	DuelReaders readers_{&db_, &scripts_};
 	void* duel_ = nullptr;
+	std::function<void(const uint8_t*, uint32_t)> tap_;
 	Decision decision_;
 	bool ended_ = false;
 	bool retry_ = false;

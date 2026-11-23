@@ -9,6 +9,7 @@
 
 #include "analyze.h"
 #include "evaluate.h"
+#include "follow.h"
 #include "json.h"
 #include "live.h"
 #include "pieces.h"
@@ -600,6 +601,62 @@ std::string Engine::replay_positions(const std::string& request) {
 		}
 	}
 	return "{\"count\":" + std::to_string(n) + ",\"jsonl\":" + quote(o.str()) + "}";
+}
+
+namespace {
+std::vector<uint8_t> from_base64(const std::string& in) {
+	static int8_t t[256];
+	static bool init = false;
+	if(!init) {
+		std::fill(std::begin(t), std::end(t), static_cast<int8_t>(-1));
+		const char* a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+		for(int i = 0; i < 64; ++i)
+			t[static_cast<uint8_t>(a[i])] = static_cast<int8_t>(i);
+		init = true;
+	}
+	std::vector<uint8_t> out;
+	uint32_t acc = 0;
+	int bits = 0;
+	for(unsigned char c : in) {
+		if(t[c] < 0)
+			continue;
+		acc = (acc << 6) | static_cast<uint32_t>(t[c]);
+		bits += 6;
+		if(bits >= 8) {
+			bits -= 8;
+			out.push_back(static_cast<uint8_t>(acc >> bits));
+		}
+	}
+	return out;
+}
+}  // namespace
+
+// {"messages": [base64 of each replay message], "decks": [{main, extra}|null, ...], "game", "per_turn"}
+// -> the replay followed by the rules (follow.h): how far, and value-network positions.
+std::string Engine::follow_replay(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	Value req = Value::parse(request);
+	FollowInput in;
+	for(const auto& m : req["messages"].items())
+		in.messages.push_back(from_base64(m.str()));
+	for(int p = 0; p < 2; ++p) {
+		const Value& d = req["decks"][static_cast<size_t>(p)];
+		if(!d.is_object())
+			continue;
+		in.has_deck[p] = true;
+		in.decks[p].main = codes(d["main"]);
+		in.decks[p].extra = codes(d["extra"]);
+	}
+	in.game = req["game"].str();
+	in.per_turn = static_cast<int>(req["per_turn"].integer(6));
+	in.max_trials = static_cast<int>(req["max_trials"].integer(3000));
+	return follow_replay_impl(in);
+}
+
+std::string Engine::follow_replay_impl(const FollowInput& in) {
+	std::lock_guard<std::mutex> run(run_mu_);
+	return ygoe::follow_replay(db_, *scripts_, in).to_json();
 }
 
 std::string Engine::card_names(const std::string& request) {

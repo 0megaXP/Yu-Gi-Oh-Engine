@@ -432,12 +432,19 @@ bool Duel::replay(const DuelSetup& setup, const std::vector<std::vector<uint8_t>
 	return true;
 }
 
+void Duel::set_deck_top(uint8_t player, const std::vector<uint32_t>& codes) {
+	if(duel_ && player < 2 && !codes.empty())
+		OCG_DuelSetDeckTop(duel_, player, codes.data(), static_cast<uint32_t>(codes.size()));
+}
+
 void Duel::process() {
 	decision_ = {};
 	while(true) {
 		int status = OCG_DuelProcess(duel_);
 		uint32_t len = 0;
 		auto* buf = static_cast<const uint8_t*>(OCG_DuelGetMessage(duel_, &len));
+		if(tap_)
+			tap_(buf, len);
 		parse_messages(buf, len);
 		if(retry_)
 			return;
@@ -916,6 +923,11 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 			}
 			o.response = select_indices(c);
 			o.label = label;
+			for(auto i : c) {
+				o.codes.push_back(codes[i]);
+				o.locs.push_back(locs[i].loc);
+				o.seqs.push_back(locs[i].seq);
+			}
 			d.options.push_back(std::move(o));
 		}
 		if(d.options.empty() && cancelable)
@@ -1173,6 +1185,11 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 			o.code = c.empty() ? 0 : codes[c[0]];
 			o.response = select_indices(c);
 			o.label = label;
+			for(auto i : c) {
+				o.codes.push_back(codes[i]);
+				o.locs.push_back(locs[i].loc);
+				o.seqs.push_back(locs[i].seq);
+			}
 			d.options.push_back(std::move(o));
 			if(d.options.size() >= kMaxCombos)
 				break;
