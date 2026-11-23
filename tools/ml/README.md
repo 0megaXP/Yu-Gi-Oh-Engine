@@ -22,36 +22,63 @@ Extra Deck sizes, lasting locks, and the hand-written value. Then: whose turn is
 turn it is, the turn number and the hand-written raw value. Cards are described by what they
 do, not by name, so the network works for cards it never saw.
 
+## The move policy
+
+The bots' search tries the plays a move policy (`engine/src/policy.h`) rates highly first. It
+has hand-written rules plus learned weights: the app's own (learned on the phone from video and
+replay lines) and `data/policy.json`, learned here from self-play. Every search adds the two.
+Here it learns from the bots' searches: at a decision, each option's share of the search's
+visits is its target (the AlphaZero way), so the next searches spend their iterations where
+deep search ended up anyway.
+
 ## The nightly pipeline (`.github/workflows/ml.yml`, "Learn")
 
-1. **Self-play**: 8 runners × 4 processes play bot games (the top decks of the current format
-   in `decks/`, random pairs including mirrors, Normal bots at 200 iterations, games cut at turn 12) for 4.5
-   hours, with the current network. Each Main Phase decision is written from both sides.
-2. **Train**: `train.py` learns from tonight's positions plus the last 7 nights' (stored in the
-   `ml-data` release), continuing from the current network. 15% of the games are held out.
-   Real games join them: the YGO Sandbox app has the engine **follow** the player's YGO Omega
-   replays in the rules core (`engine/src/follow.{h,cpp}`, `Engine::follow_replay`): the Decks are
-   stacked so the recorded draws come in order, hidden cards are known in hindsight, and at each
-   decision of either player the option is chosen whose result matches what the replay shows next
-   (backing up a few decisions when needed). Positions are taken along the way exactly as
-   self-play takes them (the turn player's Main and Battle Phase decisions, and answers with an
-   activation, up to 6 per turn), with the rules core's own board. Where a game can't be followed
-   any further (a card that works differently in Omega, a coin flip) it stops and keeps what came
-   before. The app uploads them to the `ml-data` release as `replays-*.jsonl.gz`, marked
-   `"src":"replay"`; all are kept and counted three times. Numbers only: no card names, players or
-   accounts. `ygoe-cli followtest a.ydk b.ydk --games N` checks the follower on random games
-   recorded the way Omega records them (`YGOE_FOLLOW_DEBUG=1` shows where one stops).
-3. **Check**: the new network must predict the held-out results better than the plain evaluator
-   (validation log-loss lower by 0.002).
-4. **Arena**: 40 bot games, the new network against the current one, both seats and decks in
-   turn. It replaces `data/value_net.json` only with a score of 0.55 or more; the commit message
-   carries the training report.
+1. **The app's data**: real games the YGO Sandbox app re-played from the player's YGO Omega
+   replays (`replays-*.jsonl.gz` in the `ml-data` release, see below), its combo pieces from
+   replays and videos (`app-pieces.json`) and its move policy (`app-policy.json`).
+2. **Combo pieces**: for each deck in `decks/`, `ygoe-cli library` searches 40 opening hands
+   deeply and splits the best lines into pieces, adding the app's pieces the deck can play. The
+   bots use them as the app's bots use a deck's reference boards.
+3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 4.5 hours: game 1 with a
+   coin flip for who goes first, then the loser goes first, games 2 and 3 with both decks sided
+   for the matchup (`side.h`). Normal bots at 200 search iterations (the last 2 runners at 800),
+   with the current network, the move policies and the combo pieces; in each player's first 2
+   Main / Battle Phase decisions a bot plays another well-explored move a quarter of the time.
+   A quarter of the games start instead from a real game's position (from the replays: both
+   decks, hands, field, GY, banished cards and LP at a turn's Main Phase 1) and are played on.
+   Games are cut at turn 12. Each Main Phase decision is written from both sides, and each
+   search with something to learn as a policy example.
+4. **Labels**: a finished game's result is 1 / 0. A game cut at turn 12 is labelled with the
+   current evaluator's win chance there (cards in hand, board and GY count, not only LP).
+   Training targets are TD(λ), λ = 0.95: a position's target blends the result with the
+   network's own estimates at the later positions of the game, so an early position that was
+   fine is not marked "lost" because of a later misplay.
+5. **Train**: `train.py` learns the network from tonight's positions plus the last 7 nights'
+   and the real games (each game once, counted 3 times), continuing from the current network.
+   `ygoe-cli policy-train` learns the policy from tonight's searches plus the last 2 nights'.
+   15% of the games are held out for both.
+6. **Check**: each must predict the held-out games better than now (validation log-loss lower
+   by 0.002: the network against the plain evaluator's, the policy against the current one's
+   and the rules'). What passes is the candidate; the rest stays as it is.
+7. **Arena**: 320 bot games, the candidate network and policy against the current ones, on
+   8 runners. Each deal is played twice with the same decks and shuffles, the bots swapping
+   seats, which cancels most of the luck of the draw (`tools/ml/arena.py`). The candidate is
+   kept only if its average pair score is at least 0.52 and more than one standard error above
+   0.5; the commit message carries the reports.
+
+Real games come from the app: it follows each finished YGO Omega replay in the real rules core
+(the engine's `follow_replay`, `follow.h`) and uploads what that writes: training positions (the
+board after the actions of each Main Phase, from both sides, with who won, marked
+`"src":"replay"`) and start positions (`"kind":"start"`). Positions are numbers only; start
+positions hold the two decks and the board as card ids, no names, players or accounts. In a
+replay the opponent's hand is hidden, so their hand features count unknown cards, and a start
+position samples the cards nobody saw from their deck.
 
 Run it by hand from the Actions tab ("Learn", Run workflow), with fewer hours or shards for a
-quick try. Reports (`learn-report` artifact): validation log-loss, arena games, the trained
-network even when it was not kept.
+quick try. Reports (`learn-report` artifact): validation log-losses, arena games, the candidate.
 
-The app uses a new network once its engine is updated to that commit (the usual engine bump).
+The app uses a new network or policy once its engine is updated to that commit: the app
+downloads the latest engine (publish.yml) by itself.
 
 ## Decks
 
@@ -67,7 +94,10 @@ it plays.
 ## By hand
 
 ```
-build/ygoe-cli selfplay decks/a.ydk decks/b.ydk --games 20 --out positions.jsonl
+build/ygoe-cli library decks/a.ydk --out libs/a.json            # and the same for b
+build/ygoe-cli selfplay decks/a.ydk decks/b.ydk --games 20 --libraries libs --bo3 1 --explore 0.25 \
+  --out positions.jsonl --policy-out examples.jsonl
 python3 tools/ml/train.py positions.jsonl --out value_net.json --report report.json
-build/ygoe-cli arena decks/a.ydk decks/b.ydk --games 10 --net value_net.json --vs none
+build/ygoe-cli policy-train examples.jsonl --out policy.json
+build/ygoe-cli arena decks/a.ydk decks/b.ydk --games 10 --net value_net.json --vs none --policy policy.json --vs-policy none
 ```

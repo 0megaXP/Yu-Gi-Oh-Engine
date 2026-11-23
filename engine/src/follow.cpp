@@ -674,6 +674,10 @@ struct Pos {
 	uint32_t turn;
 	size_t steps;  // history length when taken (dropped when the search backs up before it)
 	bool action;   // at a Main or Battle Phase decision (kept first when thinning a turn)
+	// At the turn player's first Main Phase 1 decision of a turn (turn 2 on): the position as a
+	// start for self-play (see start_json), "" otherwise.
+	std::string start;
+	uint8_t turn_player = 0;
 };
 
 std::string ev_str(const Ev& e) {
@@ -799,6 +803,7 @@ private:
 	bool apply(const Step& s);
 	void fix_decks(size_t cur);
 	void take_position(size_t cur);
+	std::string start_json(const Board& b) const;
 };
 
 std::vector<int> Follower::rank(const Decision& d, size_t cur) const {
@@ -1012,7 +1017,62 @@ void Follower::take_position(size_t cur) {
 	p.turn = b.turn;
 	p.steps = hist_.size();
 	p.action = action;
+	p.turn_player = b.turn_player;
+	if(d.type == DecisionType::Idle && d.player == b.turn_player && b.phase == PHASE_MAIN1 && b.turn >= 2) {
+		bool first = true;
+		for(const auto& q : pos_)
+			first = first && !(q.turn == b.turn && !q.start.empty());
+		if(first)
+			p.start = start_json(b);
+	}
 	pos_.push_back(std::move(p));
+}
+
+// A real game's position for self-play to play on from (ygoe-cli selfplay --starts): both
+// decks, hands, the cards on the field / in the GY / banished, LP, the turn player first.
+// Script ids. A card nobody saw in a hand is only counted; positions where one would be on
+// the field, in a GY or in a Deck list are not used ("" back). Xyz materials are not kept.
+std::string Follower::start_json(const Board& b) const {
+	const uint8_t order[2] = {b.turn_player, static_cast<uint8_t>(1 - b.turn_player)};
+	for(uint8_t e : order)
+		for(auto c : decks_[e].main)
+			if(c == kFiller)
+				return "";
+	std::ostringstream o;
+	o << "{\"kind\":\"start\",\"turn\":" << b.turn << ",\"lp\":[" << b.lp[order[0]] << "," << b.lp[order[1]] << "],\"decks\":[";
+	auto list = [&](const std::vector<uint32_t>& v) {
+		std::string r = "[";
+		for(size_t i = 0; i < v.size(); ++i)
+			r += (i ? "," : "") + std::to_string(v[i]);
+		return r + "]";
+	};
+	for(int k = 0; k < 2; ++k)
+		o << (k ? "," : "") << "{\"main\":" << list(decks_[order[k]].main) << ",\"extra\":" << list(decks_[order[k]].extra) << "}";
+	o << "],\"hand\":[";
+	for(int k = 0; k < 2; ++k) {
+		std::vector<uint32_t> known;
+		for(const auto& c : b.hand[order[k]])
+			if(c.code && c.code != kFiller)
+				known.push_back(c.code);
+		o << (k ? "," : "") << list(known);
+	}
+	o << "],\"hand_size\":[" << b.hand[order[0]].size() << "," << b.hand[order[1]].size() << "],\"placed\":[";
+	for(int k = 0; k < 2; ++k) {
+		o << (k ? "," : "") << "[";
+		bool f = true;
+		for(const auto* zone : {&b.mzone[order[k]], &b.szone[order[k]], &b.grave[order[k]], &b.banished[order[k]]})
+			for(const auto& c : *zone) {
+				if(!c.code || (c.type & TYPE_TOKEN))
+					continue;
+				if(c.code == kFiller)
+					return "";
+				o << (f ? "" : ",") << "{\"c\":" << c.code << ",\"l\":" << int(c.loc) << ",\"s\":" << c.seq << ",\"p\":" << c.pos << "}";
+				f = false;
+			}
+		o << "]";
+	}
+	o << "]";
+	return o.str();
 }
 
 FollowResult Follower::run() {
@@ -1377,7 +1437,14 @@ FollowResult Follower::run() {
 					++res.positions;
 				}
 		}
-		res.jsonl = o.str();
+		// the positions to start self-play games from, with who won (from the turn player's side)
+		for(const auto& p : pos_)
+			if(!p.start.empty()) {
+				const uint8_t tp = p.turn_player;
+				o.str("");
+				o << p.start << ",\"z\":" << (w == tp ? 1 : 0) << ",\"game\":" << json::quote(in_.game) << ",\"src\":\"replay\"}\n";
+				res.jsonl += o.str();
+			}
 	}
 	return res;
 }

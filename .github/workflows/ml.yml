@@ -1,9 +1,9 @@
 name: Learn
 
-# Every night: bots play each other with the current value network (self-play), a new network is
-# trained on those games plus the last nights', and it replaces data/value_net.json only if it
-# predicts results better than the current one and beats it in bot duels (the arena).
-# See tools/ml/README.md.
+# Every night: bots play each other with the current value network and move policy (self-play),
+# a new network and policy are trained on those games plus the last nights' and the app's real
+# games, and they replace data/value_net.json and data/policy.json only if they predict better
+# and the bots using them beat the current ones in bot duels (the arena). See tools/ml/README.md.
 
 on:
   schedule:
@@ -23,17 +23,22 @@ concurrency:
 
 permissions:
   contents: write
-  actions: write  # to start "Publish engine" after a new network (a push by this token starts no workflow)
 
 env:
-  ITERATIONS: "200"
+  ITERATIONS: "200"          # search iterations of the self-play and arena bots
+  STRONG_ITERATIONS: "800"   # the last two self-play shards play stronger (fewer, better games)
   TURNS: "12"
+  ARENA_SHARDS: "8"          # arena runners, 4 processes x 5 games each
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      shards: ${{ steps.shards.outputs.list }}
+      shards: ${{ steps.lists.outputs.shards }}
+      decks: ${{ steps.lists.outputs.decks }}
+      arena: ${{ steps.lists.outputs.arena }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Fetch rules core, scripts and card data
@@ -42,11 +47,23 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
           cmake --build build -j4 --target ygoe-cli
-      - name: Shard list
-        id: shards
+      - name: Shard and deck lists
+        id: lists
         run: |
           n="${{ github.event.inputs.shards || '8' }}"
-          echo "list=$(python3 -c "import json;print(json.dumps(list(range(1, $n + 1))))")" >> "$GITHUB_OUTPUT"
+          echo "shards=$(python3 -c "import json;print(json.dumps(list(range(1, $n + 1))))")" >> "$GITHUB_OUTPUT"
+          echo "arena=$(python3 -c "import json;print(json.dumps(list(range(1, $ARENA_SHARDS + 1))))")" >> "$GITHUB_OUTPUT"
+          echo "decks=$(ls decks/*.ydk | sort -u | python3 -c "import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")" >> "$GITHUB_OUTPUT"
+      - name: The app's real games, pieces and policy
+        run: |
+          # real games: what the YGO Sandbox app made from players' YGO Omega replays
+          # (replays-*.jsonl.gz, all kept): training positions and positions to start games from.
+          # A game sent again (by a newer engine) counts once: its newest file.
+          mkdir -p app replays
+          gh release download ml-data --pattern 'replays-*.jsonl.gz' --dir replays 2>/dev/null || true
+          gh release download ml-data --pattern 'app-*.json' --dir app 2>/dev/null || true
+          python3 tools/ml/replays.py replays app/replays.jsonl app/starts.jsonl
+          ls -la app
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -54,10 +71,43 @@ jobs:
             build/ygoe-cli
             data/
             third_party/CardScripts/
+            app/
           retention-days: 2
 
-  selfplay:
+  libraries:
+    # each deck's combo pieces: the best lines of many opening hands found by deep search, plus
+    # the app's pieces (from replays and videos) the deck can play
     needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        deck: ${{ fromJson(needs.build.outputs.decks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - name: Combo pieces
+        run: |
+          chmod +x build/ygoe-cli
+          name=$(basename "${{ matrix.deck }}" .ydk)
+          pieces=""
+          [ -f app/app-pieces.json ] && pieces="--pieces app/app-pieces.json"
+          mkdir -p libs
+          build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces \
+            --out "libs/$name.json" | tail -n 3
+          echo "name=$name" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: library-${{ env.name }}
+          path: libs/
+          retention-days: 3
+
+  selfplay:
+    needs: [build, libraries]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
@@ -69,23 +119,38 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: engine
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: library-*
+          path: libs
+          merge-multiple: true
       - name: Self-play
         run: |
           chmod +x build/ygoe-cli
           hours="${{ github.event.inputs.hours || '4.5' }}"
           secs=$(python3 -c "print(int(float('$hours') * 3600))")
+          n="${{ github.event.inputs.shards || '8' }}"
           # the top decks of the current format (decks/: YCS and regional top cuts)
           decks=$(ls decks/*.ydk | sort -u)
+          it="$ITERATIONS"
+          [ "${{ matrix.shard }}" -gt $(( n - 2 )) ] && [ "$n" -gt 2 ] && it="$STRONG_ITERATIONS"
+          extra=""
+          [ -f app/app-policy.json ] && extra="$extra --phone-policy app/app-policy.json"
+          [ -s app/starts.jsonl ] && extra="$extra --starts app/starts.jsonl --start-share 0.25"
+          echo "iterations $it; libraries: $(ls libs | wc -l); options:$extra"
           mkdir -p out
           # one process per core; each stops after its time (a cut game's positions are not written)
           for core in 1 2 3 4; do
             seed=$(( ${{ github.run_id }} % 100000 * 100 + ${{ matrix.shard }} * 10 + core ))
-            timeout "$secs" build/ygoe-cli selfplay $decks --games 100000 --iterations "$ITERATIONS" \
-              --turns "$TURNS" --seed "$seed" --out "out/shard-${{ matrix.shard }}-$core.jsonl" \
+            timeout "$secs" build/ygoe-cli selfplay $decks --games 100000 --iterations "$it" \
+              --turns "$TURNS" --seed "$seed" --libraries libs --bo3 1 --explore 0.25 --explore-moves 2 $extra \
+              --out "out/shard-${{ matrix.shard }}-$core.jsonl" --policy-out "out/policy-${{ matrix.shard }}-$core.pjsonl" \
               > "out/log-${{ matrix.shard }}-$core.txt" 2>&1 &
           done
           wait || true
           wc -l out/*.jsonl | tail -1
+          wc -l out/*.pjsonl | tail -1
+          head -n 1 out/log-${{ matrix.shard }}-1.txt
       - uses: actions/upload-artifact@v4
         with:
           name: positions-${{ matrix.shard }}
@@ -97,6 +162,8 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    outputs:
+      arena: ${{ steps.check.outputs.arena }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -109,25 +176,21 @@ jobs:
           pattern: positions-*
           path: tonight
           merge-multiple: true
-      - name: Positions of the last nights
+      - name: Positions and policy examples of the last nights
         run: |
-          mkdir -p history
+          mkdir -p history policy-history
           gh release download ml-data --pattern 'night-*.jsonl.gz' --dir history 2>/dev/null || true
+          gh release download ml-data --pattern 'policy-night-*.jsonl.gz' --dir policy-history 2>/dev/null || true
           cat tonight/*.jsonl > "night-${{ github.run_id }}.jsonl" || true
-          wc -l "night-${{ github.run_id }}.jsonl"
+          cat tonight/*.pjsonl > "policy-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
+          wc -l "night-${{ github.run_id }}.jsonl" "policy-night-${{ github.run_id }}.jsonl"
           gzip -kf "night-${{ github.run_id }}.jsonl"
-          for f in history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
-          ls -la history || true
-          # real games: positions the YGO Sandbox app made from players' YGO Omega replays
-          # (replays-*.jsonl.gz, all kept), counted 3 times next to the self-play ones
-          mkdir -p replays
-          gh release download ml-data --pattern 'replays-*.jsonl.gz' --dir replays 2>/dev/null || true
-          for f in replays/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
-          if ls replays/*.jsonl > /dev/null 2>&1; then
-            for k in 1 2 3; do cat replays/*.jsonl; done > history/replays.jsonl
-            echo "replay positions: $(cat replays/*.jsonl | wc -l)"
-          fi
-      - name: Train
+          gzip -kf "policy-night-${{ github.run_id }}.jsonl"
+          for f in history/*.gz policy-history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
+          # real games' positions (replays, each game once; they count 3 times in train.py)
+          [ -s app/replays.jsonl ] && cp app/replays.jsonl history/replays.jsonl
+          ls -la history policy-history || true
+      - name: Train the value network
         run: |
           python3 -m pip install --quiet --break-system-packages numpy || sudo apt-get install -y python3-numpy
           shopt -s nullglob  # the first night has no history: the pattern must vanish, not stay as text
@@ -135,71 +198,152 @@ jobs:
           [ -f data/value_net.json ] && init="--init data/value_net.json"
           python3 tools/ml/train.py "night-${{ github.run_id }}.jsonl" history/*.jsonl $init \
             --out new_net.json --report report.json --id "night-${{ github.run_id }}"
-      - name: Check against the current network
+      - name: Train the move policy
+        run: |
+          chmod +x build/ygoe-cli
+          shopt -s nullglob
+          init=""
+          [ -f data/policy.json ] && init="--init data/policy.json"
+          build/ygoe-cli policy-train "policy-night-${{ github.run_id }}.jsonl" policy-history/*.jsonl $init \
+            --out new_policy.json --report policy_report.json --epochs 4 || echo '{}' > policy_report.json
+      - name: Check against the current ones
         id: check
         run: |
           python3 - <<'EOF'
-          import json, os
+          import json, os, shutil
           r = json.load(open("report.json"))
-          better = r["net_logloss"] < r["base_logloss"] - 0.002
-          print("validation log-loss: evaluator", r["base_logloss"], "network", r["net_logloss"])
+          net_better = r["net_logloss"] < r["base_logloss"] - 0.002
+          print("value network, validation log-loss: evaluator", r["base_logloss"], "network", r["net_logloss"])
+          p = json.load(open("policy_report.json"))
+          pol_better = bool(p) and p["policy_logloss"] < min(p["init_logloss"], p["rules_logloss"]) - 0.002
+          print("move policy, validation log-loss:", p)
+          # the candidate: what predicts better, the current one otherwise
+          os.makedirs("candidate", exist_ok=True)
+          if net_better:
+              shutil.copy("new_net.json", "candidate/value_net.json")
+          elif os.path.exists("data/value_net.json"):
+              shutil.copy("data/value_net.json", "candidate/value_net.json")
+          if pol_better:
+              shutil.copy("new_policy.json", "candidate/policy.json")
+          elif os.path.exists("data/policy.json"):
+              shutil.copy("data/policy.json", "candidate/policy.json")
+          json.dump({"value_net": net_better, "policy": pol_better}, open("candidate/changed.json", "w"))
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"better={'yes' if better else 'no'}\n")
+              fh.write(f"arena={'yes' if net_better or pol_better else 'no'}\n")
           EOF
-      - name: Arena (new network against the current one)
-        if: steps.check.outputs.better == 'yes'
-        run: |
-          chmod +x build/ygoe-cli
-          decks=$(ls decks/*.ydk | sort -u)
-          vs="none"
-          [ -f data/value_net.json ] && vs="data/value_net.json"
-          for k in 1 2 3 4; do
-            build/ygoe-cli arena $decks --games 10 --net new_net.json --vs "$vs" --iterations "$ITERATIONS" \
-              --turns "$TURNS" --seed "$k" --out "arena-$k.json" > "arena-$k.txt" 2>&1 &
-          done
-          wait
-          tail -n 2 arena-*.txt
-          python3 - <<'EOF'
-          import json, glob
-          pts = games = 0
-          for f in glob.glob("arena-*.json"):
-              r = json.load(open(f)); pts += r["score"] * r["games"]; games += r["games"]
-          score = pts / games if games else 0
-          print(f"arena: new network scored {score:.3f} over {games} games")
-          json.dump({"score": score, "games": games}, open("arena.json", "w"))
-          EOF
-      - name: Keep the new network if it won
-        if: steps.check.outputs.better == 'yes'
-        run: |
-          score=$(python3 -c "import json;print(json.load(open('arena.json'))['score'])")
-          if python3 -c "import sys; sys.exit(0 if float('$score') >= 0.55 else 1)"; then
-            cp new_net.json data/value_net.json
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add data/value_net.json
-            git commit -m "Value network night-${{ github.run_id }}: arena score $score" \
-              -m "$(cat report.json)"
-            for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
-            # the apps download the new network with the next published engine
-            gh workflow run publish.yml --ref main || echo "couldn't start Publish engine"
-          else
-            echo "arena score $score < 0.55: keeping the current network"
-          fi
-      - name: Store tonight's positions (last 7 nights kept)
+      - name: Store tonight's data (last 7 nights of positions, 3 of policy examples)
         if: always()
         run: |
           gh release view ml-data > /dev/null 2>&1 || gh release create ml-data --title "Learning data" \
             --notes "Self-play positions of the nightly Learn pipeline (tools/ml). Not an app release." --latest=false
-          [ -f "night-${{ github.run_id }}.jsonl.gz" ] && gh release upload ml-data "night-${{ github.run_id }}.jsonl.gz" --clobber
-          gh release view ml-data --json assets -q '.assets[].name' | grep '^night-' | sort -t- -k2 -n | head -n -7 | \
+          for f in "night-${{ github.run_id }}.jsonl.gz" "policy-night-${{ github.run_id }}.jsonl.gz"; do
+            [ -s "$f" ] && gh release upload ml-data "$f" --clobber
+          done
+          assets=$(gh api "repos/${{ github.repository }}/releases/tags/ml-data" -q '.assets[].name')
+          echo "$assets" | grep '^night-' | sort -t- -k2 -n | head -n -7 | \
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
+          echo "$assets" | grep '^policy-night-' | sort -t- -k3 -n | head -n -3 | \
+            while read -r old; do gh release delete-asset ml-data "$old" -y; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate
+          path: |
+            candidate/
+            report.json
+            policy_report.json
+          retention-days: 14
+
+  arena:
+    # the bots with the candidate network and policy against the bots with the current ones
+    needs: [build, libraries, train]
+    if: always() && needs.train.outputs.arena == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.build.outputs.arena) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: library-*
+          path: libs
+          merge-multiple: true
+      - name: Arena
+        run: |
+          chmod +x build/ygoe-cli
+          decks=$(ls decks/*.ydk | sort -u)
+          new_net="none"; [ -f candidate/value_net.json ] && new_net="candidate/value_net.json"
+          old_net="none"; [ -f data/value_net.json ] && old_net="data/value_net.json"
+          new_pol="none"; [ -f candidate/policy.json ] && new_pol="candidate/policy.json"
+          old_pol="none"; [ -f data/policy.json ] && old_pol="data/policy.json"
+          extra=""
+          [ -f app/app-policy.json ] && extra="--phone-policy app/app-policy.json"
+          mkdir -p arena
+          for k in 1 2 3 4; do
+            seed=$(( (${{ matrix.shard }} - 1) * 4 + k ))
+            build/ygoe-cli arena $decks --games 10 --net "$new_net" --vs "$old_net" --policy "$new_pol" --vs-policy "$old_pol" \
+              --libraries libs $extra --iterations "$ITERATIONS" --turns "$TURNS" --seed "$seed" \
+              --out "arena/arena-$seed.json" > "arena/arena-$seed.txt" 2>&1 &
+          done
+          wait
+          tail -n 1 arena/arena-*.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arena-${{ matrix.shard }}
+          path: arena/
+          retention-days: 14
+
+  keep:
+    needs: [train, arena]
+    if: always() && needs.train.outputs.arena == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: arena-*
+          path: arena
+          merge-multiple: true
+      - name: Keep the new network and policy if they won
+        run: |
+          python3 tools/ml/arena.py arena > arena.json
+          cat arena.json
+          if python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['keep'] else 1)"; then
+            changed=$(python3 -c "import json; c=json.load(open('candidate/changed.json')); print(', '.join(n for k, n in (('value_net', 'value network'), ('policy', 'move policy')) if c[k]))")
+            python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['value_net'] else 1)" && \
+              cp candidate/value_net.json data/value_net.json
+            python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['policy'] else 1)" && \
+              cp candidate/policy.json data/policy.json
+            score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['score'], 3))")
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/
+            git commit -m "Learned night-${{ github.run_id }}: $changed, arena score $score" \
+              -m "$(cat arena.json)" -m "Value network: $(cat report.json)" -m "Move policy: $(cat policy_report.json)"
+            for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+          else
+            echo "not clearly better: keeping the current network and policy"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: learn-report
           path: |
+            arena.json
             report.json
-            arena*.json
-            arena*.txt
-            new_net.json
+            policy_report.json
+            candidate/
+            arena/
           retention-days: 14

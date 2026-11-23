@@ -2,6 +2,7 @@
 #include <mutex>
 #include "carddb.h"
 #include "valuenet.h"
+#include "policy.h"
 
 #include <fstream>
 #include <sstream>
@@ -144,6 +145,14 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		std::string e;
 		if(std::ifstream(dir + "/value_net.json") && net->load_file(dir + "/value_net.json", &e))
 			value_net_ = net;
+	}
+	// The learned move policy shipped with the data, if any.
+	if(std::ifstream pf{dir + "/policy.json"}) {
+		std::stringstream ss;
+		ss << pf.rdbuf();
+		auto p = std::make_shared<Policy>(*this);
+		if(p->from_json(ss.str()) && p->trained())
+			policy_ = p;
 	}
 	return true;
 }

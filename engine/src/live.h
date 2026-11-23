@@ -1,6 +1,7 @@
 // A duel played one decision at a time: by a person (the app's duel screen) or by the bot.
 #pragma once
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <random>
 #include <string>
@@ -19,6 +20,11 @@ class LiveDuel {
 public:
 	// Player 0 goes first. Both players start with 5 random cards from their deck.
 	LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& deck0, const Deck& deck1, uint64_t seed);
+	// A duel from a given position (a board taken from a real game): `sc` holds both decks,
+	// hands, the cards on the field / in the GY / banished and LP, player 0 being the one whose
+	// turn it is. `flags` are the rules core's duel flags (0: Master Rule 5); a position from
+	// later in a game needs DUEL_ATTACK_FIRST_TURN so the turn player can attack.
+	LiveDuel(const CardDB& db, ScriptCache& scripts, const Scenario& sc, uint64_t flags);
 	// The player a person controls (-1 = none). Their zone choices are asked, not answered automatically.
 	void set_human(int player) { human_ = player; }
 	bool ok() const { return ok_; }
@@ -35,7 +41,22 @@ public:
 	// Combo pieces for a player's bot (from that deck's reference boards), see pieces.h.
 	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
 	// Learned move policy (policy.h) for both bots' searches.
-	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
+	void set_policy(std::shared_ptr<const class Policy> p) { policies_[0] = policies_[1] = std::move(p); }
+	// One player's bot only (two bots with different policies, to compare them).
+	void set_policy(int player, std::shared_ptr<const class Policy> p) { policies_[player & 1] = std::move(p); }
+	// Exploration for self-play: in each player's first `moves` Main / Battle Phase decisions
+	// the bot plays, with probability `p`, another well-explored move instead of its best one
+	// (so the games don't all follow the same lines).
+	void set_exploration(double p, int moves) {
+		explore_p_ = p;
+		explore_moves_ = moves;
+	}
+	// Called after every search a bot makes, with the decision and what the search found (the
+	// visits of each answer), before the move is chosen. Self-play uses it to train the policy.
+	using SearchHook = std::function<void(const Decision&, const SearchOutput&)>;
+	void set_search_hook(SearchHook h) { search_hook_ = std::move(h); }
+	// What the move policy sees at the current decision (policy.h).
+	int steps_this_turn() const { return steps_this_turn_; }
 	// A player's learned value network (valuenet.h): their bot's evaluation uses it. Unset: the
 	// card database's (data/value_net.json), if any. Set null explicitly for none.
 	void set_value_net(int player, std::shared_ptr<const class ValueNet> n) {
@@ -63,6 +84,7 @@ public:
 	const Duel& duel() const { return *duel_; }
 
 private:
+	void begin(const Deck& d0, const Deck& d1);
 	bool respond_internal(size_t index);
 	void auto_resolve();
 	int choose(BotLevel level);
@@ -99,7 +121,13 @@ private:
 	// never played for the other side's bot.
 	int plan_player_ = -1;
 	std::shared_ptr<const PieceGuide> guides_[2];
-	std::shared_ptr<const class Policy> policy_;
+	std::shared_ptr<const class Policy> policies_[2];
+	double explore_p_ = 0;
+	int explore_moves_ = 0;
+	int explored_[2] = {0, 0};  // Main / Battle Phase searches made so far, per player
+	SearchHook search_hook_;
+	int steps_this_turn_ = 0;
+	uint32_t steps_turn_ = 0;
 	DeckKnowledge knowledge_[2];
 	std::shared_ptr<const CardPriorities> priorities_[2];
 	std::vector<SearchConfig::Imitation> imitate_[2];

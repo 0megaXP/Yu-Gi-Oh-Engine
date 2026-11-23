@@ -45,13 +45,17 @@ using json::Value;
 
 std::string error_json(const std::string& msg) { return "{\"error\":" + quote(msg) + "}"; }
 
-// The learned move policy a request passes in ("policy": {...}), or null.
+// The policy a request passes (the app's own, learned on the phone), plus the one learned on
+// GitHub (data/policy.json): the weights of both, added. Either alone when the other is missing.
 std::shared_ptr<const Policy> read_policy(const Value& v, const CardDB& db) {
+	auto base = db.policy();
 	if(!v.is_object())
-		return nullptr;
+		return base;
 	auto p = std::make_shared<Policy>(db);
 	if(!p->from_value(v) || !p->trained())
-		return nullptr;
+		return base;
+	if(base)
+		p->add(*base);
 	return p;
 }
 

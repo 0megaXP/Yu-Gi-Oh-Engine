@@ -66,6 +66,10 @@ public:
 	// when the data folder has one, or one set here. Null: the hand-written evaluator alone.
 	std::shared_ptr<const class ValueNet> value_net() const { return value_net_; }
 	void set_value_net(std::shared_ptr<const class ValueNet> n) { value_net_ = std::move(n); }
+	// The move policy learned on GitHub from self-play searches (policy.h): data/policy.json when
+	// the data folder has one. Every search uses it, added to a policy passed in (the app's own).
+	std::shared_ptr<const class Policy> policy() const { return policy_; }
+	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
 
 private:
@@ -80,6 +84,7 @@ private:
 	std::unordered_map<uint32_t, std::string> texts_;
 	std::unordered_set<uint32_t> columns_;
 	std::shared_ptr<const class ValueNet> value_net_;
+	std::shared_ptr<const class Policy> policy_;
 };
 
 }  // namespace ygoe

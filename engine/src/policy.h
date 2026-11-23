@@ -41,6 +41,9 @@ struct PolicyExample {
 	std::vector<float> prior;                    // the rule weight of each option
 	int chosen = 0;
 	float weight = 1;                            // how much this example counts
+	// Instead of one chosen option: how much each option should get (sums to 1), e.g. the share
+	// of a deep search's visits it got. Empty: `chosen` is the target.
+	std::vector<float> target;
 };
 
 class Policy {
@@ -58,6 +61,11 @@ public:
 	// before and after, so callers can see whether it learned anything.
 	std::pair<double, double> train(const std::vector<PolicyExample>& examples, int epochs = 8, double rate = 0.1,
 	                                double l2 = 1e-4);
+
+	// Adds another policy's weights to this one's (two learned corrections in one).
+	void add(const Policy& other);
+	// The average log-loss on `examples` (lower is better).
+	double loss_of(const std::vector<PolicyExample>& examples) const { return loss(examples); }
 
 	bool trained() const { return trained_; }
 	int examples_seen() const { return seen_; }

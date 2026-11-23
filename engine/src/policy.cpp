@@ -116,7 +116,15 @@ double Policy::loss(const std::vector<PolicyExample>& ex) const {
 		double sum = 0;
 		for(double v : z)
 			sum += std::exp(v - mx);
-		total += e.weight * -(z[static_cast<size_t>(e.chosen)] - mx - std::log(sum));
+		const double lse = mx + std::log(sum);
+		if(e.target.size() == z.size()) {
+			double l = 0;
+			for(size_t i = 0; i < z.size(); ++i)
+				l -= e.target[i] * (z[i] - lse);
+			total += e.weight * l;
+		} else {
+			total += e.weight * -(z[static_cast<size_t>(e.chosen)] - lse);
+		}
 		weight += e.weight;
 	}
 	return weight > 0 ? total / weight : 0;
@@ -150,7 +158,8 @@ std::pair<double, double> Policy::train(const std::vector<PolicyExample>& exampl
 				sum += v;
 			}
 			for(size_t i = 0; i < z.size(); ++i) {
-				double g = z[i] / sum - (static_cast<int>(i) == e.chosen ? 1.0 : 0.0);
+				const double want = e.target.size() == z.size() ? e.target[i] : (static_cast<int>(i) == e.chosen ? 1.0 : 0.0);
+				double g = z[i] / sum - want;
 				if(std::fabs(g) < 1e-4)
 					continue;
 				for(uint32_t f : e.options[i]) {
@@ -163,6 +172,13 @@ std::pair<double, double> Policy::train(const std::vector<PolicyExample>& exampl
 	trained_ = true;
 	seen_ += static_cast<int>(examples.size());
 	return {before, loss(examples)};
+}
+
+void Policy::add(const Policy& other) {
+	for(size_t i = 0; i < w_.size() && i < other.w_.size(); ++i)
+		w_[i] += other.w_[i];
+	trained_ = trained_ || other.trained_;
+	seen_ += other.seen_;
 }
 
 std::vector<PolicyExample> Policy::examples_from_line(ScriptCache& scripts, const std::vector<uint32_t>& declare_pool,

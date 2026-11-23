@@ -91,6 +91,21 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& d0, const
 		return;
 	}
 	setup_ = make_setup(sc_, 0);
+	begin(d0, d1);
+}
+
+LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Scenario& sc, uint64_t flags)
+    : db_(db), scripts_(scripts), sc_(sc), rng_(sc.seed * 7919 + 17) {
+	if(sc_.decks[0].main.empty() || sc_.decks[1].main.empty()) {
+		error_ = "both decks need a Main Deck";
+		return;
+	}
+	setup_ = make_setup(sc_, 0);
+	setup_.flags = flags;
+	begin(sc_.decks[0], sc_.decks[1]);
+}
+
+void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	duel_ = std::make_unique<Duel>(db_, scripts_);
 	duel_->enable_log(true);
 	duel_->set_declare_pool(declare_pool(sc_));
@@ -102,6 +117,7 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& d0, const
 	activations_ = duel_->take_activations();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
+	steps_turn_ = duel_->turn();
 	ok_ = true;
 	auto_resolve();
 }
@@ -119,6 +135,12 @@ bool LiveDuel::respond_internal(size_t index) {
 	   (type == DecisionType::Idle || type == DecisionType::Chain || type == DecisionType::EffectYesNo))
 		last_action_[who] = opt.code;
 	history_.push_back(opt.response);
+	if(duel_->turn() != steps_turn_) {
+		steps_turn_ = duel_->turn();
+		steps_this_turn_ = 0;
+	} else {
+		++steps_this_turn_;
+	}
 	last_move_ = opt.label;
 	// Keep the bot's plan while play follows it.
 	if(plan_pos_ < plan_.size() && plan_[plan_pos_].label == opt.label)
@@ -290,13 +312,15 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.cancel = &cancel_;
 	cfg.guide = guides_[d.player];
 	cfg.imitate = imitate_[d.player];
-	cfg.policy = policy_;
+	cfg.policy = policies_[d.player];
 	cfg.priorities = priorities_[d.player];
 	// The bot does not see the other player's hand: on turn 1 its search samples it.
 	std::vector<RootState> roots = hidden_roots(d.player, 8);
 	auto out = searcher_->run(roots, d.player, cfg);
 	if(out.moves.empty())
 		return 0;
+	if(search_hook_)
+		search_hook_(d, out);
 	// Combo turns are long, and random playouts after a strong first card are noisy, so the
 	// average alone undersells good starters. Rank well-explored moves by a blend of their
 	// average and the best complete line found through them.
@@ -457,6 +481,19 @@ int LiveDuel::choose(BotLevel level) {
 				repaired.clear();
 				repaired.push_back({m, std::move(t)});
 			}
+		}
+	}
+	// Self-play exploration: early in the game, sometimes another well-explored move.
+	if(explore_p_ > 0 && !response && (d.type == DecisionType::Idle || d.type == DecisionType::Battle) &&
+	   explored_[d.player & 1]++ < explore_moves_ && std::uniform_real_distribution<double>(0, 1)(rng_) < explore_p_) {
+		const int most = out.moves.front().visits;
+		std::vector<const MoveStats*> other;
+		for(const auto& m : out.moves)
+			if(&m != pick && m.visits >= std::max(8, most / 6))
+				other.push_back(&m);
+		if(!other.empty()) {
+			pick = other[std::uniform_int_distribution<size_t>(0, other.size() - 1)(rng_)];
+			repaired.clear();
 		}
 	}
 	const MoveStats& best = *pick;
