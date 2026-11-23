@@ -379,6 +379,24 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	}
 	for(int p = 0; p < 2; ++p)
 		live->set_imitate(p, read_imitate(req["imitate"][p], db_));
+	// {"priorities": [{"starters": [...], "extenders": [...], "search_first": [...], "protect": [...]}, null]}:
+	// per player, what deck guides say about playing their deck (passcodes)
+	for(int p = 0; p < 2; ++p) {
+		const Value& k = req["priorities"][p];
+		if(!k.is_object())
+			continue;
+		auto pr = std::make_shared<CardPriorities>();
+		auto read = [&](const char* key, std::vector<uint32_t>& out) {
+			for(const auto& c : k[key].items())
+				out.push_back(db_.script_id(static_cast<uint32_t>(c.integer())));
+		};
+		read("starters", pr->starters);
+		read("extenders", pr->extenders);
+		read("search_first", pr->search_first);
+		read("protect", pr->protect);
+		if(!pr->empty())
+			live->set_priorities(p, std::move(pr));
+	}
 	return live;
 }
 

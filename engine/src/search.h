@@ -44,6 +44,19 @@ struct Trajectory {
 	double reward = 0;
 };
 
+// What deck guides say about playing a deck (from the app's guide videos): its starters and
+// extenders, the cards to search first, and the cards to keep (not to spend as cost or
+// material). It biases the searching player's playout prior; the search can still go elsewhere.
+struct CardPriorities {
+	std::vector<uint32_t> starters;      // script ids
+	std::vector<uint32_t> extenders;
+	std::vector<uint32_t> search_first;  // best first
+	std::vector<uint32_t> protect;
+	bool empty() const { return starters.empty() && extenders.empty() && search_first.empty() && protect.empty(); }
+	// The playout prior's multiplier for one of the player's own options.
+	double factor(const Decision& d, const Option& o, bool own_turn) const;
+};
+
 struct SearchConfig {
 	int iterations = 4000;
 	double seconds = 30;
@@ -67,6 +80,8 @@ struct SearchConfig {
 	double guided_share = 0.7;
 	// Learned move policy (policy.h): multiplies the playout prior of every option.
 	std::shared_ptr<const Policy> policy;
+	// Deck-guide advice for the searching player (see CardPriorities).
+	std::shared_ptr<const CardPriorities> priorities;
 };
 
 struct MoveStats {

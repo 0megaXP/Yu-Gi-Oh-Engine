@@ -48,6 +48,8 @@ public:
 	// Choices players make in replays that the engine doesn't understand yet, for a player's bot
 	// (SearchConfig::imitate): followed unless its search finds something clearly better.
 	void set_imitate(int player, std::vector<SearchConfig::Imitation> v) { imitate_[player & 1] = std::move(v); }
+	// Deck-guide advice for a player's bot (SearchConfig::priorities), or null.
+	void set_priorities(int player, std::shared_ptr<const CardPriorities> p) { priorities_[player & 1] = std::move(p); }
 
 	const Duel& duel() const { return *duel_; }
 
@@ -87,6 +89,7 @@ private:
 	std::shared_ptr<const PieceGuide> guides_[2];
 	std::shared_ptr<const class Policy> policy_;
 	DeckKnowledge knowledge_[2];
+	std::shared_ptr<const CardPriorities> priorities_[2];
 	std::vector<SearchConfig::Imitation> imitate_[2];
 	uint32_t last_action_[2] = {0, 0};  // the last card each player activated or summoned
 	std::mt19937_64 rng_;

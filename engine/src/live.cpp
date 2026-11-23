@@ -287,6 +287,7 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.guide = guides_[d.player];
 	cfg.imitate = imitate_[d.player];
 	cfg.policy = policy_;
+	cfg.priorities = priorities_[d.player];
 	// The bot does not see the other player's hand: on turn 1 its search samples it.
 	std::vector<RootState> roots = hidden_roots(d.player, 8);
 	auto out = searcher_->run(roots, d.player, cfg);

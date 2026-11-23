@@ -92,6 +92,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         knowledge: List<DeckKnowledge?> = listOf(null, null),
         /** Per player: replay choices the engine doesn't understand yet, followed by that player's bot. */
         imitate: List<List<Imitation>> = listOf(emptyList(), emptyList()),
+        /** Per player: deck-guide advice for that player's bot, or null. */
+        priorities: List<CardPriorities?> = listOf(null, null),
     ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
@@ -102,6 +104,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
                 .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
                 .put("knowledge", org.json.JSONArray(knowledge.map { it?.toJson() ?: JSONObject.NULL }))
                 .put("imitate", org.json.JSONArray(imitate.map { l -> org.json.JSONArray(l.map { it.toJson() }) }))
+                .put("priorities", org.json.JSONArray(priorities.map { it?.takeUnless { p -> p.isEmpty }?.toJson() ?: JSONObject.NULL }))
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
             LiveDuel(d)

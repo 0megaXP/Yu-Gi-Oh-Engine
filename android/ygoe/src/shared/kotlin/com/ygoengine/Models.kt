@@ -399,6 +399,25 @@ data class DeckKnowledge(val chokes: List<Long>, val plays: Double) {
     internal fun toJson() = JSONObject().put("chokes", JSONArray(chokes)).put("plays", plays)
 }
 
+/**
+ * What deck guides say about playing a deck, for that player's bot ([YgoEngine.newDuel]), as
+ * passcodes: its [starters] and [extenders] (tried first on its own turn), the cards to take
+ * from the Deck first ([searchFirst], best first) and the cards to keep rather than spend as a
+ * cost or material ([protect]). They bias the bot's search; it can still play otherwise.
+ */
+data class CardPriorities(
+    val starters: List<Long> = emptyList(),
+    val extenders: List<Long> = emptyList(),
+    val searchFirst: List<Long> = emptyList(),
+    val protect: List<Long> = emptyList(),
+) {
+    val isEmpty: Boolean get() = starters.isEmpty() && extenders.isEmpty() && searchFirst.isEmpty() && protect.isEmpty()
+
+    internal fun toJson() = JSONObject()
+        .put("starters", JSONArray(starters)).put("extenders", JSONArray(extenders))
+        .put("search_first", JSONArray(searchFirst)).put("protect", JSONArray(protect))
+}
+
 /** A video line replayed by the rules. */
 data class VideoLineCheck(
     val id: String,

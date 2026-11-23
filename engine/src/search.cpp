@@ -91,6 +91,46 @@ std::string key_of(const Option& o) {
 	return o.label + "|" + std::to_string(static_cast<int>(o.kind)) + "|" + std::to_string(o.loc);
 }
 
+}  // namespace
+
+double CardPriorities::factor(const Decision& d, const Option& o, bool own_turn) const {
+	if(!o.code)
+		return 1.0;
+	auto has = [&](const std::vector<uint32_t>& v) { return std::find(v.begin(), v.end(), o.code) != v.end(); };
+	switch(d.type) {
+	case DecisionType::Idle:
+		// Opening plays on one's own turn: starters first, then extenders.
+		if(own_turn && (o.kind == OptKind::Activate || o.kind == OptKind::Summon || o.kind == OptKind::SpSummon) &&
+		   (o.loc & LOCATION_HAND)) {
+			if(has(starters))
+				return 3.0;
+			if(has(extenders))
+				return 1.5;
+		}
+		return 1.0;
+	case DecisionType::Card:
+	case DecisionType::UnselectCard: {
+		// Taking a card from the Deck: the guide's search order, best first.
+		if(o.loc & LOCATION_DECK) {
+			for(size_t i = 0; i < search_first.size(); ++i)
+				if(search_first[i] == o.code)
+					return 1.0 + 3.0 * static_cast<double>(search_first.size() - i) / static_cast<double>(search_first.size());
+			return 1.0;
+		}
+		// Choosing a card in hand or on the field (cost, material, tribute): keep the key ones.
+		if((o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(protect))
+			return 0.3;
+		return 1.0;
+	}
+	case DecisionType::Tribute:
+		return (o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(protect) ? 0.3 : 1.0;
+	default:
+		return 1.0;
+	}
+}
+
+namespace {
+
 // Prior weights for the playout policy: favour developing plays on your own turn and
 // holding responses unless they are clearly interrupts.
 //
@@ -652,6 +692,8 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 			// learned from this deck's own good lines, so only for the searching player's options
 			if(cfg.policy && dd.player == me)
 				w *= cfg.policy->factor(dd, o, PolicyContext{duel.turn_player(), steps_this_turn, duel.chain_depth()});
+			if(cfg.priorities && dd.player == me)
+				w *= cfg.priorities->factor(dd, o, dd.player == duel.turn_player());
 			if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
 				w *= 0.1;
 			// The other player answering an open window (a phase change, nothing on the chain)
