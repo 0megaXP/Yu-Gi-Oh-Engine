@@ -3,6 +3,7 @@
 #include "carddb.h"
 #include "valuenet.h"
 #include "policy.h"
+#include "nonengine.h"
 
 #include <fstream>
 #include <sstream>
@@ -153,6 +154,21 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		auto p = std::make_shared<Policy>(*this);
 		if(p->from_json(ss.str()) && p->trained())
 			policy_ = p;
+	}
+	// Non-engine timing and values, if any.
+	if(std::ifstream tf{dir + "/nonengine_timing.json"}) {
+		std::stringstream ss;
+		ss << tf.rdbuf();
+		auto t = std::make_shared<NeTiming>();
+		if(t->parse(ss.str()))
+			ne_timing_ = t;
+	}
+	if(std::ifstream vf{dir + "/nonengine_values.json"}) {
+		std::stringstream ss;
+		ss << vf.rdbuf();
+		auto v = std::make_shared<NeValues>();
+		if(v->parse(ss.str()))
+			ne_values_ = v;
 	}
 	return true;
 }

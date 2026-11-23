@@ -70,6 +70,12 @@ public:
 	// the data folder has one. Every search uses it, added to a policy passed in (the app's own).
 	std::shared_ptr<const class Policy> policy() const { return policy_; }
 	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
+	// Non-engine (nonengine.h): when to use a non-engine card (data/nonengine_timing.json) and
+	// what each is worth per matchup (data/nonengine_values.json), learned on GitHub. Null if none.
+	std::shared_ptr<const class NeTiming> nonengine_timing() const { return ne_timing_; }
+	void set_nonengine_timing(std::shared_ptr<const class NeTiming> t) { ne_timing_ = std::move(t); }
+	std::shared_ptr<const class NeValues> nonengine_values() const { return ne_values_; }
+	void set_nonengine_values(std::shared_ptr<const class NeValues> v) { ne_values_ = std::move(v); }
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
 
 private:
@@ -85,6 +91,8 @@ private:
 	std::unordered_set<uint32_t> columns_;
 	std::shared_ptr<const class ValueNet> value_net_;
 	std::shared_ptr<const class Policy> policy_;
+	std::shared_ptr<const class NeTiming> ne_timing_;
+	std::shared_ptr<const class NeValues> ne_values_;
 };
 
 }  // namespace ygoe

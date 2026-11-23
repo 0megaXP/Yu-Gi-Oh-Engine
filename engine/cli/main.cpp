@@ -43,6 +43,7 @@ int run_arena(const std::vector<std::string>& decks, const CardDB& db, ScriptCac
 int run_netcheck(const std::string& net, const std::string& positions);
 int run_library(const std::string& deck, const CardDB& db, ScriptCache& scripts, const std::map<std::string, std::string>& opt);
 int run_policy_train(const std::vector<std::string>& files, const CardDB& db, const std::map<std::string, std::string>& opt);
+int run_nonengine(const std::vector<std::string>& decks, const CardDB& db);
 }
 
 namespace {
@@ -87,6 +88,7 @@ int usage() {
 	             "  ygoe-cli bench <suite.json> [--out result.json] [--baseline old.json] [--only lines,interrupts,hands,duels]\n"
 	             "  ygoe-cli selfplay <a.ydk> [b.ydk ...] --games N --out positions.jsonl [--seed S --iterations 300 --turns 14 --net f|none]\n"
 	             "  ygoe-cli arena <a.ydk> [b.ydk ...] --games N --net new.json [--vs old.json|none] [--policy p.json --vs-policy q.json] [--out result.json]\n"
+	             "  ygoe-cli nonengine <deck.ydk> [opponent.ydk ...]   (non-engine cards: role, measured value)\n"
 	             "  ygoe-cli library <deck.ydk> --out lib.json [--hands 40 --iterations 1500 --pieces app_pieces.json]\n"
 	             "  ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json --epochs 4 --report r.json]\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
@@ -298,6 +300,11 @@ int main(int argc, char** argv) {
 		if(a.pos.size() < 2)
 			return usage();
 		return run_library(a.pos[1], db, scripts, a.opt);
+	}
+	if(cmd == "nonengine") {
+		if(a.pos.size() < 2)
+			return usage();
+		return run_nonengine(std::vector<std::string>(a.pos.begin() + 1, a.pos.end()), db);
 	}
 	if(cmd == "policy-train") {
 		if(a.pos.size() < 2)

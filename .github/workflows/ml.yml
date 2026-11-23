@@ -143,8 +143,9 @@ jobs:
           for core in 1 2 3 4; do
             seed=$(( ${{ github.run_id }} % 100000 * 100 + ${{ matrix.shard }} * 10 + core ))
             timeout "$secs" build/ygoe-cli selfplay $decks --games 100000 --iterations "$it" \
-              --turns "$TURNS" --seed "$seed" --libraries libs --bo3 1 --explore 0.25 --explore-moves 2 $extra \
+              --turns "$TURNS" --seed "$seed" --libraries libs --bo3 1 --explore 0.25 --explore-moves 2 --ne-explore 0.15 $extra \
               --out "out/shard-${{ matrix.shard }}-$core.jsonl" --policy-out "out/policy-${{ matrix.shard }}-$core.pjsonl" \
+              --ne-out "out/ne-${{ matrix.shard }}-$core.nejsonl" --games-out "out/games-${{ matrix.shard }}-$core.gjsonl" \
               > "out/log-${{ matrix.shard }}-$core.txt" 2>&1 &
           done
           wait || true
@@ -181,12 +182,19 @@ jobs:
           mkdir -p history policy-history
           gh release download ml-data --pattern 'night-*.jsonl.gz' --dir history 2>/dev/null || true
           gh release download ml-data --pattern 'policy-night-*.jsonl.gz' --dir policy-history 2>/dev/null || true
+          mkdir -p ne-history
+          gh release download ml-data --pattern 'ne-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
+          gh release download ml-data --pattern 'games-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
+          cat tonight/*.nejsonl > "ne-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
+          cat tonight/*.gjsonl > "games-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
+          gzip -kf "ne-night-${{ github.run_id }}.jsonl"
+          gzip -kf "games-night-${{ github.run_id }}.jsonl"
           cat tonight/*.jsonl > "night-${{ github.run_id }}.jsonl" || true
           cat tonight/*.pjsonl > "policy-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
           wc -l "night-${{ github.run_id }}.jsonl" "policy-night-${{ github.run_id }}.jsonl"
           gzip -kf "night-${{ github.run_id }}.jsonl"
           gzip -kf "policy-night-${{ github.run_id }}.jsonl"
-          for f in history/*.gz policy-history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
+          for f in history/*.gz policy-history/*.gz ne-history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
           # real games' positions (replays, each game once; they count 3 times in train.py)
           [ -s app/replays.jsonl ] && cp app/replays.jsonl history/replays.jsonl
           ls -la history policy-history || true
@@ -206,6 +214,15 @@ jobs:
           [ -f data/policy.json ] && init="--init data/policy.json"
           build/ygoe-cli policy-train "policy-night-${{ github.run_id }}.jsonl" policy-history/*.jsonl $init \
             --out new_policy.json --report policy_report.json --epochs 4 || echo '{}' > policy_report.json
+      - name: Non-engine timing and values
+        run: |
+          shopt -s nullglob
+          init=""
+          [ -f data/nonengine_timing.json ] && init="--init data/nonengine_timing.json"
+          python3 tools/ml/nonengine.py timing "ne-night-${{ github.run_id }}.jsonl" ne-history/ne-night-*.jsonl $init \
+            --out new_ne_timing.json --report ne_report.json || echo '{}' > ne_report.json
+          python3 tools/ml/nonengine.py values "games-night-${{ github.run_id }}.jsonl" ne-history/games-night-*.jsonl \
+            --out nonengine_values.json --report values_report.json || true
       - name: Check against the current ones
         id: check
         run: |
@@ -217,6 +234,9 @@ jobs:
           p = json.load(open("policy_report.json"))
           pol_better = bool(p) and p["policy_logloss"] < min(p["init_logloss"], p["rules_logloss"]) - 0.002
           print("move policy, validation log-loss:", p)
+          t = json.load(open("ne_report.json"))
+          ne_better = bool(t) and t["timing_logloss"] < t["base_logloss"] - 0.002
+          print("non-engine timing, validation log-loss:", t)
           # the candidate: what predicts better, the current one otherwise
           os.makedirs("candidate", exist_ok=True)
           if net_better:
@@ -227,16 +247,25 @@ jobs:
               shutil.copy("new_policy.json", "candidate/policy.json")
           elif os.path.exists("data/policy.json"):
               shutil.copy("data/policy.json", "candidate/policy.json")
-          json.dump({"value_net": net_better, "policy": pol_better}, open("candidate/changed.json", "w"))
+          if ne_better:
+              shutil.copy("new_ne_timing.json", "candidate/nonengine_timing.json")
+          elif os.path.exists("data/nonengine_timing.json"):
+              shutil.copy("data/nonengine_timing.json", "candidate/nonengine_timing.json")
+          # measured values are kept every run (they are measurements, not a bot change)
+          if os.path.exists("nonengine_values.json"):
+              shutil.copy("nonengine_values.json", "candidate/nonengine_values.json")
+          json.dump({"value_net": net_better, "policy": pol_better, "nonengine_timing": ne_better},
+                    open("candidate/changed.json", "w"))
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"arena={'yes' if net_better or pol_better else 'no'}\n")
+              fh.write(f"arena={'yes' if net_better or pol_better or ne_better else 'no'}\n")
           EOF
       - name: Store tonight's data (last 7 nights of positions, 3 of policy examples)
         if: always()
         run: |
           gh release view ml-data > /dev/null 2>&1 || gh release create ml-data --title "Learning data" \
             --notes "Self-play positions of the nightly Learn pipeline (tools/ml). Not an app release." --latest=false
-          for f in "night-${{ github.run_id }}.jsonl.gz" "policy-night-${{ github.run_id }}.jsonl.gz"; do
+          for f in "night-${{ github.run_id }}.jsonl.gz" "policy-night-${{ github.run_id }}.jsonl.gz" \
+                   "ne-night-${{ github.run_id }}.jsonl.gz" "games-night-${{ github.run_id }}.jsonl.gz"; do
             [ -s "$f" ] && gh release upload ml-data "$f" --clobber
           done
           assets=$(gh api "repos/${{ github.repository }}/releases/tags/ml-data" -q '.assets[].name')
@@ -244,6 +273,10 @@ jobs:
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
           echo "$assets" | grep '^policy-night-' | sort -t- -k3 -n | head -n -3 | \
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
+          for kind in ne games; do
+            echo "$assets" | grep "^$kind-night-" | sort -t- -k3 -n | head -n -20 | \
+              while read -r old; do gh release delete-asset ml-data "$old" -y; done
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -252,6 +285,8 @@ jobs:
             candidate/
             report.json
             policy_report.json
+            ne_report.json
+            values_report.json
           retention-days: 14
 
   arena:
@@ -285,12 +320,15 @@ jobs:
           old_net="none"; [ -f data/value_net.json ] && old_net="data/value_net.json"
           new_pol="none"; [ -f candidate/policy.json ] && new_pol="candidate/policy.json"
           old_pol="none"; [ -f data/policy.json ] && old_pol="data/policy.json"
+          new_t="none"; [ -f candidate/nonengine_timing.json ] && new_t="candidate/nonengine_timing.json"
+          old_t="none"; [ -f data/nonengine_timing.json ] && old_t="data/nonengine_timing.json"
           extra=""
           [ -f app/app-policy.json ] && extra="--phone-policy app/app-policy.json"
           mkdir -p arena
           for k in 1 2 3 4; do
             seed=$(( (${{ matrix.shard }} - 1) * 4 + k ))
             build/ygoe-cli arena $decks --games 10 --net "$new_net" --vs "$old_net" --policy "$new_pol" --vs-policy "$old_pol" \
+              --ne-timing "$new_t" --vs-ne-timing "$old_t" \
               --libraries libs $extra --iterations "$ITERATIONS" --turns "$TURNS" --seed "$seed" \
               --out "arena/arena-$seed.json" > "arena/arena-$seed.txt" 2>&1 &
           done
@@ -304,7 +342,7 @@ jobs:
 
   keep:
     needs: [train, arena]
-    if: always() && needs.train.outputs.arena == 'yes'
+    if: always() && needs.train.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -312,29 +350,42 @@ jobs:
         with:
           name: candidate
       - uses: actions/download-artifact@v4
+        if: needs.train.outputs.arena == 'yes'
         with:
           pattern: arena-*
           path: arena
           merge-multiple: true
-      - name: Keep the new network and policy if they won
+      - name: Keep what won, and the measured non-engine values
         run: |
+          mkdir -p arena
           python3 tools/ml/arena.py arena > arena.json
           cat arena.json
-          if python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['keep'] else 1)"; then
-            changed=$(python3 -c "import json; c=json.load(open('candidate/changed.json')); print(', '.join(n for k, n in (('value_net', 'value network'), ('policy', 'move policy')) if c[k]))")
-            python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['value_net'] else 1)" && \
-              cp candidate/value_net.json data/value_net.json
-            python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['policy'] else 1)" && \
-              cp candidate/policy.json data/policy.json
+          changed=""
+          # the non-engine values are measurements: kept every run
+          if [ -f candidate/nonengine_values.json ]; then
+            cp candidate/nonengine_values.json data/nonengine_values.json
+            if [ -n "$(git status --porcelain -- data/nonengine_values.json)" ]; then changed="non-engine values"; fi
+          fi
+          if [ "${{ needs.train.outputs.arena }}" = "yes" ] && python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['keep'] else 1)"; then
+            won=$(python3 -c "import json; c=json.load(open('candidate/changed.json')); print(', '.join(n for k, n in (('value_net', 'value network'), ('policy', 'move policy'), ('nonengine_timing', 'non-engine timing')) if c[k]))")
+            for f in value_net policy nonengine_timing; do
+              if python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['$f'] else 1)"; then
+                cp "candidate/$f.json" "data/$f.json"
+              fi
+            done
             score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['score'], 3))")
+            changed="$won (arena score $score)${changed:+, $changed}"
+          else
+            echo "no candidate, or not clearly better: keeping the current network, policy and timing"
+          fi
+          if [ -n "$changed" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add data/
-            git commit -m "Learned night-${{ github.run_id }}: $changed, arena score $score" \
-              -m "$(cat arena.json)" -m "Value network: $(cat report.json)" -m "Move policy: $(cat policy_report.json)"
+            git commit -m "Learned night-${{ github.run_id }}: $changed" \
+              -m "$(cat arena.json)" -m "Value network: $(cat report.json)" -m "Move policy: $(cat policy_report.json)" \
+              -m "Non-engine timing: $(cat ne_report.json)" -m "Non-engine values: $(cat values_report.json 2>/dev/null)"
             for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
-          else
-            echo "not clearly better: keeping the current network and policy"
           fi
       - uses: actions/upload-artifact@v4
         if: always()
@@ -344,6 +395,8 @@ jobs:
             arena.json
             report.json
             policy_report.json
+            ne_report.json
+            values_report.json
             candidate/
             arena/
           retention-days: 14

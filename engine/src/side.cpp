@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <map>
 #include <sstream>
 
 #include "evaluate.h"
+#include "nonengine.h"
 #include "ocgapi_constants.h"
 #include "search.h"
 
@@ -145,6 +147,27 @@ SidePlan plan_side(const CardDB& db, const Deck& mine, const Deck& theirs, const
 	SidePlan plan;
 	plan.going_first = going_first;
 	auto sets = dominant_setcodes(db, mine);
+	// Values measured in self-play (nonengine.h): blended in as games add up.
+	const NeValues* measured = db.nonengine_values().get();
+	const uint16_t me_key = measured ? archetype_key(db, mine) : 0, opp_key = measured ? archetype_key(db, theirs) : 0;
+	auto blend = [&](CardValue& v, uint32_t code) {
+		if(!measured)
+			return;
+		const uint32_t sid = db.script_id(code);
+		const NeValues::Entry* e = measured->get(me_key, opp_key, going_first, sid);
+		if(!e || e->games < 30)
+			e = measured->get(me_key, 0, going_first, sid);  // against the whole format
+		if(!e || e->games < 30)
+			return;
+		const double w = e->games / (e->games + 150.0);
+		const double learned = std::clamp(0.5 + 8.0 * e->delta, 0.0, 1.5);
+		v.value = (1 - w) * v.value + w * learned;
+		std::ostringstream why;
+		why.imbue(std::locale::classic());
+		why << v.why << "; measured: " << (e->delta >= 0 ? "+" : "") << static_cast<int>(std::lround(e->delta * 100))
+		    << "% win rate when drawn early (" << e->games << " games)";
+		v.why = why.str();
+	};
 
 	std::map<uint32_t, int> side_count, main_count;
 	for(auto c : mine.side)
@@ -154,6 +177,7 @@ SidePlan plan_side(const CardDB& db, const Deck& mine, const Deck& theirs, const
 
 	for(auto& [code, n] : side_count) {
 		auto v = value_of(db, code, sets, opp, shape, going_first, false);
+		blend(v, code);
 		for(int i = 0; i < n; ++i)
 			plan.side_values.push_back(v);
 	}
@@ -161,6 +185,7 @@ SidePlan plan_side(const CardDB& db, const Deck& mine, const Deck& theirs, const
 		auto v = value_of(db, code, sets, opp, shape, going_first, true);
 		if(v.why == "engine")
 			continue;
+		blend(v, code);
 		for(int i = 0; i < n; ++i)
 			plan.flex_values.push_back(v);
 	}

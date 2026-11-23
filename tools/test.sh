@@ -34,7 +34,7 @@ echo "== benchmark (replay lines, small budget: the checker must still follow th
 build/ygoe-cli bench bench/suite.json --only lines --iterations 150 --out "$OUT/bench.json" > "$OUT/bench.txt"
 python3 -c "import json,sys; t=json.load(open(sys.argv[1]))['totals']; sys.exit(0 if t['lines.followed'] >= 0.85 else 'replay lines followed: %.2f' % t['lines.followed'])" "$OUT/bench.json"
 echo "== learning: combo pieces, self-play (best of 3, starts), training, policy, arena (tiny)"
-rm -f "$OUT/sp.jsonl" "$OUT/sp.pjsonl"
+rm -f "$OUT/sp.jsonl" "$OUT/sp.pjsonl" "$OUT/sp.nejsonl" "$OUT/sp.gjsonl"
 mkdir -p "$OUT/libs"
 build/ygoe-cli library decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 \
   --out "$OUT/libs/angelechy_luna_mardelplata_2026-11.json" > "$OUT/lib.txt"
@@ -42,7 +42,10 @@ YGOE_FOLLOW_JSONL=1 build/ygoe-cli followtest decks/angelechy_luna_mardelplata_2
   --seed 1 --turns 4 | python3 -c "import json,sys; [print(l) for r in map(json.loads, sys.stdin) for l in r['jsonl'].splitlines() if '\"kind\":\"start\"' in l]" > "$OUT/starts.jsonl"
 build/ygoe-cli selfplay decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk \
   --games 2 --iterations 40 --turns 3 --net none --libraries "$OUT/libs" --bo3 1 --explore 0.5 \
-  --starts "$OUT/starts.jsonl" --start-share 0.5 --policy-out "$OUT/sp.pjsonl" --out "$OUT/sp.jsonl" > "$OUT/sp.txt"
+  --starts "$OUT/starts.jsonl" --start-share 0.5 --policy-out "$OUT/sp.pjsonl" --out "$OUT/sp.jsonl" \
+  --ne-explore 0.2 --ne-out "$OUT/sp.nejsonl" --games-out "$OUT/sp.gjsonl" > "$OUT/sp.txt"
+python3 tools/ml/nonengine.py values "$OUT/sp.gjsonl" --out "$OUT/ne_values.json" > /dev/null
+build/ygoe-cli nonengine decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk | grep -q "hand trap"
 python3 tools/ml/train.py "$OUT/sp.jsonl" "$OUT/starts.jsonl" --epochs 2 --out "$OUT/net.json" --report "$OUT/net_report.json" > /dev/null
 build/ygoe-cli policy-train "$OUT/sp.pjsonl" --epochs 1 --out "$OUT/policy.json" --report "$OUT/policy_report.json" > /dev/null
 build/ygoe-cli arena decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk \

@@ -44,6 +44,7 @@
 #include <map>
 #include <memory>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -54,6 +55,7 @@
 #include "evaluate.h"
 #include "json.h"
 #include "live.h"
+#include "nonengine.h"
 #include "ocgapi_constants.h"
 #include "pieces.h"
 #include "policy.h"
@@ -207,7 +209,19 @@ struct Bot {
 	std::shared_ptr<const ValueNet> net;
 	std::shared_ptr<const Policy> policy;
 	std::shared_ptr<const PieceGuide> guide;
+	std::shared_ptr<const NeTiming> timing;  // non-engine timing (nonengine.h)
 };
+
+std::shared_ptr<const NeTiming> timing_from(const std::string& path, const CardDB& db) {
+	if(path.empty())
+		return db.nonengine_timing();
+	if(path == "none")
+		return nullptr;
+	auto t = std::make_shared<NeTiming>();
+	if(!t->parse(read_file(path)))
+		return nullptr;
+	return t;
+}
 
 struct PlayConfig {
 	int iterations = 300;
@@ -216,6 +230,8 @@ struct PlayConfig {
 	int explore_moves = 0;
 	const Scenario* start = nullptr;  // a real game's position, player 0 the turn player
 	int turn_offset = 0;              // that position's turn number minus 1
+	double ne_explore = 0;            // non-engine choices turned around (self-play)
+	LiveDuel::NonEngineHook ne_hook;
 };
 
 struct Game {
@@ -248,6 +264,10 @@ Game play(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Deck& d1
 	live.set_policy(1, b1.policy);
 	live.set_guide(0, b0.guide);
 	live.set_guide(1, b1.guide);
+	live.set_nonengine_timing(0, b0.timing);
+	live.set_nonengine_timing(1, b1.timing);
+	if(pc.ne_hook)
+		live.set_nonengine_exploration(pc.ne_explore, pc.ne_hook);
 	if(pc.explore > 0)
 		live.set_exploration(pc.explore, pc.explore_moves);
 	if(hook)
@@ -383,6 +403,21 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 		return 1;
 	}
 	auto policy = policy_from(get("policy", ""), get("phone-policy", ""), db);
+	auto timing = timing_from(get("ne-timing", ""), db);
+	pc.ne_explore = std::stod(get("ne-explore", "0"));
+	std::unique_ptr<std::ofstream> ne_out, games_out;
+	if(opt.count("ne-out"))
+		ne_out = std::make_unique<std::ofstream>(opt.at("ne-out"), std::ios::app);
+	if(opt.count("games-out"))
+		games_out = std::make_unique<std::ofstream>(opt.at("games-out"), std::ios::app);
+	// each deck's non-engine cards (nonengine.h), by its address
+	std::map<const Deck*, std::vector<NeCard>> ne_of;
+	auto nonengine = [&](const Deck& d) -> const std::vector<NeCard>& {
+		auto it = ne_of.find(&d);
+		if(it == ne_of.end())
+			it = ne_of.emplace(&d, classify_nonengine(db, d)).first;
+		return it->second;
+	};
 	std::vector<Start> starts;
 	if(opt.count("starts"))
 		starts = load_starts(opt.at("starts"));
@@ -456,8 +491,24 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			int this_turn = 0;
 			game_id = gid;
 			game_examples = 0;
+			// non-engine cards each player had in hand early (turns 1-4), and the chances to use one
+			std::set<uint32_t> seen[2];
+			struct NeChance {
+				uint8_t player;
+				std::vector<float> f;
+				bool used;
+			};
+			std::vector<NeChance> chances;
+			PlayConfig gpc2 = gpc;
+			if(ne_out)
+				gpc2.ne_hook = [&](uint8_t player, const std::vector<float>& f, bool used) { chances.push_back({player, f, used}); };
 			auto record = [&](LiveDuel& live) {
 				Board b = live.duel().board();
+				if(!gpc.start && b.turn <= 4)
+					for(uint8_t p = 0; p < 2; ++p)
+						for(const auto& c : b.hand[p])
+							if(c.code)
+								seen[p].insert(c.code);
 				b.turn += static_cast<uint32_t>(gpc.turn_offset);
 				if(b.turn != last_turn) {
 					last_turn = b.turn;
@@ -471,8 +522,38 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 					pos.push_back({base.features(b, me, next, ev.value), ev.raw, me, b.turn});
 				}
 			};
-			Game g = play(db, scripts, d0, d1, gseed, gpc, b0, b1, record, hook, &current);
+			Game g = play(db, scripts, d0, d1, gseed, gpc2, b0, b1, record, hook, &current);
 			written += write_positions(out, pos, g, gid, src);
+			if(ne_out) {
+				for(const auto& c : chances) {
+					*ne_out << "{\"g\":" << json::quote(gid) << ",\"z\":" << (c.player == 0 ? g.z0 : 1.0 - g.z0) << ",\"u\":" << (c.used ? 1 : 0)
+					        << ",\"f\":[";
+					for(size_t i = 0; i < c.f.size(); ++i)
+						*ne_out << (i ? "," : "") << c.f[i];
+					*ne_out << "]}\n";
+				}
+				ne_out->flush();
+			}
+			if(games_out && !gpc.start) {
+				// which non-engine cards each side had early, for their values (tools/ml/nonengine.py)
+				*games_out << "{\"g\":" << json::quote(gid) << ",\"z0\":" << g.z0 << ",\"fin\":" << (g.finished ? 1 : 0) << ",\"arch\":["
+				           << archetype_key(db, d0) << "," << archetype_key(db, d1) << "],\"ne\":[";
+				for(int p = 0; p < 2; ++p) {
+					*games_out << (p ? "," : "") << "[";
+					bool f = true;
+					for(const auto& c : nonengine(p ? d1 : d0)) {
+						if(c.engine() || !c.copies)
+							continue;
+						const uint32_t sid = db.script_id(c.code);
+						*games_out << (f ? "" : ",") << "{\"c\":" << sid << ",\"n\":" << c.copies << ",\"seen\":" << (seen[p].count(sid) ? 1 : 0)
+						           << "}";
+						f = false;
+					}
+					*games_out << "]";
+				}
+				*games_out << "]}\n";
+				games_out->flush();
+			}
 			const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 			std::printf("game %s: %s, %d turns, winner %d (z %.2f, LP %d/%d), %zu positions, %.0fs\n", gid.c_str(),
 			            g.finished ? "finished" : "cut", g.turns, g.winner, g.z0, g.lp[0], g.lp[1], pos.size(), secs);
@@ -488,7 +569,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			spc.turn_offset = st.turn - 1;
 			sc.seed = rng();
 			spc.start = &sc;
-			Bot b{net, policy, nullptr};
+			Bot b{net, policy, nullptr, timing};
 			one(sc.decks[0], sc.decks[1], b, b, sc.seed, spc, match_id, "start");
 			continue;
 		}
@@ -497,7 +578,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 		if(!bo3) {
 			const bool swap = gi % 2 == 1;
 			const size_t p0 = swap ? bdx : a, p1 = swap ? a : bdx;
-			one(decks[p0], decks[p1], Bot{net, policy, dk.guides[p0]}, Bot{net, policy, dk.guides[p1]},
+			one(decks[p0], decks[p1], Bot{net, policy, dk.guides[p0], timing}, Bot{net, policy, dk.guides[p1], timing},
 			    seed * 7919 + static_cast<uint64_t>(gi), pc, match_id, nullptr);
 			continue;
 		}
@@ -508,7 +589,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			const size_t f = idx[first], s = idx[1 - first];
 			const Deck& df = game == 1 ? decks[f] : siding.sided(f, s, true, decks);
 			const Deck& ds = game == 1 ? decks[s] : siding.sided(s, f, false, decks);
-			Game g = one(df, ds, Bot{net, policy, dk.guides[f]}, Bot{net, policy, dk.guides[s]},
+			Game g = one(df, ds, Bot{net, policy, dk.guides[f], timing}, Bot{net, policy, dk.guides[s], timing},
 			             seed * 7919 + static_cast<uint64_t>(gi) * 3 + static_cast<uint64_t>(game), pc,
 			             match_id + "-g" + std::to_string(game), nullptr);
 			int loser;
@@ -551,6 +632,8 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 	const std::string phone = get("phone-policy", "");
 	auto fresh_pol = policy_from(get("policy", ""), phone, db);
 	auto old_pol = policy_from(get("vs-policy", ""), phone, db);
+	auto fresh_t = timing_from(get("ne-timing", ""), db);
+	auto old_t = timing_from(get("vs-ne-timing", ""), db);
 	const int games = std::stoi(get("games", "8"));
 	PlayConfig pc;
 	pc.iterations = std::stoi(get("iterations", "300"));
@@ -567,8 +650,8 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 		const size_t ia = pair % decks.size();
 		const size_t ib = (pair / decks.size() + 1 + pair) % decks.size();
 		const bool new_first = gi % 2 == 0;
-		const Bot nb0{fresh, fresh_pol, dk.guides[ia]}, ob0{old, old_pol, dk.guides[ia]};
-		const Bot nb1{fresh, fresh_pol, dk.guides[ib]}, ob1{old, old_pol, dk.guides[ib]};
+		const Bot nb0{fresh, fresh_pol, dk.guides[ia], fresh_t}, ob0{old, old_pol, dk.guides[ia], old_t};
+		const Bot nb1{fresh, fresh_pol, dk.guides[ib], fresh_t}, ob1{old, old_pol, dk.guides[ib], old_t};
 		Game g = play(db, scripts, decks[ia], decks[ib], seed * 104729 + static_cast<uint64_t>(pair), pc, new_first ? nb0 : ob0,
 		              new_first ? ob1 : nb1, [](LiveDuel&) {});
 		const double r = new_first ? g.z0 : 1.0 - g.z0;
@@ -675,6 +758,39 @@ int run_policy_train(const std::vector<std::string>& files, const CardDB& db, co
 	std::printf("%s\n", r.str().c_str());
 	if(opt.count("report"))
 		std::ofstream(opt.at("report")) << r.str() << "\n";
+	return 0;
+}
+
+// ygoe-cli nonengine <deck.ydk> [<opponent.ydk> ...]: the deck's non-engine cards (Main and Side
+// Deck) with their role, what they stop and their measured value against the opponents (the
+// format when none are given: data/nonengine_values.json), best first.
+int run_nonengine(const std::vector<std::string>& paths, const CardDB& db) {
+	std::vector<Deck> decks;
+	for(const auto& p : paths) {
+		Deck d;
+		std::string err;
+		if(!load_ydk(p, d, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		decks.push_back(std::move(d));
+	}
+	const Deck& mine = decks.front();
+	std::vector<Deck> opp(decks.begin() + 1, decks.end());
+	std::printf("archetype %u; measured values: %s\n", archetype_key(db, mine), db.nonengine_values() ? "yes" : "none yet");
+	std::printf("%-44s %-14s %5s %5s %8s %8s %6s  stops\n", "card", "role", "main", "side", "1st", "2nd", "games");
+	for(const auto& ch : rank_nonengine(db, mine, opp)) {
+		std::string stops;
+		for(const auto& s : stops_names(ch.card.stops))
+			stops += (stops.empty() ? "" : ", ") + s;
+		auto pct = [&](double v, bool m) {
+			char b[16];
+			std::snprintf(b, sizeof b, m ? "%+.1f%%" : "-", v * 100);
+			return std::string(b);
+		};
+		std::printf("%-44.44s %-14s %5d %5d %8s %8s %6d  %s\n", db.name(db.script_id(ch.card.code)).c_str(), ne_role_name(ch.card.role),
+		            ch.card.copies, ch.card.side_copies, pct(ch.value_first, ch.measured_first).c_str(), pct(ch.value_second, ch.measured_second).c_str(), ch.games, stops.c_str());
+	}
 	return 0;
 }
 

@@ -31,6 +31,26 @@ Here it learns from the bots' searches: at a decision, each option's share of th
 visits is its target (the AlphaZero way), so the next searches spend their iterations where
 deep search ended up anyway.
 
+## Non-engine (`engine/src/nonengine.h`)
+
+The cards a deck plays besides its own combo: hand traps, interrupting Spells/Traps, board
+breakers, floodgates. `ygoe-cli nonengine <deck.ydk> [opponents...]` lists them with their role,
+what they stop and their measured value.
+
+- **Classification**: from the script analysis; a card of the deck's archetype is engine, a
+  card with no interaction at all is a combo piece.
+- **Timing**: whenever a bot can use one on the opponent's play, self-play records the situation
+  (the search's view of using vs holding, their plays this turn, a Deck play on the chain, a known
+  choke point, interruptions left, board and hand sizes, what the card stops...) and whether it
+  was used; 15% of these choices are turned around so both are seen. `nonengine.py timing` learns
+  P(win) if used and if held; the bot adds the difference (at most ±5%) to its search's view.
+  `data/nonengine_timing.json`, kept like the network: when it predicts better and wins the arena.
+- **Values**: for each non-engine card, the win rate when it was in hand in the first 4 turns
+  minus when it wasn't, per matchup (by archetype), going first and second, and against the whole
+  format (`nonengine.py values`, `data/nonengine_values.json`, updated every run). Side plans
+  (`side.h`) blend them into their card values as games add up (from 30 games, fully at a few
+  hundred), and `ygoe-cli nonengine` ranks a deck's non-engine slots by them.
+
 ## The nightly pipeline (`.github/workflows/ml.yml`, "Learn")
 
 1. **The app's data**: real games the YGO Sandbox app re-played from the player's YGO Omega

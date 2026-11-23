@@ -40,6 +40,7 @@ add_library(ygoe STATIC
   engine/src/profile.cpp
   engine/src/evaluate.cpp
   engine/src/valuenet.cpp
+  engine/src/nonengine.cpp
   engine/src/search.cpp
   engine/src/side.cpp
   engine/src/analyze.cpp

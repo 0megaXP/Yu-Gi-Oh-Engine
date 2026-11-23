@@ -55,6 +55,19 @@ public:
 	// visits of each answer), before the move is chosen. Self-play uses it to train the policy.
 	using SearchHook = std::function<void(const Decision&, const SearchOutput&)>;
 	void set_search_hook(SearchHook h) { search_hook_ = std::move(h); }
+	// Non-engine timing (nonengine.h) for a player's bot: unset, the card database's. Null: none.
+	void set_nonengine_timing(int player, std::shared_ptr<const class NeTiming> t) {
+		ne_timing_[player & 1] = std::move(t);
+		ne_timing_set_[player & 1] = true;
+	}
+	// Self-play: at each chance to use a non-engine card on the opponent's play, the bot's choice
+	// is turned around with probability `p` (so both choices are seen), and the hook gets the
+	// situation's features (nonengine.h) and whether the card was used.
+	using NonEngineHook = std::function<void(uint8_t player, const std::vector<float>& features, bool used)>;
+	void set_nonengine_exploration(double p, NonEngineHook h) {
+		ne_explore_ = p;
+		ne_hook_ = std::move(h);
+	}
 	// What the move policy sees at the current decision (policy.h).
 	int steps_this_turn() const { return steps_this_turn_; }
 	// A player's learned value network (valuenet.h): their bot's evaluation uses it. Unset: the
@@ -126,6 +139,10 @@ private:
 	int explore_moves_ = 0;
 	int explored_[2] = {0, 0};  // Main / Battle Phase searches made so far, per player
 	SearchHook search_hook_;
+	std::shared_ptr<const class NeTiming> ne_timing_[2];
+	bool ne_timing_set_[2] = {false, false};
+	double ne_explore_ = 0;
+	NonEngineHook ne_hook_;
 	int steps_this_turn_ = 0;
 	uint32_t steps_turn_ = 0;
 	DeckKnowledge knowledge_[2];

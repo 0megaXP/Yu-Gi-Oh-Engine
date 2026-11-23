@@ -46,10 +46,11 @@ with open(os.path.join(out, "scripts.pack"), "wb") as f:
         f.write(b)
         digest.update(b)
 
-for name in ("cards.tsv", "effects.tsv", "strings.tsv", "passcode_map.tsv", "value_net.json", "policy.json"):
+for name in ("cards.tsv", "effects.tsv", "strings.tsv", "passcode_map.tsv", "value_net.json", "policy.json",
+             "nonengine_timing.json", "nonengine_values.json"):
     src = os.path.join(data, name)
-    if name in ("value_net.json", "policy.json") and not os.path.exists(src):
-        continue  # the learned value network and move policy are optional (tools/ml)
+    if name.endswith(".json") and not os.path.exists(src):
+        continue  # what was learned (tools/ml) is optional
     shutil.copyfile(src, os.path.join(out, name))
     digest.update(open(src, "rb").read())
 

@@ -81,7 +81,8 @@ val ygoeEnginePack = tasks.register<Exec>("ygoeEnginePack") {
     inputs.file(File(engineRoot, "data/passcode_map.tsv"))
     // the learned value network (tools/ml), when there is one
     File(engineRoot, "data/value_net.json").takeIf { it.exists() }?.let { inputs.file(it) }
-    File(engineRoot, "data/policy.json").takeIf { it.exists() }?.let { inputs.file(it) }
+    for (learned in listOf("policy.json", "nonengine_timing.json", "nonengine_values.json"))
+        File(engineRoot, "data/$learned").takeIf { it.exists() }?.let { inputs.file(it) }
     outputs.dir(out)
     commandLine(
         "bash", "-c",

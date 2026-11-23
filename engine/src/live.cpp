@@ -8,6 +8,8 @@
 #include <sstream>
 
 #include "json.h"
+#include "nonengine.h"
+#include "profile.h"
 #include "ocgapi_constants.h"
 
 namespace ygoe {
@@ -396,8 +398,63 @@ int LiveDuel::choose(BotLevel level) {
 			if(theirs <= 2 && from_deck)
 				margin = std::min(margin, 0.0);
 		}
+		// A non-engine card (hand trap, interrupting Set): what the learned timing says about using
+		// it now rather than holding it, added to the search's view (nonengine.h).
+		bool ne_card = false;
+		NeSituation ns;
+		if(use && pass) {
+			uint32_t code = 0;
+			for(const auto& o : d.options)
+				if(o.label == use->label)
+					code = o.code;
+			const CardRole& r = code ? eval_->role(d.player, code) : CardRole{};
+			ns.stops = code ? ne_stops(r) : 0;
+			ne_card = code && (r.hand_trap || (!r.engine && ns.stops));
+			if(ne_card) {
+				const uint8_t o2 = static_cast<uint8_t>(1 - d.player);
+				ns.search_gain = use->mean - pass->mean;
+				ns.their_turn = duel_->turn_player() == o2;
+				ns.hand_trap = r.hand_trap;
+				ns.chain_depth = duel_->chain_depth();
+				ns.turn = static_cast<int>(duel_->turn());
+				for(size_t i = duel_->events().size(); i-- > 0;) {
+					const Event& e = duel_->events()[i];
+					if(e.kind == Event::NewTurn)
+						break;
+					if(e.kind == Event::Chaining && e.player == o2)
+						++ns.their_plays;
+				}
+				const uint32_t top2 = duel_->chain_last_code();
+				if(top2 && duel_->chain_last_player() == o2) {
+					std::string text = db_.text(db_.script_id(top2));
+					for(auto& ch : text)
+						ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+					ns.deck_play = text.find("from your deck") != std::string::npos;
+					const auto& ck = knowledge_[o2].chokes;
+					ns.choke = std::find(ck.begin(), ck.end(), top2) != ck.end();
+				}
+				Board b = duel_->board();
+				for(const auto& c : b.hand[d.player])
+					if(c.code && eval_->role(d.player, c.code).hand_trap)
+						++ns.my_interruptions;
+				for(const auto& c : b.szone[d.player])
+					if(c.code && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
+						++ns.my_interruptions;
+				ns.their_hand = static_cast<int>(b.hand[o2].size());
+				ns.their_field = b.count_field(o2);
+				ns.my_field = b.count_field(d.player);
+				auto timing = ne_timing_set_[d.player & 1] ? ne_timing_[d.player & 1] : db_.nonengine_timing();
+				if(timing)
+					margin -= std::clamp(timing->gain(ns), -0.05, 0.05);
+			}
+		}
+		bool used = !pass || (use && use->mean > pass->mean + margin);
+		if(ne_card && ne_explore_ > 0 && std::uniform_real_distribution<double>(0, 1)(rng_) < ne_explore_)
+			used = !used;  // self-play: both choices get seen
+		if(ne_card && ne_hook_)
+			ne_hook_(d.player, ne_features(ns), used);
 		pick = pass;
-		if(!pass || (use && use->mean > pass->mean + margin))
+		if(used)
 			pick = use ? use : &out.moves.front();
 	} else {
 		int most = out.moves.front().visits;
