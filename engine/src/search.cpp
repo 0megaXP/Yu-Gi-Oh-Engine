@@ -471,7 +471,8 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 					for(const auto& o : dec.options)
 						if(o.label == s.label)
 							matches = true;
-					matches = matches || s.minor;
+					// a zone step meets any zone choice (which zones are free changes with the order)
+					matches = matches || s.minor || (s.type == DecisionType::Place && dec.type == DecisionType::Place);
 				}
 				if(matches)
 					break;
@@ -503,6 +504,9 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 				continue;
 		}
 		const Decision& dec = d.decision();
+		// A zone the line chose that isn't asked now (the order changed what is free): skip it.
+		if(lenient && s.type == DecisionType::Place && dec.type != DecisionType::Place)
+			continue;
 		if(d.ended() || dec.options.empty() || dec.player != s.player)
 			return false;
 		size_t pick = SIZE_MAX;
@@ -511,7 +515,8 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 				pick = o;
 				break;
 			}
-		if(pick == SIZE_MAX && s.minor)
+		// that zone is taken now: the default one (keeps cards apart in their columns)
+		if(pick == SIZE_MAX && (s.minor || (lenient && s.type == DecisionType::Place && dec.type == DecisionType::Place)))
 			pick = 0;
 		if(pick == SIZE_MAX) {
 			if(dbg) fprintf(stderr, "defer: step '%s' not available\n", s.label.c_str());

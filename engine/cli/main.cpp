@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
 		ss << f.rdbuf();
 		auto ref = json::Value::parse(ss.str());
 		auto lib = parse_library(db, ref["library"]);
-		auto guide = std::make_shared<PieceGuide>(lib);
+		auto guide = std::make_shared<PieceGuide>(lib, &db);
 		std::printf("%zu pieces\n", guide->size());
 		int hands = std::stoi(a.get("hands", "10"));
 		int iters = std::stoi(a.get("iterations", "400"));
@@ -456,7 +456,7 @@ int main(int argc, char** argv) {
 			std::stringstream ls;
 			ls << lf.rdbuf();
 			auto v = json::Value::parse(ls.str());
-			live.set_guide(p, std::make_shared<PieceGuide>(parse_library(db, v.is_array() ? v : v["library"])));
+			live.set_guide(p, std::make_shared<PieceGuide>(parse_library(db, v.is_array() ? v : v["library"]), &db));
 		}
 		uint32_t max_turns = static_cast<uint32_t>(std::stoi(a.get("turns", "4")));
 		auto print_log = [&] {

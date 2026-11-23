@@ -1,3 +1,4 @@
+#include <cctype>
 #include <locale>
 #include "live.h"
 
@@ -347,6 +348,24 @@ int LiveDuel::choose(BotLevel level) {
 				if(mine >= know.plays - theirs)
 					margin = 0.0;
 			}
+			// One of their first plays this turn that searches or summons from the Deck (a
+			// starter): stopping it can stop the whole turn, which the search undersells (the hands
+			// it imagines for them hold more starters than a real one usually does). Use the card
+			// whenever the search rates it at least as well as passing.
+			int theirs = 0;
+			for(size_t i = duel_->events().size(); i-- > 0;) {
+				const Event& e = duel_->events()[i];
+				if(e.kind == Event::NewTurn)
+					break;
+				if(e.kind == Event::Chaining && e.player == opp)
+					++theirs;
+			}
+			std::string text = db_.text(db_.script_id(top));
+			for(auto& ch : text)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			const bool from_deck = text.find("from your deck") != std::string::npos;
+			if(theirs <= 2 && from_deck)
+				margin = std::min(margin, 0.0);
 		}
 		pick = pass;
 		if(!pass || (use && use->mean > pass->mean + margin))
@@ -476,6 +495,13 @@ int LiveDuel::choose(BotLevel level) {
 		plan_player_ = d.player;
 		if(!plan_.empty() && plan_.front().player == d.player)
 			want = plan_.front().label;
+		// A response the bot decided to make stays made: the clean-up judges "not needed" on one
+		// imagined line, which must not overrule the decision itself. Search again afterwards.
+		if(response && want != best.label) {
+			want = best.label;
+			plan_.clear();
+			plan_pos_ = 0;
+		}
 		// A Set or a Normal Summon goes as late as it can: if the plan has another play of this
 		// Main Phase available now, make that one first and search again afterwards. The card
 		// stays in the hand until it is really the next thing to do, and if the opponent

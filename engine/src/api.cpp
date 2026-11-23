@@ -262,7 +262,7 @@ std::string Engine::analyze(const std::string& request) {
 	cfg.search.horizon_turns = static_cast<int>(c["horizon"].integer(0));
 	cfg.search.cancel = &cancel_;
 	if(req["library"].is_array())
-		cfg.search.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+		cfg.search.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]), &db_);
 	cfg.search.imitate = read_imitate(req["imitate"], db_);
 	cfg.search.policy = read_policy(req["policy"], db_);
 	cfg.determinizations = static_cast<int>(c["samples"].integer(12));
@@ -364,7 +364,7 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	live->set_human(static_cast<int>(req["human"].integer(-1)));
 	for(int p = 0; p < 2; ++p)
 		if(req["libraries"][p].is_array())
-			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p])));
+			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p]), &db_));
 	live->set_policy(read_policy(req["policy"], db_));
 	// {"knowledge": [{"chokes": [passcodes], "plays": 6.5}, null]}: per player, about their deck
 	for(int p = 0; p < 2; ++p) {
@@ -488,7 +488,7 @@ std::string Engine::combo_tree(const std::string& request) {
 		return error_json("the combo tree needs your hand");
 	ComboTreeConfig cfg;
 	if(req["library"].is_array())
-		cfg.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]));
+		cfg.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]), &db_);
 	cfg.imitate = read_imitate(req["imitate"], db_);
 	cfg.policy = read_policy(req["policy"], db_);
 	cfg.iterations = static_cast<int>(req["iterations"].integer(1500));

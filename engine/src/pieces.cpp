@@ -1,3 +1,4 @@
+#include <cstring>
 #include <locale>
 #include "pieces.h"
 
@@ -544,6 +545,43 @@ std::vector<const ComboPiece*> PieceGuide::playable(const PieceResources& r) con
 	return out;
 }
 
+PieceGuide::PieceGuide(std::vector<LibraryPiece> lib, const CardDB* db) : lib_(std::move(lib)) {
+	if(!db)
+		return;
+	// "Activate <card> — ...  →  <target> (Deck)": that card can add that target.
+	for(const auto& lp : lib_)
+		for(const auto& step : lp.piece.steps) {
+			auto parts = split_labels(step);
+			if(parts.size() < 2)
+				continue;
+			std::string head = parts[0];
+			for(const char* verb : {"Activate ", "Chain ", "Use "})
+				if(head.rfind(verb, 0) == 0) {
+					head = head.substr(std::strlen(verb));
+					break;
+				}
+			const size_t cut = std::min(head.find(" — "), head.find(" ("));
+			const uint32_t from = db->by_name(head.substr(0, cut));
+			if(!from)
+				continue;
+			for(size_t k = 1; k < parts.size(); ++k) {
+				const std::string& x = parts[k];
+				const std::string tail = " (Deck)";
+				if(x.size() <= tail.size() || x.compare(x.size() - tail.size(), tail.size(), tail) != 0)
+					continue;
+				const uint32_t to = db->by_name(x.substr(0, x.size() - tail.size()));
+				if(!to || to == from)
+					continue;
+				bool known = false;
+				for(const auto& b : bridges_)
+					known = known || (b.from == from && b.to == to);
+				if(!known)
+					bridges_.push_back({from, to, parts[0] + "  →  " + x});
+				break;
+			}
+		}
+}
+
 std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces) const {
 	std::vector<std::string> labels;
 	std::vector<uint32_t> hand = r.hand, other = r.other;
@@ -552,10 +590,29 @@ std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt1993
 	for(int n = 0; n < max_pieces; ++n) {
 		std::vector<double> w(lib_.size(), 0);
 		double total = 0;
+		std::vector<int> bridge(lib_.size(), -1);  // a search that gets the one card a piece lacks
 		for(size_t i = 0; i < lib_.size(); ++i) {
 			const auto& lp = lib_[i];
-			if(used[i] || !can_play(lp.piece, hand, other, ns_used))
+			if(used[i])
 				continue;
+			if(!can_play(lp.piece, hand, other, ns_used)) {
+				// The piece needs one card from the hand that isn't there, and a card in the hand
+				// is known to search it: plan that search first.
+				for(size_t b = 0; b < bridges_.size() && bridge[i] < 0; ++b) {
+					const Bridge& br = bridges_[b];
+					if(std::find(hand.begin(), hand.end(), br.from) == hand.end() ||
+					   std::find(lp.piece.needs_hand.begin(), lp.piece.needs_hand.end(), br.to) == lp.piece.needs_hand.end())
+						continue;
+					std::vector<uint32_t> h = hand;
+					h.erase(std::find(h.begin(), h.end(), br.from));
+					h.push_back(br.to);
+					if(std::find(lp.piece.needs_hand.begin(), lp.piece.needs_hand.end(), br.from) == lp.piece.needs_hand.end() &&
+					   can_play(lp.piece, h, other, ns_used))
+						bridge[i] = static_cast<int>(b);
+				}
+				if(bridge[i] < 0)
+					continue;
+			}
 			// Common pieces from strong lines first; a piece that makes nothing is a last resort.
 			double x = (1.0 + lp.count) * (1.0 + std::max(0.0, lp.value) / 5.0);
 			if(lp.piece.gives.empty() && lp.piece.leaves.empty())
@@ -569,6 +626,8 @@ std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt1993
 			// Use what earlier pieces gave before starting something unrelated.
 			if(n > 0 && !lp.piece.needs_earlier.empty())
 				x *= 3;
+			if(bridge[i] >= 0)
+				x *= 0.7;  // one search away
 			w[i] = x;
 			total += x;
 		}
@@ -586,6 +645,13 @@ std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt1993
 			break;
 		used[i] = 1;
 		const ComboPiece& p = lib_[i].piece;
+		if(bridge[i] >= 0) {
+			const Bridge& br = bridges_[static_cast<size_t>(bridge[i])];
+			hand.erase(std::find(hand.begin(), hand.end(), br.from));
+			hand.push_back(br.to);
+			for(auto& l : split_labels(br.step))
+				labels.push_back(std::move(l));
+		}
 		for(auto code : p.needs_hand) {
 			auto it = std::find(hand.begin(), hand.end(), code);
 			if(it != hand.end())

@@ -207,4 +207,9 @@ std::string CardDB::description(uint64_t desc) const {
 	return {};
 }
 
+uint32_t CardDB::by_name(const std::string& name) const {
+	auto it = by_name_.find(lower_name(name));
+	return it == by_name_.end() ? 0 : it->second;
+}
+
 }  // namespace ygoe

@@ -98,7 +98,10 @@ PieceResources resources_of(const CardDB& db, const Board& b, uint8_t player);
 // option matching the next label (see SearchConfig::guide).
 class PieceGuide {
 public:
-	explicit PieceGuide(std::vector<LibraryPiece> lib) : lib_(std::move(lib)) {}
+	// With `db`, the guide also learns from the pieces' steps which card searched which ("Strategy
+	// Score → Angelechy Opposition (Deck)"): a plan can then start by searching a card a piece
+	// needs that isn't in the hand.
+	explicit PieceGuide(std::vector<LibraryPiece> lib, const CardDB* db = nullptr);
 	bool empty() const { return lib_.empty(); }
 	size_t size() const { return lib_.size(); }
 	std::vector<std::string> sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces = 5) const;
@@ -107,6 +110,11 @@ public:
 
 private:
 	std::vector<LibraryPiece> lib_;
+	struct Bridge {
+		uint32_t from = 0, to = 0;  // the card used, the card it adds from the Deck
+		std::string step;           // the step as the pieces wrote it
+	};
+	std::vector<Bridge> bridges_;
 };
 
 }  // namespace ygoe

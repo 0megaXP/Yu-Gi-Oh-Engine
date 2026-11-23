@@ -59,6 +59,8 @@ public:
 	std::string text(uint32_t code) const;  // full card text
 	// Its text mentions columns: where cards are placed matters to it.
 	bool cares_about_columns(uint32_t code) const { return columns_.count(code) > 0; }
+	// The id of the card with this name (case does not matter), 0 if none.
+	uint32_t by_name(const std::string& name) const;
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
 
 private:
