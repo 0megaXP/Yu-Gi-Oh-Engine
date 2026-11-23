@@ -96,7 +96,9 @@ double Policy::score(const std::vector<uint32_t>& f) const {
 double Policy::factor(const Decision& d, const Option& o, const PolicyContext& c) const {
 	if(!trained_)
 		return 1.0;
-	thread_local std::vector<uint32_t> f;
+	// A plain local, not thread_local: on Windows (MinGW) thread_locals with a destructor
+	// corrupted the heap when the bots' search threads ended.
+	std::vector<uint32_t> f;
 	features(d, o, c, f);
 	double s = std::clamp(score(f), -2.08, 2.08);  // e^2.08 ≈ 8
 	return std::exp(s);

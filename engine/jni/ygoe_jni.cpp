@@ -2,7 +2,9 @@
 // to ygoe::Engine; requests and results are JSON strings (docs/api.md).
 #include <jni.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -63,7 +65,15 @@ jstring to_jstring(JNIEnv* env, const std::string& s) {
 
 ygoe::Engine* engine(jlong handle) { return reinterpret_cast<ygoe::Engine*>(handle); }
 ygoe::LiveDuel* live(jlong handle) { return reinterpret_cast<ygoe::LiveDuel*>(handle); }
-thread_local std::string last_error;
+// The last error of a call, per thread. A fixed buffer, not a std::string: on Windows (MinGW)
+// thread_locals with a destructor corrupted the heap when threads ended.
+thread_local char last_error_text[1024] = "";
+
+void set_last_error(const std::string& e) {
+	size_t n = std::min(e.size(), sizeof(last_error_text) - 1);
+	std::memcpy(last_error_text, e.data(), n);
+	last_error_text[n] = 0;
+}
 
 // ---- crash notes ----
 // An error the engine doesn't catch ends the whole app (std::terminate), before the app can write
@@ -161,13 +171,14 @@ JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_progress(JNIEnv* env, jcl
 
 JNIEXPORT jlong JNICALL Java_com_ygoengine_YgoNative_liveCreate(JNIEnv* env, jclass, jlong h, jstring request) {
 	last_call.store("liveCreate");
-	last_error.clear();
-	auto* d = engine(h)->create_live(to_string(env, request), last_error);
+	std::string error;
+	auto* d = engine(h)->create_live(to_string(env, request), error);
+	set_last_error(error);
 	return reinterpret_cast<jlong>(d);
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_lastError(JNIEnv* env, jclass) {
-	return to_jstring(env, last_error);
+	return to_jstring(env, std::string(last_error_text));
 }
 
 JNIEXPORT jstring JNICALL Java_com_ygoengine_YgoNative_liveState(JNIEnv* env, jclass, jlong d) {

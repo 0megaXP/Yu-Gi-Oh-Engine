@@ -239,10 +239,7 @@ const std::string* ScriptCache::get(const std::string& name) {
 
 namespace {
 
-struct Payload {
-	const CardDB* db;
-	ScriptCache* scripts;
-};
+using Payload = DuelReaders;
 
 void card_reader(void* payload, uint32_t code, OCG_CardData* data) {
 	auto* pl = static_cast<Payload*>(payload);
@@ -333,10 +330,9 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	chain_players_.clear();
 	chain_codes_.clear();
 
-	// Payload must outlive the duel; one per Duel object is enough.
-	static thread_local Payload payload;
-	payload.db = &db_;
-	payload.scripts = &scripts_;
+	// The readers' payload is the duel's own, not one per thread: a live duel is created on one
+	// app thread and continued on others, and a thread's data is gone once that thread ends.
+	Payload& payload = readers_;
 
 	OCG_DuelOptions opt{};
 	for(int i = 0; i < 4; ++i)

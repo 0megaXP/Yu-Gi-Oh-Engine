@@ -110,6 +110,12 @@ struct Event {
 	uint32_t value = 0;
 };
 
+/** What the rules core's card and script readers need. */
+struct DuelReaders {
+	const CardDB* db;
+	ScriptCache* scripts;
+};
+
 class Duel {
 public:
 	Duel(const CardDB& db, ScriptCache& scripts);
@@ -181,6 +187,9 @@ private:
 
 	const CardDB& db_;
 	ScriptCache& scripts_;
+	// What the core's card and script readers get (their "payload"): this duel's own, so a duel
+	// can be continued from any thread (it used to be per thread, see duel.cpp).
+	DuelReaders readers_{&db_, &scripts_};
 	void* duel_ = nullptr;
 	Decision decision_;
 	bool ended_ = false;
