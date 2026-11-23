@@ -1,4 +1,5 @@
 #include "evaluate.h"
+#include "valuenet.h"
 
 #include <algorithm>
 #include <cctype>
@@ -48,6 +49,7 @@ Evaluator::Evaluator(const CardDB& db, const Deck& d0, const Deck& d1) : db_(db)
 		const double n = std::max<size_t>(decks[p]->main.size(), 40);
 		column_threat_[p] = k ? 1.0 - std::pow(1.0 - k / n, 6.0) : 0.0;
 	}
+	net_ = db.value_net();
 }
 
 uint32_t Evaluator::locked_attributes(uint64_t hint) const {
@@ -259,10 +261,95 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 		ev.value[next] += 0.45 * b.hand[next].size() * std::exp(-held_off[def] / 1.5);
 	}
 	ev.raw = ev.value[me] - ev.value[1 - me];
+	// The learned correction (trained so the score predicts who wins), split between the sides.
+	if(net_) {
+		const double c = net_->correction(features(b, me, next, ev.value));
+		ev.value[me] += c / 2;
+		ev.value[1 - me] -= c / 2;
+		ev.raw += c;
+	}
 	ev.score = 1.0 / (1.0 + std::exp(-ev.raw / 2.5));
 	if(want_notes)
 		std::sort(ev.notes.begin(), ev.notes.end(), [](auto& a, auto& c) { return a.value > c.value; });
 	return ev;
+}
+
+std::vector<float> Evaluator::features(const Board& b, uint8_t me, uint8_t next, const double value[2]) const {
+	std::vector<float> f;
+	f.reserve(kFeatures);
+	for(uint8_t s : {me, static_cast<uint8_t>(1 - me)}) {
+		const uint8_t p = s;
+		bool controls = false;
+		for(const auto* z : {&b.mzone[p], &b.szone[p]})
+			for(const auto& c : *z)
+				controls = controls || c.code != 0;
+		int hts = 0, hand_iv = 0, dead = 0;
+		for(const auto& cv : b.hand[p]) {
+			const CardRole& r = role(p, cv.code);
+			hts += r.hand_trap;
+			hand_iv += !r.interrupts.empty();
+			dead += controls && r.needs_empty_field;
+		}
+		int mons = 0, up = 0, extra_mons = 0, mon_iv = 0;
+		double atk = 0, max_atk = 0;
+		for(const auto& cv : b.mzone[p]) {
+			if(!cv.code)
+				continue;
+			++mons;
+			if(cv.pos & POS_FACEUP) {
+				++up;
+				atk += cv.atk;
+				max_atk = std::max<double>(max_atk, cv.atk);
+				mon_iv += !role(p, cv.code).interrupts.empty();
+			}
+			extra_mons += (cv.type & (TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK)) != 0;
+		}
+		int set_st = 0, set_iv = 0, up_st = 0, field = 0;
+		for(const auto& cv : b.szone[p]) {
+			if(!cv.code)
+				continue;
+			if(cv.seq == 5) {
+				++field;
+				continue;
+			}
+			if(cv.pos & POS_FACEDOWN) {
+				++set_st;
+				set_iv += !role(p, cv.code).interrupts.empty();
+			} else {
+				++up_st;
+			}
+		}
+		int gy_eff = 0;
+		for(const auto& cv : b.grave[p])
+			gy_eff += role(p, cv.code).gy_effect > 0;
+		f.push_back(static_cast<float>(std::min(b.lp[p], 16000) / 8000.0));
+		f.push_back(static_cast<float>(b.hand[p].size()));
+		f.push_back(static_cast<float>(hts));
+		f.push_back(static_cast<float>(hand_iv));
+		f.push_back(static_cast<float>(dead));
+		f.push_back(static_cast<float>(mons));
+		f.push_back(static_cast<float>(up));
+		f.push_back(static_cast<float>(atk / 3000.0));
+		f.push_back(static_cast<float>(max_atk / 3000.0));
+		f.push_back(static_cast<float>(extra_mons));
+		f.push_back(static_cast<float>(mon_iv));
+		f.push_back(static_cast<float>(set_st));
+		f.push_back(static_cast<float>(set_iv));
+		f.push_back(static_cast<float>(up_st));
+		f.push_back(static_cast<float>(field));
+		f.push_back(static_cast<float>(b.grave[p].size() / 10.0));
+		f.push_back(static_cast<float>(gy_eff));
+		f.push_back(static_cast<float>(b.banished[p].size() / 10.0));
+		f.push_back(static_cast<float>(b.deck[p].size() / 40.0));
+		f.push_back(static_cast<float>(b.extra[p].size() / 15.0));
+		f.push_back(static_cast<float>(b.hints[p].size()));
+		f.push_back(static_cast<float>(value[p] / 10.0));
+	}
+	f.push_back(next == me ? 1.0f : 0.0f);
+	f.push_back(b.turn_player == me ? 1.0f : 0.0f);
+	f.push_back(static_cast<float>(std::min<uint32_t>(b.turn, 20) / 10.0));
+	f.push_back(static_cast<float>((value[me] - value[1 - me]) / 10.0));
+	return f;
 }
 
 }  // namespace ygoe

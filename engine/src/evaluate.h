@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <memory>
 #include <vector>
 
 #include "duel.h"
@@ -32,6 +33,13 @@ public:
 	Evaluation evaluate(const Board& b, uint8_t me, uint8_t next_player, bool ended = false, int winner = -1,
 	                    bool want_notes = false) const;
 	const DeckProfile& profile(uint8_t p) const { return profile_[p]; }
+	// The numbers the learned value network reads (valuenet.h), from `me`'s side: 22 per player
+	// (yours first) and 4 about the turn. `value` are the hand-written values of both players.
+	static constexpr size_t kFeatures = 48;
+	std::vector<float> features(const Board& b, uint8_t me, uint8_t next, const double value[2]) const;
+	// The learned correction (default: the CardDB's network, if any). Null: none.
+	void set_value_net(std::shared_ptr<const class ValueNet> n) { net_ = std::move(n); }
+	const std::shared_ptr<const class ValueNet>& value_net() const { return net_; }
 	// Replaces what a side is assumed to rely on (e.g. generic_profile() for deck-neutral scores).
 	void set_profile(uint8_t p, const DeckProfile& prof) { profile_[p] = prof; }
 	const CardRole& role(uint8_t owner, uint32_t code) const;
@@ -48,7 +56,8 @@ private:
 	mutable std::unordered_map<uint64_t, uint32_t> lock_cache_;
 	mutable std::mutex mu_;
 	mutable std::unordered_map<uint32_t, CardRole> roles_[2];
-	double column_threat_[2] = {0, 0};  // chance each deck opens with a column interruption (Imperm)
+	double column_threat_[2] = {0, 0};
+	std::shared_ptr<const class ValueNet> net_;  // chance each deck opens with a column interruption (Imperm)
 };
 
 }  // namespace ygoe

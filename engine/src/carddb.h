@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <shared_mutex>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -61,6 +62,10 @@ public:
 	bool cares_about_columns(uint32_t code) const { return columns_.count(code) > 0; }
 	// The id of the card with this name (case does not matter), 0 if none.
 	uint32_t by_name(const std::string& name) const;
+	// The learned value network (valuenet.h) every Evaluator uses by default: data/value_net.json
+	// when the data folder has one, or one set here. Null: the hand-written evaluator alone.
+	std::shared_ptr<const class ValueNet> value_net() const { return value_net_; }
+	void set_value_net(std::shared_ptr<const class ValueNet> n) { value_net_ = std::move(n); }
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
 
 private:
@@ -74,6 +79,7 @@ private:
 	std::unordered_map<uint64_t, std::string> strings_;  // key: code*16+idx
 	std::unordered_map<uint32_t, std::string> texts_;
 	std::unordered_set<uint32_t> columns_;
+	std::shared_ptr<const class ValueNet> value_net_;
 };
 
 }  // namespace ygoe

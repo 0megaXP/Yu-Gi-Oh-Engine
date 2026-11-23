@@ -36,6 +36,15 @@ public:
 	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
 	// Learned move policy (policy.h) for both bots' searches.
 	void set_policy(std::shared_ptr<const class Policy> p) { policy_ = std::move(p); }
+	// A player's learned value network (valuenet.h): their bot's evaluation uses it. Unset: the
+	// card database's (data/value_net.json), if any. Set null explicitly for none.
+	void set_value_net(int player, std::shared_ptr<const class ValueNet> n) {
+		nets_[player & 1] = std::move(n);
+		net_set_[player & 1] = true;
+	}
+	// The search budget of a bot decision (0: the level's own). Self-play uses less to play more games.
+	void set_iterations(int n) { iterations_ = n; }
+	const class Evaluator& evaluator() const { return *eval_; }
 	// What is known about a player's deck from past games (replays): the cards where it is
 	// usually stopped, and how many plays it makes in a turn. The other bot uses it to time its
 	// interruptions: on a choke point, or straight away when it holds as many interruptions as
@@ -71,6 +80,9 @@ private:
 	DuelSetup setup_;
 	std::unique_ptr<Duel> duel_;
 	std::unique_ptr<Evaluator> eval_;
+	std::shared_ptr<const class ValueNet> nets_[2];
+	bool net_set_[2] = {false, false};
+	int iterations_ = 0;
 	std::unique_ptr<Searcher> searcher_;
 	std::vector<std::vector<uint8_t>> history_;
 	std::vector<std::string> log_;

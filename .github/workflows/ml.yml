@@ -1,0 +1,191 @@
+name: Learn
+
+# Every night: bots play each other with the current value network (self-play), a new network is
+# trained on those games plus the last nights', and it replaces data/value_net.json only if it
+# predicts results better than the current one and beats it in bot duels (the arena).
+# See tools/ml/README.md.
+
+on:
+  schedule:
+    - cron: "17 1 * * *"   # 01:17 UTC
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Self-play hours per shard"
+        default: "4.5"
+      shards:
+        description: "Self-play shards (parallel runners)"
+        default: "8"
+
+concurrency:
+  group: learn
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  ITERATIONS: "200"
+  TURNS: "12"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.shards.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch rules core, scripts and card data
+        run: tools/bootstrap.sh
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build build -j4 --target ygoe-cli
+      - name: Shard list
+        id: shards
+        run: |
+          n="${{ github.event.inputs.shards || '8' }}"
+          echo "list=$(python3 -c "import json;print(json.dumps(list(range(1, $n + 1))))")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine
+          path: |
+            build/ygoe-cli
+            data/
+            third_party/CardScripts/
+          retention-days: 2
+
+  selfplay:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.build.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - name: Self-play
+        run: |
+          chmod +x build/ygoe-cli
+          hours="${{ github.event.inputs.hours || '4.5' }}"
+          secs=$(python3 -c "print(int(float('$hours') * 3600))")
+          decks=$(ls decks/*.ydk bench/decks/*.ydk | sort -u)
+          mkdir -p out
+          # one process per core; each stops after its time (a cut game's positions are not written)
+          for core in 1 2 3 4; do
+            seed=$(( ${{ github.run_id }} % 100000 * 100 + ${{ matrix.shard }} * 10 + core ))
+            timeout "$secs" build/ygoe-cli selfplay $decks --games 100000 --iterations "$ITERATIONS" \
+              --turns "$TURNS" --seed "$seed" --out "out/shard-${{ matrix.shard }}-$core.jsonl" \
+              > "out/log-${{ matrix.shard }}-$core.txt" 2>&1 &
+          done
+          wait || true
+          wc -l out/*.jsonl | tail -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: positions-${{ matrix.shard }}
+          path: out/
+          retention-days: 3
+
+  train:
+    needs: [build, selfplay]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: positions-*
+          path: tonight
+          merge-multiple: true
+      - name: Positions of the last nights
+        run: |
+          mkdir -p history
+          gh release download ml-data --pattern 'night-*.jsonl.gz' --dir history 2>/dev/null || true
+          cat tonight/*.jsonl > "night-${{ github.run_id }}.jsonl" || true
+          wc -l "night-${{ github.run_id }}.jsonl"
+          gzip -kf "night-${{ github.run_id }}.jsonl"
+          for f in history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
+          ls -la history || true
+      - name: Train
+        run: |
+          python3 -m pip install --quiet --break-system-packages numpy || sudo apt-get install -y python3-numpy
+          init=""
+          [ -f data/value_net.json ] && init="--init data/value_net.json"
+          python3 tools/ml/train.py "night-${{ github.run_id }}.jsonl" history/*.jsonl $init \
+            --out new_net.json --report report.json --id "night-${{ github.run_id }}"
+      - name: Check against the current network
+        id: check
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          r = json.load(open("report.json"))
+          better = r["net_logloss"] < r["base_logloss"] - 0.002
+          print("validation log-loss: evaluator", r["base_logloss"], "network", r["net_logloss"])
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"better={'yes' if better else 'no'}\n")
+          EOF
+      - name: Arena (new network against the current one)
+        if: steps.check.outputs.better == 'yes'
+        run: |
+          chmod +x build/ygoe-cli
+          decks=$(ls decks/*.ydk | sort -u)
+          vs="none"
+          [ -f data/value_net.json ] && vs="data/value_net.json"
+          for k in 1 2 3 4; do
+            build/ygoe-cli arena $decks --games 10 --net new_net.json --vs "$vs" --iterations "$ITERATIONS" \
+              --turns "$TURNS" --seed "$k" --out "arena-$k.json" > "arena-$k.txt" 2>&1 &
+          done
+          wait
+          tail -n 2 arena-*.txt
+          python3 - <<'EOF'
+          import json, glob
+          pts = games = 0
+          for f in glob.glob("arena-*.json"):
+              r = json.load(open(f)); pts += r["score"] * r["games"]; games += r["games"]
+          score = pts / games if games else 0
+          print(f"arena: new network scored {score:.3f} over {games} games")
+          json.dump({"score": score, "games": games}, open("arena.json", "w"))
+          EOF
+      - name: Keep the new network if it won
+        if: steps.check.outputs.better == 'yes'
+        run: |
+          score=$(python3 -c "import json;print(json.load(open('arena.json'))['score'])")
+          if python3 -c "import sys; sys.exit(0 if float('$score') >= 0.55 else 1)"; then
+            cp new_net.json data/value_net.json
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/value_net.json
+            git commit -m "Value network night-${{ github.run_id }}: arena score $score" \
+              -m "$(cat report.json)"
+            for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+          else
+            echo "arena score $score < 0.55: keeping the current network"
+          fi
+      - name: Store tonight's positions (last 7 nights kept)
+        if: always()
+        run: |
+          gh release view ml-data > /dev/null 2>&1 || gh release create ml-data --title "Learning data" \
+            --notes "Self-play positions of the nightly Learn pipeline (tools/ml). Not an app release." --latest=false
+          [ -f "night-${{ github.run_id }}.jsonl.gz" ] && gh release upload ml-data "night-${{ github.run_id }}.jsonl.gz" --clobber
+          gh release view ml-data --json assets -q '.assets[].name' | grep '^night-' | sort -t- -k2 -n | head -n -7 | \
+            while read -r old; do gh release delete-asset ml-data "$old" -y; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: learn-report
+          path: |
+            report.json
+            arena*.json
+            arena*.txt
+            new_net.json
+          retention-days: 14

@@ -35,6 +35,11 @@ using namespace ygoe;
 namespace ygoe {
 int run_bench(const std::string& suite, const std::string& data, const std::string& scripts,
               const std::map<std::string, std::string>& opt);
+int run_selfplay(const std::vector<std::string>& decks, const CardDB& db, ScriptCache& scripts,
+                 const std::map<std::string, std::string>& opt);
+int run_arena(const std::vector<std::string>& decks, const CardDB& db, ScriptCache& scripts,
+              const std::map<std::string, std::string>& opt);
+int run_netcheck(const std::string& net, const std::string& positions);
 }
 
 namespace {
@@ -77,6 +82,8 @@ int usage() {
 	             "  ygoe-cli proxy <deck.ydk> [count]\n"
 	             "  ygoe-cli json <analyze|profile|side> <request.json>   (the app API, see docs/api.md)\n"
 	             "  ygoe-cli bench <suite.json> [--out result.json] [--baseline old.json] [--only lines,interrupts,hands,duels]\n"
+	             "  ygoe-cli selfplay <a.ydk> [b.ydk ...] --games N --out positions.jsonl [--seed S --iterations 300 --turns 14 --net f|none]\n"
+	             "  ygoe-cli arena <a.ydk> [b.ydk ...] --games N --net new.json [--vs old.json|none] [--out result.json]\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
@@ -270,6 +277,17 @@ int main(int argc, char** argv) {
 		return out.rfind("{\"error\"", 0) == 0 ? 1 : 0;
 	}
 	ScriptCache scripts(a.get("scripts", "third_party/CardScripts"));
+	if(cmd == "netcheck") {
+		if(a.pos.size() < 3)
+			return usage();
+		return run_netcheck(a.pos[1], a.pos[2]);
+	}
+	if(cmd == "selfplay" || cmd == "arena") {
+		if(a.pos.size() < 2)
+			return usage();
+		std::vector<std::string> decks(a.pos.begin() + 1, a.pos.end());
+		return cmd == "selfplay" ? run_selfplay(decks, db, scripts, a.opt) : run_arena(decks, db, scripts, a.opt);
+	}
 	if(cmd == "analyze")
 		return cmd_analyze(db, scripts, a);
 	if(cmd == "profile")

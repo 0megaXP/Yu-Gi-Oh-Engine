@@ -39,6 +39,7 @@ add_library(ygoe STATIC
   engine/src/deck.cpp
   engine/src/profile.cpp
   engine/src/evaluate.cpp
+  engine/src/valuenet.cpp
   engine/src/search.cpp
   engine/src/side.cpp
   engine/src/analyze.cpp
@@ -68,7 +69,7 @@ option(YGOE_BUILD_CLI "Build the ygoe-cli command-line tool" ${_cli_default})
 option(YGOE_BUILD_JNI "Build libygoe_jni for the Android/Kotlin module" ${_jni_default})
 
 if(YGOE_BUILD_CLI)
-  add_executable(ygoe-cli engine/cli/main.cpp engine/cli/bench.cpp)
+  add_executable(ygoe-cli engine/cli/main.cpp engine/cli/bench.cpp engine/cli/ml.cpp)
   target_link_libraries(ygoe-cli PRIVATE ygoe)
 endif()
 

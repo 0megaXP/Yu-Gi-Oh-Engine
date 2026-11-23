@@ -1,6 +1,7 @@
 #include <cctype>
 #include <mutex>
 #include "carddb.h"
+#include "valuenet.h"
 
 #include <fstream>
 #include <sstream>
@@ -136,6 +137,13 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 			ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 		if(l.find("column") != std::string::npos)
 			columns_.insert(id);
+	}
+	// A learned value network shipped with the data, if any.
+	{
+		auto net = std::make_shared<ValueNet>();
+		std::string e;
+		if(std::ifstream(dir + "/value_net.json") && net->load_file(dir + "/value_net.json", &e))
+			value_net_ = net;
 	}
 	return true;
 }

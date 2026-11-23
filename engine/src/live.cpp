@@ -282,6 +282,10 @@ int LiveDuel::choose(BotLevel level) {
 	SearchConfig cfg;
 	cfg.iterations = level == BotLevel::Strong ? 2500 : 800;
 	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
+	if(iterations_ > 0)
+		cfg.iterations = iterations_;
+	// This bot's value network (players can have different ones, to compare them).
+	eval_->set_value_net(net_set_[d.player] ? nets_[d.player] : db_.value_net());
 	cfg.horizon_turns = 1;
 	cfg.cancel = &cancel_;
 	cfg.guide = guides_[d.player];

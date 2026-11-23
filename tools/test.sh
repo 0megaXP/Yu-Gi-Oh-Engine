@@ -33,6 +33,14 @@ grep -q '"verified":1,' "$OUT/lines.json"
 echo "== benchmark (replay lines, small budget: the checker must still follow them)"
 build/ygoe-cli bench bench/suite.json --only lines --iterations 150 --out "$OUT/bench.json" > "$OUT/bench.txt"
 python3 -c "import json,sys; t=json.load(open(sys.argv[1]))['totals']; sys.exit(0 if t['lines.followed'] >= 0.85 else 'replay lines followed: %.2f' % t['lines.followed'])" "$OUT/bench.json"
+echo "== learning: self-play, training, arena (tiny)"
+rm -f "$OUT/sp.jsonl"
+build/ygoe-cli selfplay decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk \
+  --games 2 --iterations 40 --turns 3 --net none --out "$OUT/sp.jsonl" > "$OUT/sp.txt"
+python3 tools/ml/train.py "$OUT/sp.jsonl" --epochs 2 --out "$OUT/net.json" --report "$OUT/net_report.json" > /dev/null
+build/ygoe-cli arena decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk \
+  --games 2 --iterations 40 --turns 2 --net "$OUT/net.json" --vs none --out "$OUT/arena.json" > "$OUT/arena.txt"
+python3 -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if r['games']==2 else 'arena failed')" "$OUT/arena.json"
 echo "== asset pack + JNI"
 python3 tools/make_pack.py third_party/CardScripts data "$OUT/pack" > /dev/null
 mkdir -p "$OUT/classes"
