@@ -4,6 +4,7 @@
 #include "valuenet.h"
 #include "policy.h"
 #include "nonengine.h"
+#include "guess.h"
 
 #include <fstream>
 #include <sstream>
@@ -169,6 +170,13 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		auto v = std::make_shared<NeValues>();
 		if(v->parse(ss.str()))
 			ne_values_ = v;
+	}
+	if(std::ifstream lf{dir + "/deck_library.json"}) {
+		std::stringstream ss;
+		ss << lf.rdbuf();
+		auto l = std::make_shared<DeckLibrary>();
+		if(l->parse(*this, ss.str()) && !l->empty())
+			deck_library_ = l;
 	}
 	return true;
 }

@@ -77,6 +77,10 @@ public:
 	std::shared_ptr<const class NeValues> nonengine_values() const { return ne_values_; }
 	void set_nonengine_values(std::shared_ptr<const class NeValues> v) { ne_values_ = std::move(v); }
 	const std::unordered_map<uint32_t, CardInfo>& all() const { return cards_; }
+	// The decks a player can meet, for guessing the opponent's (guess.h): data/deck_library.json.
+	// Null if none: then the bots' searches draw the opponent's unseen cards from their real list.
+	std::shared_ptr<const class DeckLibrary> deck_library() const { return deck_library_; }
+	void set_deck_library(std::shared_ptr<const class DeckLibrary> l) { deck_library_ = std::move(l); }
 
 private:
 	std::unordered_map<uint32_t, CardInfo> cards_;
@@ -93,6 +97,7 @@ private:
 	std::shared_ptr<const class Policy> policy_;
 	std::shared_ptr<const class NeTiming> ne_timing_;
 	std::shared_ptr<const class NeValues> ne_values_;
+	std::shared_ptr<const class DeckLibrary> deck_library_;
 };
 
 }  // namespace ygoe

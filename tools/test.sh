@@ -45,6 +45,11 @@ build/ygoe-cli selfplay decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfno
   --starts "$OUT/starts.jsonl" --start-share 0.5 --policy-out "$OUT/sp.pjsonl" --out "$OUT/sp.jsonl" \
   --ne-explore 0.2 --ne-out "$OUT/sp.nejsonl" --games-out "$OUT/sp.gjsonl" > "$OUT/sp.txt"
 python3 tools/ml/nonengine.py values "$OUT/sp.gjsonl" --out "$OUT/ne_values.json" > /dev/null
+python3 tools/ml/decklib.py decks --starts "$OUT/starts.jsonl" --out "$OUT/deck_library.json" > /dev/null
+# hidden information: every guess of the other player's cards keeps what the bot sees (guessed decks from data/)
+YGOE_HIDDEN_DEBUG=1 build/ygoe-cli selfplay decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk \
+  --games 1 --iterations 30 --turns 3 --net none --seed 4 --out "$OUT/hidden.jsonl" > /dev/null 2> "$OUT/hidden.txt"
+grep -q "hidden: turn 2" "$OUT/hidden.txt" && ! grep -v " 0 bad" "$OUT/hidden.txt" | grep -q "^hidden" || { echo "hidden information failed"; exit 1; }
 build/ygoe-cli nonengine decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk | grep -q "hand trap"
 python3 tools/ml/train.py "$OUT/sp.jsonl" "$OUT/starts.jsonl" --epochs 2 --out "$OUT/net.json" --report "$OUT/net_report.json" > /dev/null
 build/ygoe-cli policy-train "$OUT/sp.pjsonl" --epochs 1 --out "$OUT/policy.json" --report "$OUT/policy_report.json" > /dev/null

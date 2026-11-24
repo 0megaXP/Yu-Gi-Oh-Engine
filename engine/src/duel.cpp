@@ -442,7 +442,8 @@ bool Duel::replay(const DuelSetup& setup, const std::vector<std::vector<uint8_t>
 
 void Duel::set_hidden(const DuelSetup::Hidden& h) {
 	if(duel_ && h.player < 2)
-		OCG_DuelSetHidden(duel_, h.player, h.hand.data(), static_cast<uint32_t>(h.hand.size()), h.seed);
+		OCG_DuelSetHidden(duel_, h.player, h.hand.data(), static_cast<uint32_t>(h.hand.size()), h.guessed ? h.deck.data() : nullptr,
+		                  static_cast<uint32_t>(h.deck.size()), h.seed);
 }
 
 void Duel::set_deck_top(uint8_t player, const std::vector<uint32_t>& codes) {

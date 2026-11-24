@@ -11,6 +11,7 @@
 #include "deck.h"
 #include "duel.h"
 #include "evaluate.h"
+#include "guess.h"
 #include "search.h"
 
 namespace ygoe {
@@ -19,6 +20,14 @@ enum class BotLevel { Easy, Normal, Strong };
 
 class LiveDuel {
 public:
+	// The other player's Main Deck cards `me` has seen: on the field face-up, in the GY or
+	// banished, and the hand cards it knows (script id -> copies).
+	std::map<uint32_t, int> seen_cards(uint8_t me) const;
+	// What `me` makes of the other player's deck from those (guess.h); empty without a library.
+	DeckGuess deck_guess(uint8_t me) const;
+	// The decks the bots guess from (default: the CardDB's). Null: they draw the other player's
+	// unseen cards from their real list.
+	void set_deck_library(std::shared_ptr<const DeckLibrary> lib) { library_ = std::move(lib); library_set_ = true; }
 	// Player 0 goes first. Both players start with 5 random cards from their deck.
 	LiveDuel(const CardDB& db, ScriptCache& scripts, const Deck& deck0, const Deck& deck1, uint64_t seed);
 	// A duel from a given position (a board taken from a real game): `sc` holds both decks,
@@ -155,6 +164,9 @@ private:
 	// Cards in each player's hand that the other player knows (script id -> copies), and the
 	// hand as it was at the last update.
 	std::map<uint32_t, int> known_[2];
+	std::shared_ptr<const DeckLibrary> library_;
+	bool library_set_ = false;
+	const DeckLibrary* library() const { return library_set_ ? library_.get() : db_.deck_library().get(); }
 	std::map<uint32_t, int> last_hand_[2];
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};

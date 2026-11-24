@@ -65,6 +65,8 @@ jobs:
           gh release download ml-data --pattern 'app-*.json' --dir app 2>/dev/null || true
           python3 tools/ml/replays.py replays app/replays.jsonl app/starts.jsonl
           ls -la app
+          # the decks the bots guess the opponent's from: the top cuts and the real games' decks
+          python3 tools/ml/decklib.py decks --starts app/starts.jsonl --out data/deck_library.json
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -388,6 +390,10 @@ jobs:
           pattern: arena-*
           path: arena
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+          path: built
       - name: Keep what won, and the measured non-engine values
         run: |
           mkdir -p arena
@@ -400,6 +406,11 @@ jobs:
           if [ -f candidate/nonengine_values.json ]; then
             cp candidate/nonengine_values.json data/nonengine_values.json
             if [ -n "$(git status --porcelain -- data/nonengine_values.json)" ]; then changed="non-engine values"; fi
+          fi
+          # the deck library (top cuts and real games' decks): kept every run, like the values
+          if [ -f built/data/deck_library.json ]; then
+            cp built/data/deck_library.json data/deck_library.json
+            if [ -n "$(git status --porcelain -- data/deck_library.json)" ]; then changed="$changed${changed:+, }deck library"; fi
           fi
           won=""
           if [ "${{ needs.train.outputs.arena }}" = "yes" ]; then

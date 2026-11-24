@@ -1,5 +1,5 @@
---- a/ocgapi.cpp	2026-11-24 15:56:58.443972521 +0800
-+++ b/ocgapi.cpp	2026-11-24 15:56:58.445583050 +0800
+--- a/ocgapi.cpp	2026-11-24 16:07:40.840366205 +0800
++++ b/ocgapi.cpp	2026-11-24 16:07:40.842355738 +0800
 @@ -4,6 +4,8 @@
   *
   * SPDX-License-Identifier: AGPL-3.0-or-later
@@ -9,19 +9,43 @@
  #include <cstring> //std::memcpy
  #include <new> //std::nothrow
  #include <vector>
-@@ -322,3 +324,33 @@
+@@ -322,3 +324,67 @@
  	pduel->game_field->reset_sequence(team, LOCATION_DECK);
  }
  
-+void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, uint64_t seed) {
++void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, const uint32_t* deck,
++                       uint32_t deck_count, uint64_t seed) {
 +	auto* pduel = static_cast<duel*>(ocg_duel);
 +	if(!pduel || team > 1)
 +		return;
-+	auto& pl = pduel->game_field->player[team];
++	auto& field = *pduel->game_field;
++	auto& pl = field.player[team];
++	// a card taken out of play: out of every list, its effects off (it stays owned by the duel)
++	auto retire = [](card* c) {
++		c->enable_field_effect(false);
++		c->current.location = 0;
++	};
++	auto fresh = [&](uint32_t code, uint8_t location) {
++		card* c = pduel->new_card(code);
++		c->owner = team;
++		c->current.controler = team;
++		c->current.location = location;
++		c->current.position = POS_FACEDOWN_DEFENSE;
++		return c;
++	};
 +	for(uint32_t i = 0; hand && i < count && i < pl.list_hand.size(); ++i) {
 +		card* h = pl.list_hand[i];
 +		if(!hand[i] || h->data.code == hand[i])
 +			continue;
++		if(deck) {
++			// a guessed Deck: the card is made anew
++			card* c = fresh(hand[i], LOCATION_HAND);
++			c->current.position = h->current.position;
++			retire(h);
++			pl.list_hand[i] = c;
++			c->enable_field_effect(true);
++			continue;
++		}
 +		for(auto& slot : pl.list_main) {
 +			card* c = slot;
 +			if(c->data.code != hand[i])
@@ -36,23 +60,36 @@
 +			break;
 +		}
 +	}
++	if(deck) {
++		for(card* c : pl.list_main)
++			retire(c);
++		pl.list_main.clear();
++		for(uint32_t i = 0; i < deck_count; ++i) {
++			card* c = fresh(deck[i], LOCATION_DECK);
++			pl.list_main.push_back(c);
++			c->enable_field_effect(true);
++		}
++	}
 +	if(seed) {
 +		std::mt19937_64 rng(seed);
 +		std::shuffle(pl.list_main.begin(), pl.list_main.end(), rng);
 +	}
-+	pduel->game_field->reset_sequence(team, LOCATION_DECK);
-+	pduel->game_field->reset_sequence(team, LOCATION_HAND);
++	field.reset_sequence(team, LOCATION_DECK);
++	field.reset_sequence(team, LOCATION_HAND);
 +}
---- a/ocgapi.h	2026-11-24 15:56:58.443999241 +0800
-+++ b/ocgapi.h	2026-11-24 15:56:58.445609452 +0800
-@@ -41,6 +41,10 @@
+--- a/ocgapi.h	2026-11-24 16:07:40.840398152 +0800
++++ b/ocgapi.h	2026-11-24 16:07:40.842385779 +0800
+@@ -41,6 +41,13 @@
  /* ygoe: puts the Main Deck cards with these codes on top, codes[0] topmost (for following a
     recorded duel: the recorded draws come next). Cards not found are skipped. No message. */
  OCGAPI void OCG_DuelSetDeckTop(OCG_Duel ocg_duel, uint8_t team, const uint32_t* codes, uint32_t count);
-+/* ygoe: hidden information for a search: the cards in `team`'s hand at the indices where
-+   hand[i] != 0 are swapped with a Main Deck card of that code (if any), then the Main Deck is
-+   shuffled with `seed` (0: not). No message. */
-+OCGAPI void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, uint64_t seed);
++/* ygoe: hidden information for a search. Without `deck`: the cards in `team`'s hand at the
++   indices where hand[i] != 0 are swapped with a Main Deck card of that code (if any). With
++   `deck` (a guessed Deck): those hand cards are replaced by new cards of those codes, and the
++   Main Deck by new cards of deck[0..deck_count). Then the Main Deck is shuffled with `seed`
++   (0: not). No message. */
++OCGAPI void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, const uint32_t* deck,
++                              uint32_t deck_count, uint64_t seed);
  
  OCGAPI uint32_t OCG_DuelQueryCount(OCG_Duel ocg_duel, uint8_t team, uint32_t loc);
  OCGAPI void* OCG_DuelQuery(OCG_Duel ocg_duel, uint32_t* length, const OCG_QueryInfo* info_ptr);

@@ -79,6 +79,11 @@ what they stop and their measured value.
    their Deck, and both Decks are shuffled (`LiveDuel::hidden_roots`, the rules core's
    `OCG_DuelSetHidden`, `tools/patches/ygopro-core/0003-set-hidden.patch`). Cards searched,
    returned to the hand or revealed stay known. (Before, only turn 1 was guessed.)
+   Nor do they know the other player's list: each guess draws their unseen cards from a deck
+   picked by how likely it is given the cards they have shown (`engine/src/guess.h`), out of
+   the deck library `data/deck_library.json` (the top cuts in `decks/` and the decks of the
+   app's real games, weighted by how often they were met; `tools/ml/decklib.py`, rebuilt and
+   committed every run), or a "rogue" deck (the cards seen, their archetype, the staples).
 4. **Labels**: a finished game's result is 1 / 0. A game cut at turn 12 is labelled with the
    current evaluator's win chance there (cards in hand, board and GY count, not only LP).
    Training targets are TD(λ), λ = 0.95: a position's target blends the result with the

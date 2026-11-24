@@ -209,6 +209,19 @@ std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
 	for(const auto& c : truth.deck[opp])
 		if(c.code)
 			pool.push_back(c.code);
+	// their deck isn't known either: each guess draws from a deck picked by how likely it is
+	const DeckLibrary* lib = library();
+	DeckGuess guess;
+	std::vector<double> chance;
+	std::map<uint32_t, int> seen, rogue;
+	if(lib && !lib->empty()) {
+		seen = seen_cards(me);
+		guess = guess_deck(*lib, seen);
+		chance = guess.p;
+		chance.push_back(guess.rogue);
+		rogue = rogue_deck(db_, *lib, seen);
+	}
+	const size_t deck_size = truth.deck[opp].size();
 	std::vector<RootState> roots;
 	for(int k = 0; k < samples; ++k) {
 		RootState r{setup_, history_};
@@ -216,9 +229,36 @@ std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
 		DuelSetup::Hidden h;
 		h.player = opp;
 		h.hand.assign(truth.hand[opp].size(), 0);
-		std::shuffle(pool.begin(), pool.end(), rng_);
-		for(size_t j = 0; j < hidden_idx.size(); ++j)
-			h.hand[hidden_idx[j]] = pool[j];
+		if(!chance.empty()) {
+			std::discrete_distribution<size_t> pick(chance.begin(), chance.end());
+			const size_t di = pick(rng_);
+			const auto& list = di < lib->decks().size() ? lib->decks()[di].main : rogue;
+			std::vector<uint32_t> all, rest;
+			for(const auto& [sid, n] : list) {
+				const int s_n = seen.count(sid) ? seen.at(sid) : 0;
+				for(int c = 0; c < n; ++c) {
+					all.push_back(sid);
+					if(c >= s_n)
+						rest.push_back(sid);  // the copies not seen yet
+				}
+			}
+			std::shuffle(rest.begin(), rest.end(), rng_);
+			auto next = [&](size_t& at) {
+				if(at < rest.size())
+					return rest[at++];
+				return all.empty() ? pool.front() : all[rng_() % all.size()];
+			};
+			size_t at = 0;
+			for(size_t j = 0; j < hidden_idx.size(); ++j)
+				h.hand[hidden_idx[j]] = next(at);
+			h.guessed = true;
+			for(size_t j = 0; j < deck_size; ++j)
+				h.deck.push_back(next(at));
+		} else {
+			std::shuffle(pool.begin(), pool.end(), rng_);
+			for(size_t j = 0; j < hidden_idx.size(); ++j)
+				h.hand[hidden_idx[j]] = pool[j];
+		}
 		h.seed = rng_() | 1;
 		DuelSetup::Hidden mine;  // `me` doesn't know their own Deck's order either
 		mine.player = me;
@@ -253,7 +293,8 @@ std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
 			all_t.insert(all_t.end(), truth.deck[opp].begin(), truth.deck[opp].end());
 			all_b.insert(all_b.end(), b.deck[opp].begin(), b.deck[opp].end());
 			const bool same_public = codes(b.hand[me]) == codes(truth.hand[me]) && codes(b.mzone[opp]) == codes(truth.mzone[opp]) &&
-			                         codes(b.grave[opp]) == codes(truth.grave[opp]) && sorted(all_b) == sorted(all_t) &&
+			                         codes(b.grave[opp]) == codes(truth.grave[opp]) &&
+			                         (r.setup.hidden[0].guessed ? b.deck[opp].size() == truth.deck[opp].size() : sorted(all_b) == sorted(all_t)) &&
 			                         b.hand[opp].size() == truth.hand[opp].size() &&
 			                         check.decision().options.size() == duel_->decision().options.size();
 			if(!same_public)
@@ -261,10 +302,51 @@ std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
 			if(codes(b.hand[opp]) != codes(truth.hand[opp]))
 				++changed;
 		}
-		std::fprintf(stderr, "hidden: turn %u, player %d, their hand %zu (%zu hidden), %zu guesses: %d with another hand, %d bad\n",
-		             truth.turn, me, truth.hand[opp].size(), hidden_idx.size(), roots.size(), changed, bad);
+		std::string g;
+		if(!chance.empty()) {
+			int shown = 0;
+			for(const auto& [i, pr] : guess.ranked()) {
+				if(shown++ >= 3 || pr < 0.01)
+					break;
+				char buf[96];
+				std::snprintf(buf, sizeof buf, "%s %.0f%%, ", i < 0 ? "rogue" : lib->decks()[static_cast<size_t>(i)].name.c_str(), 100 * pr);
+				g += buf;
+			}
+		}
+		int seen_n = 0;
+		for(const auto& [c, n] : seen)
+			seen_n += n;
+		std::fprintf(stderr, "hidden: turn %u, player %d, their hand %zu (%zu hidden), %zu guesses: %d with another hand, %d bad; %d seen; %s\n",
+		             truth.turn, me, truth.hand[opp].size(), hidden_idx.size(), roots.size(), changed, bad, seen_n, g.c_str());
 	}
 	return roots;
+}
+
+std::map<uint32_t, int> LiveDuel::seen_cards(uint8_t me) const {
+	const uint8_t opp = static_cast<uint8_t>(1 - me);
+	std::map<uint32_t, int> out;
+	const Board b = duel_->board();
+	for(uint8_t p = 0; p < 2; ++p) {
+		for(const auto* z : {&b.mzone[p], &b.szone[p]})
+			for(const auto& c : *z)
+				if(c.code && c.owner == opp && (c.pos & POS_FACEUP) && main_deck_card(db_, c.code))
+					++out[c.code];
+		for(const auto* z : {&b.grave[p], &b.banished[p]})
+			for(const auto& c : *z)
+				if(c.code && c.owner == opp && main_deck_card(db_, c.code))
+					++out[c.code];
+	}
+	for(const auto& [code, n] : known_[opp])
+		if(main_deck_card(db_, code))
+			out[code] += n;
+	return out;
+}
+
+DeckGuess LiveDuel::deck_guess(uint8_t me) const {
+	const DeckLibrary* lib = library();
+	if(!lib || lib->empty())
+		return {};
+	return guess_deck(*lib, seen_cards(me));
 }
 
 void LiveDuel::track_knowledge() {

@@ -49,6 +49,10 @@ struct DuelSetup {
 		uint8_t player = 0;
 		std::vector<uint32_t> hand;  // per hand index (Board::hand order): script id, 0 = keep
 		uint64_t seed = 0;           // shuffle seed (0: keep the order)
+		// A guessed Deck (the other player's list isn't known): the hand cards above and the Main
+		// Deck (script ids) are made anew instead of swapped.
+		bool guessed = false;
+		std::vector<uint32_t> deck;
 	};
 	std::vector<Hidden> hidden;
 	size_t hidden_at = 0;
