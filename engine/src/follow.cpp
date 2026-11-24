@@ -1169,9 +1169,16 @@ FollowResult Follower::run() {
 		std::multiset<uint32_t> pool;
 		std::vector<uint32_t> extra;
 		if(in_.has_deck[r]) {
-			for(auto c : in_.decks[r].main)
-				pool.insert(c);
 			extra = in_.decks[r].extra;
+			for(auto c : in_.decks[r].main) {
+				// an Extra Deck card the sender couldn't tell apart (an id unknown to it, such as
+				// YGO Omega's own artworks) goes to the Extra Deck
+				const CardInfo* ci = db_.get(db_.script_id(c));
+				if(ci && ci->is_extra_deck())
+					extra.push_back(c);
+				else
+					pool.insert(c);
+			}
 		} else {
 			// no list: the cards seen of it (one copy of each beyond the draws), filled up to 40
 			std::set<uint32_t> once;

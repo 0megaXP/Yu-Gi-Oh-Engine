@@ -222,7 +222,17 @@ uint32_t CardDB::script_id(uint32_t passcode) const {
 			return l->second;
 	}
 	auto it = passcode_map_.find(passcode);
-	return it == passcode_map_.end() ? passcode : it->second;
+	if(it != passcode_map_.end())
+		return it->second;
+	if(!cards_.count(passcode)) {
+		// YGO Omega's own artworks: the card's passcode plus a small number (seen: 1, 2, 20, 30),
+		// unknown to the database. Passcodes are spread over 10^8 values for ~15,000 cards, so a
+		// different card that close is very unlikely.
+		for(uint32_t off : {20u, 30u, 1u, 2u, 10u})
+			if(passcode > off && cards_.count(passcode - off))
+				return script_id(passcode - off);
+	}
+	return passcode;
 }
 
 uint32_t CardDB::official_id(uint32_t sid) const {
