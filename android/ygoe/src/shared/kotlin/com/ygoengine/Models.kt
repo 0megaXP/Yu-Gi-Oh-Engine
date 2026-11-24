@@ -674,5 +674,9 @@ data class FollowResult(
     val winner: Int,
     /** Why it stopped ("" when complete). */
     val stopped: String,
+    /** The turn it stopped in (1 = the first; 0 when complete; -1: an engine that doesn't say). */
+    val stopTurn: Int = 0,
+    /** The recorded events it couldn't reproduce from there (card ids only). */
+    val stopNext: String = "",
 )
 

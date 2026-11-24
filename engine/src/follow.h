@@ -48,6 +48,8 @@ struct FollowResult {
 	bool complete = false;      // followed to the end
 	int winner = -1;            // recorded player 0/1, -1 when the replay doesn't say
 	std::string stopped;        // why it stopped ("" when complete)
+	int stop_turn = 0;          // the turn it stopped in (1 = the first)
+	std::string stop_next;      // the recorded events it couldn't reproduce from there (card ids)
 	std::string to_json() const;
 };
 

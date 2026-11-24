@@ -76,7 +76,7 @@ jobs:
           mkdir -p app replays
           gh release download ml-data --pattern 'replays-*.jsonl.gz' --dir replays 2>/dev/null || true
           gh release download ml-data --pattern 'app-*.json' --dir app 2>/dev/null || true
-          python3 tools/ml/replays.py replays app/replays.jsonl app/starts.jsonl
+          python3 tools/ml/replays.py replays app/replays.jsonl app/starts.jsonl app/follow_report.json
           ls -la app
           # the decks the bots guess the opponent's from: the top cuts and the real games' decks
           python3 tools/ml/decklib.py format --lists meta/lists.json --starts app/starts.jsonl --out data/deck_library.json

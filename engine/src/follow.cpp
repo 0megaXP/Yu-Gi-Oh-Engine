@@ -1433,6 +1433,16 @@ FollowResult Follower::run() {
 	}
 	cur = std::max(cur, best);
 	pos_ = std::move(best_pos);
+	if(!res.complete && cur < rec_.size()) {
+		// where it stopped: the turn, and the recorded events it couldn't reproduce (card ids only)
+		for(size_t j = 0; j < cur; ++j)
+			if(rec_[j].k == TURN)
+				++res.stop_turn;
+		for(size_t j = cur, n = 0; j < rec_.size() && n < 6; ++j)
+			if(!soft(rec_[j])) {
+				res.stop_next += (n++ ? " " : "") + ("[" + ev_str(rec_[j]) + "]");
+			}
+	}
 	res.followed = 0;
 	for(size_t j = 0; j < cur && j < rec_.size(); ++j)
 		if(!soft(rec_[j]))
@@ -1486,7 +1496,8 @@ std::string FollowResult::to_json() const {
 	std::ostringstream o;
 	o << "{\"positions\":" << positions << ",\"events\":" << events << ",\"followed\":" << followed << ",\"turns\":" << turns
 	  << ",\"turns_followed\":" << turns_followed << ",\"complete\":" << (complete ? "true" : "false") << ",\"winner\":" << winner
-	  << ",\"stopped\":" << json::quote(stopped) << ",\"jsonl\":" << json::quote(jsonl) << "}";
+	  << ",\"stopped\":" << json::quote(stopped) << ",\"stop_turn\":" << stop_turn << ",\"stop_next\":" << json::quote(stop_next)
+	  << ",\"jsonl\":" << json::quote(jsonl) << "}";
 	return o.str();
 }
 
