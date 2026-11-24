@@ -107,6 +107,9 @@ double CardPriorities::factor(const Decision& d, const Option& o, bool own_turn)
 			if(has(extenders))
 				return 1.5;
 		}
+		// a bridge's play on one's own turn, from wherever it is (the Extra Deck, the GY...)
+		if(own_turn && (o.kind == OptKind::Activate || o.kind == OptKind::Summon || o.kind == OptKind::SpSummon) && has(bridges))
+			return 1.6;
 		return 1.0;
 	case DecisionType::Card:
 	case DecisionType::UnselectCard: {
@@ -115,15 +118,19 @@ double CardPriorities::factor(const Decision& d, const Option& o, bool own_turn)
 			for(size_t i = 0; i < search_first.size(); ++i)
 				if(search_first[i] == o.code)
 					return 1.0 + 3.0 * static_cast<double>(search_first.size() - i) / static_cast<double>(search_first.size());
+			for(size_t i = 0; i < bridges.size(); ++i)
+				if(bridges[i] == o.code)
+					return 1.0 + 1.5 * static_cast<double>(bridges.size() - i) / static_cast<double>(bridges.size());
 			return 1.0;
 		}
 		// Choosing a card in hand or on the field (cost, material, tribute): keep the key ones.
-		if((o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(protect))
-			return 0.3;
+		if((o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && (has(protect) || has(bridges)))
+			return has(protect) ? 0.3 : 0.5;
 		return 1.0;
 	}
 	case DecisionType::Tribute:
-		return (o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(protect) ? 0.3 : 1.0;
+		return (o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(protect) ? 0.3
+		     : (o.loc & (LOCATION_HAND | LOCATION_ONFIELD)) && has(bridges) ? 0.5 : 1.0;
 	default:
 		return 1.0;
 	}

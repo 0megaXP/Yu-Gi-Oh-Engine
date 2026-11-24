@@ -21,6 +21,8 @@ grep -q "^#1 " "$OUT/real.txt"
 echo "== CLI profile / side"
 build/ygoe-cli profile examples/decks/elfnote_koller_wien_2026-11.ydk > /dev/null
 build/ygoe-cli side examples/decks/elfnote_koller_wien_2026-11.ydk examples/decks/angelechy_luna_mardelplata_2026-11.ydk | grep -q "Going second"
+echo "== bridges (reach.h): Elfnote joins its Power Patron cards"
+build/ygoe-cli bridges examples/decks/elfnote_koller_wien_2026-11.ydk --reach data/reach.tsv | grep -q '"bridges":\[{'
 echo "== JSON API"
 for call in analyze profile side; do
   build/ygoe-cli json "$call" "examples/request_$call.json" > "$OUT/$call.json"

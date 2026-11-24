@@ -1,0 +1,63 @@
+name: Reach
+
+# What each card of the format's decks can reach (engine/src/reach.h): every card is used in the
+# rules core against all the cards of decks/ (the format's decks, kept current by Learn), and
+# what its effects can add, summon or send is written to data/reach.tsv, with the Extra Deck
+# monsters pairs of each deck's monsters can be materials for. Bots find their deck's bridge
+# cards from it (cards that take the deck into another of its archetypes). Runs when the decks
+# or the probe change, and weekly (new scripts).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - decks/**
+      - engine/src/reach.*
+      - .github/workflows/reach.yml
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: reach
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write  # to start "Publish engine" (a push by this token starts no workflow)
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch rules core, scripts and card data
+        run: tools/bootstrap.sh
+      - name: Build the CLI
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build build -j"$(nproc)" --target ygoe-cli
+      - name: Scan
+        run: |
+          build/ygoe-cli reachscan decks/*.ydk --out reach.tsv
+          echo "$(wc -l < reach.tsv) reach lines"
+          for d in decks/*.ydk; do
+            echo "== $d"
+            build/ygoe-cli bridges "$d" --reach reach.tsv | python3 -c "import json,sys; r=json.load(sys.stdin); [print(' ', b['name'], '->', hex(b['to_set']), b['weight']) for b in r['bridges'][:6]]"
+          done
+      - name: Keep it when it changed
+        run: |
+          sort -u reach.tsv > sorted.tsv
+          if [ -f data/reach.tsv ] && cmp -s sorted.tsv data/reach.tsv; then
+            echo "no change"
+            exit 0
+          fi
+          cp sorted.tsv data/reach.tsv
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/reach.tsv
+          git commit -q -m "Reach: what the format's cards can reach ($(wc -l < data/reach.tsv) lines)"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+          gh workflow run publish.yml --ref main || echo "couldn't start Publish engine"

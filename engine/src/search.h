@@ -52,7 +52,12 @@ struct CardPriorities {
 	std::vector<uint32_t> extenders;
 	std::vector<uint32_t> search_first;  // best first
 	std::vector<uint32_t> protect;
-	bool empty() const { return starters.empty() && extenders.empty() && search_first.empty() && protect.empty(); }
+	// Bridge cards (reach.h): they take the deck into another of its archetypes. Their plays are
+	// tried first, they are searched before others and kept rather than spent.
+	std::vector<uint32_t> bridges;       // strongest first
+	bool empty() const {
+		return starters.empty() && extenders.empty() && search_first.empty() && protect.empty() && bridges.empty();
+	}
 	// The playout prior's multiplier for one of the player's own options.
 	double factor(const Decision& d, const Option& o, bool own_turn) const;
 };

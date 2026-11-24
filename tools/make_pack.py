@@ -47,9 +47,9 @@ with open(os.path.join(out, "scripts.pack"), "wb") as f:
         digest.update(b)
 
 for name in ("cards.tsv", "effects.tsv", "strings.tsv", "passcode_map.tsv", "value_net.json", "policy.json",
-             "nonengine_timing.json", "nonengine_values.json", "deck_library.json"):
+             "nonengine_timing.json", "nonengine_values.json", "deck_library.json", "reach.tsv"):
     src = os.path.join(data, name)
-    if name.endswith(".json") and not os.path.exists(src):
+    if (name.endswith(".json") or name == "reach.tsv") and not os.path.exists(src):
         continue  # what was learned (tools/ml) is optional
     shutil.copyfile(src, os.path.join(out, name))
     digest.update(open(src, "rb").read())

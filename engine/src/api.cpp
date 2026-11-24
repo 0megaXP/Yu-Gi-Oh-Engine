@@ -194,6 +194,9 @@ std::string Engine::missing_json(const std::vector<const Deck*>& decks) {
 Engine::Engine(const std::string& data_dir, const std::string& scripts_dir) {
 	ok_ = db_.load(data_dir, &error_);
 	scripts_ = std::make_unique<ScriptCache>(scripts_dir);
+	reach_ = std::make_unique<ReachTable>();
+	if(!reach_->load(data_dir + "/reach.tsv"))
+		reach_.reset();
 	if(ok_ && !scripts_->get("utility.lua")) {
 		ok_ = false;
 		error_ = "no card scripts found in " + scripts_dir;
@@ -354,6 +357,48 @@ std::string Engine::side(const std::string& request) {
 	return o.str();
 }
 
+std::shared_ptr<const CardPriorities> Engine::bridge_priorities(const Deck& deck) {
+	std::vector<uint32_t> all(deck.main);
+	all.insert(all.end(), deck.extra.begin(), deck.extra.end());
+	std::sort(all.begin(), all.end());
+	std::string key;
+	for(uint32_t c : all)
+		key += std::to_string(c) + ",";
+	{
+		std::lock_guard<std::mutex> lock(bridges_mu_);
+		auto it = bridges_.find(key);
+		if(it != bridges_.end())
+			return it->second;
+	}
+	std::shared_ptr<CardPriorities> pr;
+	try {
+		BridgeReport rep = find_bridges(db_, *scripts_, deck, reach_.get());
+		pr = std::make_shared<CardPriorities>();
+		for(const auto& b : rep.bridges) {
+			const uint32_t sid = db_.script_id(b.code);
+			if(std::find(pr->bridges.begin(), pr->bridges.end(), sid) == pr->bridges.end())
+				pr->bridges.push_back(sid);
+		}
+	} catch(...) {
+		pr.reset();
+	}
+	std::lock_guard<std::mutex> lock(bridges_mu_);
+	bridges_[key] = pr;
+	return pr;
+}
+
+std::string Engine::bridges(const std::string& request) {
+	if(!ok_)
+		return error_json(error_);
+	Value req = Value::parse(request);
+	Deck d;
+	std::string error;
+	if(!read_deck(req["deck"], d, error, db_))
+		return error_json(error);
+	std::lock_guard<std::mutex> run(run_mu_);
+	return find_bridges(db_, *scripts_, d, reach_.get()).to_json(db_);
+}
+
 LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	if(!ok_) {
 		error = error_;
@@ -389,12 +434,20 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 	for(int p = 0; p < 2; ++p)
 		live->set_imitate(p, read_imitate(req["imitate"][p], db_));
 	// {"priorities": [{"starters": [...], "extenders": [...], "search_first": [...], "protect": [...]}, null]}:
-	// per player, what deck guides say about playing their deck (passcodes)
+	// per player, what deck guides say about playing their deck (passcodes); with the deck's
+	// bridge cards (reach.h) unless "bridges": false
+	const bool use_bridges = req["bridges"].boolean(true);
 	for(int p = 0; p < 2; ++p) {
 		const Value& k = req["priorities"][p];
-		if(!k.is_object())
-			continue;
 		auto pr = std::make_shared<CardPriorities>();
+		if(use_bridges)
+			if(auto b = bridge_priorities(d[p]))
+				pr->bridges = b->bridges;
+		if(!k.is_object()) {
+			if(!pr->empty())
+				live->set_priorities(p, std::move(pr));
+			continue;
+		}
 		auto read = [&](const char* key, std::vector<uint32_t>& out) {
 			for(const auto& c : k[key].items())
 				out.push_back(db_.script_id(static_cast<uint32_t>(c.integer())));

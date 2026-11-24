@@ -21,6 +21,7 @@
 #include "json.h"
 #include "api.h"
 #include "follow.h"
+#include "reach.h"
 #include "live.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
@@ -350,6 +351,64 @@ int main(int argc, char** argv) {
 		if(a.pos.size() < 2)
 			return usage();
 		return run_policy_train(std::vector<std::string>(a.pos.begin() + 1, a.pos.end()), db, a.opt);
+	}
+	if(cmd == "bridges" || cmd == "reachscan") {
+		// ygoe-cli bridges deck.ydk [--reach data/reach.tsv]: the deck's bridge cards (reach.h)
+		// ygoe-cli reachscan a.ydk b.ydk ... [--shard I/N] [--out reach.tsv]: what each card of
+		// these lists can reach, tried in the rules core against all of them (the card pool)
+		if(a.pos.size() < 2)
+			return usage();
+		std::vector<Deck> decks;
+		for(size_t i = 1; i < a.pos.size(); ++i) {
+			Deck d;
+			std::string err;
+			if(!load_ydk(a.pos[i], d, &err)) {
+				std::fprintf(stderr, "%s\n", err.c_str());
+				return 1;
+			}
+			decks.push_back(std::move(d));
+		}
+		if(cmd == "bridges") {
+			ReachTable table;
+			const bool have = table.load(a.get("reach", "data/reach.tsv"));
+			std::printf("%s\n", find_bridges(db, scripts, decks[0], have ? &table : nullptr).to_json(db).c_str());
+			return 0;
+		}
+		std::vector<uint32_t> main_pool, extra_pool, all;
+		for(const auto& d : decks)
+			for(const auto* v : {&d.main, &d.extra, &d.side})
+				for(uint32_t c : *v) {
+					if(std::find(all.begin(), all.end(), c) != all.end())
+						continue;
+					all.push_back(c);
+					const CardInfo* ci = db.get(db.script_id(c));
+					if(!ci)
+						continue;
+					(ci->is_extra_deck() ? extra_pool : main_pool).push_back(c);
+				}
+		std::sort(all.begin(), all.end());
+		int shard = 0, shards = 1;
+		std::sscanf(a.get("shard", "0/1").c_str(), "%d/%d", &shard, &shards);
+		std::FILE* out = std::fopen(a.get("out", "/dev/stdout").c_str(), "w");
+		if(!out)
+			return 1;
+		size_t done = 0;
+		for(size_t i = 0; i < all.size(); ++i) {
+			if(static_cast<int>(i % static_cast<size_t>(std::max(1, shards))) != shard)
+				continue;
+			for(const auto& e : probe_card(db, scripts, all[i], main_pool, extra_pool))
+				std::fprintf(out, "%u\t%u\t%u\n", e.from, e.to, e.how);
+			std::fflush(out);
+			if(++done % 25 == 0)
+				std::fprintf(stderr, "%zu cards\n", done);
+		}
+		// what pairs of each list's monsters can be materials for
+		if(shard == 0)
+			for(const auto& d : decks)
+				for(const auto& e : probe_materials(db, scripts, d))
+					std::fprintf(out, "%u\t%u\t%u\n", e.from, e.to, e.how);
+		std::fclose(out);
+		return 0;
 	}
 	if(cmd == "followtest") {
 		// ygoe-cli followtest a.ydk b.ydk [--seed N] [--turns T] [--games G]: random games, recorded

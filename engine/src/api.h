@@ -1,6 +1,9 @@
 // JSON-in / JSON-out entry points. This is the surface the Android (JNI) layer uses;
 // see docs/api.md for the request and response formats.
 #pragma once
+#include "search.h"
+#include "reach.h"
+#include <map>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -47,6 +50,8 @@ public:
 	// {"messages": [base64 message], "decks": [{main, extra}|null x2], "game", "per_turn"} -> a YGO Omega
 	// replay followed by the rules core (follow.h): how far it got, and value-network positions.
 	std::string follow_replay(const std::string& request);
+	// {"deck": {main, extra, side}} -> the deck's bridge cards between its archetypes (reach.h).
+	std::string bridges(const std::string& request);
 	std::string card_names(const std::string& request);  // {"codes":[...]} -> names, for debugging
 
 	// Live duels: {"decks":[deck, deck], "seed": n}; player 0 goes first. Returns nullptr and
@@ -62,8 +67,14 @@ private:
 	void set_progress(const std::string& phase, int done, int total);
 	std::string missing_json(const std::vector<const Deck*>& decks);
 
+	// The deck's bridge cards as priorities for its bot (reach.h), worked out once per deck.
+	std::shared_ptr<const CardPriorities> bridge_priorities(const Deck& deck);
+
 	CardDB db_;
 	std::unique_ptr<ScriptCache> scripts_;
+	std::unique_ptr<ReachTable> reach_;  // data/reach.tsv: what the card pool reaches (may be null)
+	std::mutex bridges_mu_;
+	std::map<std::string, std::shared_ptr<const CardPriorities>> bridges_;
 	bool ok_ = false;
 	std::string error_;
 	std::atomic<bool> cancel_{false};
