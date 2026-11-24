@@ -92,6 +92,8 @@ int usage() {
 	             "  ygoe-cli library <deck.ydk> --out lib.json [--hands 40 --iterations 1500 --pieces app_pieces.json]\n"
 	             "  ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json --epochs 4 --report r.json]\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
+	             "  ygoe-cli followall <inputs.jsonl> --out positions.jsonl --summary follows.jsonl [--shard i/n]\n"
+	             "                   (follows the app's uploaded games: one follow request per line)\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
 }
@@ -264,6 +266,43 @@ int main(int argc, char** argv) {
 		if(a.pos.size() < 2)
 			return usage();
 		return run_bench(a.pos[1], a.get("data", "data"), a.get("scripts", "third_party/CardScripts"), a.opt);
+	}
+	if(cmd == "followall") {
+		// Each line: a game the app uploaded (its YGO Omega replay's moves and decks, the follow
+		// request of docs/api.md). Writes the training positions and one summary line per game.
+		if(a.pos.size() < 2 || a.get("out", "").empty())
+			return usage();
+		int shard = 1, shards = 1;
+		std::sscanf(a.get("shard", "1/1").c_str(), "%d/%d", &shard, &shards);
+		Engine engine(a.get("data", "data"), a.get("scripts", "third_party/CardScripts"));
+		std::ifstream in(a.pos[1]);
+		std::ofstream out(a.get("out", "")), sum(a.get("summary", "/dev/null"));
+		std::string line;
+		int n = 0, done = 0, complete = 0, positions = 0;
+		while(std::getline(in, line)) {
+			if(line.empty())
+				continue;
+			const json::Value req = json::Value::parse(line);
+			const std::string game = req["game"].str();
+			if(game.empty() || static_cast<int>(std::hash<std::string>{}(game) % static_cast<size_t>(shards)) != shard - 1)
+				continue;
+			++n;
+			const json::Value r = json::Value::parse(engine.follow_replay(line));
+			if(!r.is_object() || !r["error"].is_null())
+				continue;
+			++done;
+			out << r["jsonl"].str();
+			positions += static_cast<int>(r["positions"].integer(0));
+			complete += r["complete"].boolean() ? 1 : 0;
+			sum << "{\"kind\":\"follow\",\"game\":" << json::quote(game) << ",\"turns\":" << r["turns"].integer(0)
+			    << ",\"turns_followed\":" << r["turns_followed"].integer(0) << ",\"events\":" << r["events"].integer(0)
+			    << ",\"followed\":" << r["followed"].integer(0) << ",\"complete\":" << (r["complete"].boolean() ? "true" : "false")
+			    << ",\"winner\":" << r["winner"].integer(-1) << ",\"stopped\":" << json::quote(r["stopped"].str())
+			    << ",\"stop_turn\":" << r["stop_turn"].integer(0) << ",\"stop_next\":" << json::quote(r["stop_next"].str())
+			    << ",\"follow_version\":" << r["follow_version"].integer(0) << "}\n";
+		}
+		std::printf("shard %d/%d: %d games, %d followed, %d to the end, %d positions\n", shard, shards, n, done, complete, positions);
+		return 0;
 	}
 	if(cmd == "json") {
 		if(a.pos.size() < 3)

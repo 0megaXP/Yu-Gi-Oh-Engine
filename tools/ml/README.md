@@ -57,9 +57,16 @@ what they stop and their measured value.
 
 ## The pipeline (`.github/workflows/ml.yml`, "Learn"): every 6 hours
 
-1. **The app's data**: real games the YGO Sandbox app re-played from the player's YGO Omega
-   replays (`replays-*.jsonl.gz` in the `ml-data` release, see below), its combo pieces from
-   replays and videos (`app-pieces.json`) and its move policy (`app-policy.json`).
+1. **The app's data**: the player's real games from their YGO Omega replays: each game's moves
+   (the replay's game messages, card ids) and the decks it keeps, without the replay's header
+   (no players or accounts): `inputs-*.jsonl.gz` in the `ml-data` release. The **follow** job
+   follows every game in the rules core with this run's engine (`ygoe-cli followall`, 6 runners
+   x 4 processes) and takes training positions along the way, so each fix to the follower counts
+   for all the games; `tools/ml/replays.py merge` puts them in place of the positions older app
+   versions made on the phone (`replays-*.jsonl.gz`), and writes `app/follow_report.json`: how
+   many games were followed to the end and the cards most often next where it stopped. Also the
+   app's combo pieces from replays and videos (`app-pieces.json`) and its move policy
+   (`app-policy.json`).
 1b. **The format's decks** (`tools/ml/meta.py`): YGOPRODeck's TCG tournament top cuts of the
    last 3 weeks, by archetype. Results: each list scores its placement (Winner 4, Runner-Up 3,
    Top 4 2, Top 8 1, lower 0.5) times the event's size (1 + log2(players / 32), at least 0.5).

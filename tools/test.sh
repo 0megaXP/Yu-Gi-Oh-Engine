@@ -52,6 +52,14 @@ build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk ex
   --starts "$OUT/starts.jsonl" --start-share 0.5 --policy-out "$OUT/sp.pjsonl" --out "$OUT/sp.jsonl" \
   --ne-explore 0.2 --ne-out "$OUT/sp.nejsonl" --games-out "$OUT/sp.gjsonl" > "$OUT/sp.txt"
 python3 tools/ml/nonengine.py values "$OUT/sp.gjsonl" --out "$OUT/ne_values.json" > /dev/null
+# the pipeline following the app's uploaded games (a real 2-turn YGO Omega game, followed to the end)
+build/ygoe-cli followall examples/follow_input.jsonl --out "$OUT/fa.jsonl" --summary "$OUT/fa_sum.jsonl" > /dev/null
+python3 -c "
+import json,sys
+s=json.loads(open(sys.argv[1]).readline()); n=sum(1 for l in open(sys.argv[2]) if '\"f\":' in l)
+sys.exit(0 if s['complete'] and n > 0 else f'followall: complete {s[\"complete\"]}, {n} positions')" "$OUT/fa_sum.jsonl" "$OUT/fa.jsonl"
+mkdir -p "$OUT/followed" && cp "$OUT/fa.jsonl" "$OUT/fa_sum.jsonl" "$OUT/followed/"
+python3 tools/ml/replays.py merge "$OUT/none.jsonl" "$OUT/followed" "$OUT/merged.jsonl" > /dev/null
 python3 tools/ml/decklib.py decks --starts "$OUT/starts.jsonl" --out "$OUT/deck_library.json" > /dev/null
 # hidden information: every guess of the other player's cards keeps what the bot sees (guessed decks from data/)
 YGOE_HIDDEN_DEBUG=1 build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \

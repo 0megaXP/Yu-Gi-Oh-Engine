@@ -176,8 +176,48 @@ jobs:
           path: out/
           retention-days: 3
 
+  follow:
+    # the app's games, followed by this engine: 6 runners x 4 processes, each a share of the games
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - name: Follow the app's games
+        run: |
+          chmod +x build/ygoe-cli
+          # the games themselves (each replay's moves and decks, no player names), uploaded by
+          # the app: followed here with this engine, so every follower fix counts for all of them
+          mkdir -p inputs followed
+          gh release download ml-data --pattern 'inputs-*.jsonl.gz' --dir inputs 2>/dev/null || true
+          python3 tools/ml/replays.py inputs inputs app/inputs.jsonl
+          if [ -s app/inputs.jsonl ]; then
+            for k in 1 2 3 4; do
+              s=$(( (${{ matrix.runner }} - 1) * 4 + k ))
+              build/ygoe-cli followall app/inputs.jsonl --shard $s/24 --out followed/pos-$s.jsonl --summary followed/sum-$s.jsonl &
+            done
+            wait
+          fi
+          touch followed/none.jsonl
+          wc -l followed/*.jsonl | tail -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: followed-${{ matrix.runner }}
+          path: followed/
+          retention-days: 2
+
   train:
-    needs: [build, selfplay]
+    needs: [build, selfplay, follow]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 330
@@ -194,6 +234,12 @@ jobs:
         with:
           pattern: positions-*
           path: tonight
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: followed-*
+          path: followed
           merge-multiple: true
       - name: Positions and policy examples of the last nights
         run: |
@@ -215,8 +261,10 @@ jobs:
           gzip -kf "night-${{ github.run_id }}.jsonl"
           gzip -kf "policy-night-${{ github.run_id }}.jsonl"
           for f in history/*.gz policy-history/*.gz ne-history/*.gz; do [ -f "$f" ] && gunzip -kf "$f"; done
-          # real games' positions (replays, each game once; they count 3 times in train.py)
-          [ -s app/replays.jsonl ] && cp app/replays.jsonl history/replays.jsonl
+          # real games' positions (replays, each game once; they count 3 times in train.py): the
+          # games followed here replace the positions the app made of them on the phone
+          python3 tools/ml/replays.py merge app/replays.jsonl followed history/replays.jsonl app/follow_report.json
+          [ -s history/replays.jsonl ] || rm -f history/replays.jsonl
           ls -la history policy-history || true
       - name: Train the value network
         run: |
