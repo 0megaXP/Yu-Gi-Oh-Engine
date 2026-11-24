@@ -51,7 +51,7 @@ what they stop and their measured value.
   (`side.h`) blend them into their card values as games add up (from 30 games, fully at a few
   hundred), and `ygoe-cli nonengine` ranks a deck's non-engine slots by them.
 
-## The nightly pipeline (`.github/workflows/ml.yml`, "Learn")
+## The pipeline (`.github/workflows/ml.yml`, "Learn"): every 6 hours
 
 1. **The app's data**: real games the YGO Sandbox app re-played from the player's YGO Omega
    replays (`replays-*.jsonl.gz` in the `ml-data` release, see below), its combo pieces from
@@ -59,7 +59,7 @@ what they stop and their measured value.
 2. **Combo pieces**: for each deck in `decks/`, `ygoe-cli library` searches 40 opening hands
    deeply and splits the best lines into pieces, adding the app's pieces the deck can play. The
    bots use them as the app's bots use a deck's reference boards.
-3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 4.5 hours: game 1 with a
+3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 3.5 hours: game 1 with a
    coin flip for who goes first, then the loser goes first, games 2 and 3 with both decks sided
    for the matchup (`side.h`). Normal bots at 200 search iterations (the last 2 runners at 800),
    with the current network, the move policies and the combo pieces; in each player's first 2
@@ -73,9 +73,9 @@ what they stop and their measured value.
    Training targets are TD(λ), λ = 0.95: a position's target blends the result with the
    network's own estimates at the later positions of the game, so an early position that was
    fine is not marked "lost" because of a later misplay.
-5. **Train**: `train.py` learns the network from tonight's positions plus the last 7 nights'
+5. **Train**: `train.py` learns the network from this run's positions plus the last 20 runs'
    and the real games (each game once, counted 3 times), continuing from the current network.
-   `ygoe-cli policy-train` learns the policy from tonight's searches plus the last 2 nights'.
+   `ygoe-cli policy-train` learns the policy from this run's searches plus the last 5 runs'.
    15% of the games are held out for both.
 6. **Check**: each must predict the held-out games better than now (validation log-loss lower
    by 0.002: the network against the plain evaluator's, the policy against the current one's
@@ -97,8 +97,9 @@ position samples the cards nobody saw from their deck.
 Run it by hand from the Actions tab ("Learn", Run workflow), with fewer hours or shards for a
 quick try. Reports (`learn-report` artifact): validation log-losses, arena games, the candidate.
 
-The app uses a new network or policy once its engine is updated to that commit: the app
-downloads the latest engine (publish.yml) by itself.
+The app uses what was learned once its engine is updated to that commit: after a commit the run
+starts the "Publish engine" workflow (a commit made by a workflow doesn't start it by itself), and
+the app downloads the latest engine by itself.
 
 ## Decks
 

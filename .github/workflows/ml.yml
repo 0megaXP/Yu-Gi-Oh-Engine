@@ -1,18 +1,18 @@
 name: Learn
 
-# Every night: bots play each other with the current value network and move policy (self-play),
+# Four times a day (every 6 hours): bots play each other with the current value network and move policy (self-play),
 # a new network and policy are trained on those games plus the last nights' and the app's real
 # games, and they replace data/value_net.json and data/policy.json only if they predict better
 # and the bots using them beat the current ones in bot duels (the arena). See tools/ml/README.md.
 
 on:
   schedule:
-    - cron: "17 1 * * *"   # 01:17 UTC
+    - cron: "17 1,7,13,19 * * *"   # every 6 hours from 01:17 UTC (a run takes about 4.5 h, the rest is left for other pipelines)
   workflow_dispatch:
     inputs:
       hours:
         description: "Self-play hours per shard"
-        default: "4.5"
+        default: "3.5"
       shards:
         description: "Self-play shards (parallel runners)"
         default: "8"
@@ -23,6 +23,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write   # to start "Publish engine" after a commit (a workflow's own push doesn't)
 
 env:
   ITERATIONS: "200"          # search iterations of the self-play and arena bots
@@ -127,7 +128,7 @@ jobs:
       - name: Self-play
         run: |
           chmod +x build/ygoe-cli
-          hours="${{ github.event.inputs.hours || '4.5' }}"
+          hours="${{ github.event.inputs.hours || '3.5' }}"
           secs=$(python3 -c "print(int(float('$hours') * 3600))")
           n="${{ github.event.inputs.shards || '8' }}"
           # the top decks of the current format (decks/: YCS and regional top cuts)
@@ -259,7 +260,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write(f"arena={'yes' if net_better or pol_better or ne_better else 'no'}\n")
           EOF
-      - name: Store tonight's data (last 7 nights of positions, 3 of policy examples)
+      - name: Store this run's data (last 20 runs of positions, 6 of policy examples)
         if: always()
         run: |
           gh release view ml-data > /dev/null 2>&1 || gh release create ml-data --title "Learning data" \
@@ -269,9 +270,9 @@ jobs:
             [ -s "$f" ] && gh release upload ml-data "$f" --clobber
           done
           assets=$(gh api "repos/${{ github.repository }}/releases/tags/ml-data" -q '.assets[].name')
-          echo "$assets" | grep '^night-' | sort -t- -k2 -n | head -n -7 | \
+          echo "$assets" | grep '^night-' | sort -t- -k2 -n | head -n -20 | \
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
-          echo "$assets" | grep '^policy-night-' | sort -t- -k3 -n | head -n -3 | \
+          echo "$assets" | grep '^policy-night-' | sort -t- -k3 -n | head -n -6 | \
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
           for kind in ne games; do
             echo "$assets" | grep "^$kind-night-" | sort -t- -k3 -n | head -n -20 | \
@@ -344,6 +345,8 @@ jobs:
     needs: [train, arena]
     if: always() && needs.train.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -386,6 +389,8 @@ jobs:
               -m "$(cat arena.json)" -m "Value network: $(cat report.json)" -m "Move policy: $(cat policy_report.json)" \
               -m "Non-engine timing: $(cat ne_report.json)" -m "Non-engine values: $(cat values_report.json 2>/dev/null)"
             for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+            # the app downloads the latest engine: publish it with what was learned
+            gh api -X POST "repos/${{ github.repository }}/actions/workflows/publish.yml/dispatches" -f ref=main || true
           fi
       - uses: actions/upload-artifact@v4
         if: always()
