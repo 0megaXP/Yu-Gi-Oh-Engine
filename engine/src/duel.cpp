@@ -1121,16 +1121,19 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 						continue;
 					int c = column(o.response[0], o.response[1], o.response[2]);
 					int sig = o.response[1] * 1000 + (o.response[0] == d.player ? 0 : 500);
+					// (also: the center column, Elfnote Regina's; opponent's cards 2 columns away,
+					// Angelechy Castellan's reach)
 					if(c >= 0)
 						sig += (own[c] > 0) + 2 * (opp[c] > 0) + 4 * ((c > 0 && opp[c - 1]) || (c < 4 && opp[c + 1])) +
-						       8 * ((c > 0 && own[c - 1]) || (c < 4 && own[c + 1]));
+						       8 * ((c > 0 && own[c - 1]) || (c < 4 && own[c + 1])) + 16 * (c == 2) +
+						       32 * ((c > 1 && opp[c - 2]) || (c < 3 && opp[c + 2]));
 					else
 						sig += 100 + o.response[2];
 					if(std::find(seen.begin(), seen.end(), sig) != seen.end())
 						continue;
 					seen.push_back(sig);
 					kept.push_back(o);
-					if(kept.size() >= 4)
+					if(kept.size() >= 5)
 						break;
 				}
 				// The default (first) zone keeps cards apart from one's own cards in the same column: a

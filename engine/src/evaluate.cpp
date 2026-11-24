@@ -140,6 +140,25 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			// Its once-per-turn uses already spent this turn, during the other player's turn (the
 			// one it would interrupt): little left of it until that turn ends (they come back on
 			// later turns). Only when all of its interruptions here are once per turn.
+			// A column interruption on the field reaches only some of the opponent's cards (an
+			// Angelechy Bastion its own column, Castellan the adjacent ones...): with nothing in
+			// reach now it is worth less (they will play where it can't reach when they can). A
+			// Set Infinite Impermanence also negates the Spell/Trap effects in its column.
+			if(best_in && (loc & (LOCATION_MZONE | LOCATION_SZONE))) {
+				const ColumnRule& cr = r.column;
+				const bool as_monster = loc == LOCATION_MZONE;
+				const bool st_card = !(cv.type & TYPE_MONSTER);
+				const int col = column_of(cv.con, static_cast<uint8_t>(loc), cv.seq);
+				if((cr.mon || cr.st) && col >= 0 && (as_monster || st_card)) {
+					const int reach = column_reach(cr, col, b, static_cast<uint8_t>(1 - p));
+					total *= reach > 0 ? 1.0 : 0.5;
+				}
+				if(cr.st_column && loc == LOCATION_SZONE && (cv.pos & POS_FACEDOWN) && col >= 0) {
+					ColumnRule same;
+					same.st = kColSame;
+					total += 0.08 * std::min(2, column_reach(same, col, b, static_cast<uint8_t>(1 - p)));
+				}
+			}
 			if(cv.opt_total > 0 && b.turn_player != p && best_in) {
 				bool all_once = true;
 				for(const auto& in : r.interrupts)
@@ -260,6 +279,21 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			v += 0.03 + std::max(iv, later);
 		}
 		v += 0.02 * b.extra[p].size();
+		// Within reach of the other player's column removal on the field (their Angelechy Bastion's
+		// column, Castellan's adjacent ones): those cards are the ones it can take.
+		{
+			const uint8_t o = static_cast<uint8_t>(1 - p);
+			int exposed = 0;
+			for(const auto& oc : b.mzone[o]) {
+				if(!oc.code || !(oc.pos & POS_FACEUP) || (oc.status & 0x1))
+					continue;
+				const CardRole& orole = role(o, oc.code);
+				if(!(orole.column.mon || orole.column.st) || orole.field_removal <= 0)
+					continue;
+				exposed += std::min(2, column_reach(orole.column, column_of(o, LOCATION_MZONE, oc.seq), b, p));
+			}
+			v -= 0.06 * std::min(exposed, 4);
+		}
 		// Life points: worth more the lower they get, so bots push damage and protect themselves.
 		if(b.lp[p] <= 0)
 			v -= 50;

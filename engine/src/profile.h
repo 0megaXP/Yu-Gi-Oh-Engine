@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "carddb.h"
+#include "column.h"
 #include "deck.h"
 
 namespace ygoe {
@@ -65,6 +66,9 @@ struct CardRole {
 	// destroyed, sent to the GY, banished or leaving the field (trigger.h floats). A board of
 	// such monsters loses less to removal.
 	double floats = 0;
+	// What its effects reach by its column (column.h: Angelechy Synchros, Elfnote Regina's center
+	// zone, a Set Infinite Impermanence's column).
+	ColumnRule column;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };

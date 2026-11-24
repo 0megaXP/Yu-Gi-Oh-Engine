@@ -42,6 +42,7 @@ add_library(ygoe STATIC
   engine/src/valuenet.cpp
   engine/src/nonengine.cpp
   engine/src/guess.cpp
+  engine/src/column.cpp
   engine/src/search.cpp
   engine/src/side.cpp
   engine/src/analyze.cpp

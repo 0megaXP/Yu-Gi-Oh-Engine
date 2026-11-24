@@ -141,12 +141,14 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 			by_name_[key] = id;
 	}
 	// Cards whose effects care where cards are: "in this card's column", "adjacent", "in that
-	// column" (Angelechy, Infinite Impermanence...). Where these are in a duel, zones are chosen.
+	// column" (Angelechy, Infinite Impermanence...), "the center Main Monster Zone" (Elfnote
+	// Regina), "adjacent Monster Zones". Where these are in a duel, zones are chosen.
 	for(const auto& [id, t] : texts_) {
 		std::string l = t;
 		for(auto& ch : l)
 			ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-		if(l.find("column") != std::string::npos)
+		if(l.find("column") != std::string::npos || l.find("center main monster zone") != std::string::npos ||
+		   l.find("adjacent monster zone") != std::string::npos)
 			columns_.insert(id);
 	}
 	// A learned value network shipped with the data, if any.
