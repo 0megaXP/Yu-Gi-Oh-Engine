@@ -596,6 +596,7 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 				chain_last_owner_ = g != given_.end() ? g->second : li.con;
 			}
 			chain_last_code_ = code;
+			chain_last_loc_ = li.loc;
 			break;
 		}
 		case MSG_CHAIN_NEGATED:

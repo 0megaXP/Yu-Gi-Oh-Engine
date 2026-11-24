@@ -410,9 +410,16 @@ int LiveDuel::choose(BotLevel level) {
 		return -1;
 	if(d.options.size() == 1)
 		return 0;
-	// Follow the plan while it still matches.
+	// Follow the plan while it still matches (but not into a hand trap Normal Summoned that
+	// nothing in the rest of the plan uses: decide again).
+	// A chain window isn't followed into using a card either: the plan is one imagined line, and its
+	// answers there are that line's random play (it once had a Mulcharmy Fuwalos chained in its
+	// owner's own Standby Phase); using a card is decided with the checks below.
+	const bool plan_uses_card = (d.type == DecisionType::Chain || d.type == DecisionType::EffectYesNo) &&
+	                            plan_pos_ < plan_.size() && plan_[plan_pos_].label != "Don't respond" &&
+	                            plan_[plan_pos_].label.rfind("Don't use", 0) != 0;
 	if(level != BotLevel::Easy && plan_pos_ < plan_.size() && plan_[plan_pos_].player == d.player &&
-	   plan_player_ == d.player) {
+	   plan_player_ == d.player && !plan_uses_card && !unused_summon(d, plan_[plan_pos_].label, plan_, plan_pos_ + 1)) {
 		for(size_t i = 0; i < d.options.size(); ++i)
 			if(d.options[i].label == plan_[plan_pos_].label) {
 				// A Set or a Normal Summon waits while another play of this Main Phase in the plan
@@ -441,6 +448,12 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
 	if(iterations_ > 0)
 		cfg.iterations = iterations_;
+	// The opponent's interruption on the chain against the bot's own turn: a window where the
+	// right answer (protecting the combo, a card that dodges the hand trap) matters most, and the
+	// options and hidden cards split the search: search it twice as long.
+	if((d.type == DecisionType::Chain || d.type == DecisionType::EffectYesNo) && duel_->turn_player() == d.player &&
+	   duel_->chain_last_player() == 1 - d.player)
+		cfg.iterations *= 2;
 	// This bot's value network (players can have different ones, to compare them).
 	eval_->set_value_net(net_set_[d.player] ? nets_[d.player] : db_.value_net());
 	cfg.horizon_turns = 1;
@@ -476,11 +489,54 @@ int LiveDuel::choose(BotLevel level) {
 				use = &m;
 		// Spending a card from the hand, or acting on the opponent's turn, needs a clear gain;
 		// an effect of a card already on your field during your own turn only a small one.
+		// (The deck's own engine cards from the hand during its own turn are part of the combo, not a
+		// hand trap being spent: the small margin, so answers like Verdict placing Bastion against
+		// the opponent's Ghost Ogre get played.)
 		double margin = 0.005;
+		uint32_t use_code = 0;
 		if(use) {
 			for(const auto& o : d.options)
-				if(o.label == use->label && ((o.loc & LOCATION_HAND) || d.player != duel_->turn_player()))
-					margin = 0.03;
+				if(o.label == use->label) {
+					use_code = o.code;
+					const bool own_engine = d.player == duel_->turn_player() && o.code && eval_->role(d.player, o.code).engine &&
+					                        !eval_->role(d.player, o.code).hand_trap;
+					if(((o.loc & LOCATION_HAND) || d.player != duel_->turn_player()) && !own_engine)
+						margin = 0.03;
+				}
+		}
+		// A hand trap on its owner's own turn answers the opponent's link (Ash on their Ash...);
+		// with none on top, using it (Mulcharmy Fuwalos in its own Standby Phase) mostly throws it
+		// away: only for a very clear gain.
+		if(use_code && eval_->role(d.player, use_code).hand_trap && d.player == duel_->turn_player() &&
+		   duel_->chain_last_player() != 1 - d.player)
+			margin = std::max(margin, 0.10);
+		// Does the card stop the link on top of the chain? The shortcuts below that make the bot
+		// answer more readily (a choke point, a starter from the Deck...) only count when it does:
+		// an Infinite Impermanence can't stop a Spell or a GY effect, and would land on any monster.
+		const uint32_t top_code = duel_->chain_last_code();
+		bool stops_top = true;
+		if(use_code && top_code) {
+			const CardRole& ur = eval_->role(d.player, use_code);
+			if(!ur.interrupts.empty()) {
+				std::string tt = db_.text(db_.script_id(top_code));
+				for(auto& ch : tt)
+					ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+				const uint8_t tl = duel_->chain_last_loc();
+				stops_top = false;
+				for(const auto& in : ur.interrupts) {
+					switch(in.kind) {
+					case Interrupt::NegateActivation: stops_top = true; break;
+					case Interrupt::NegateEffect: stops_top |= (tl & (LOCATION_MZONE | LOCATION_SZONE)) != 0; break;
+					case Interrupt::GyHate:
+						stops_top |= tt.find("from your deck") != std::string::npos || tt.find("graveyard") != std::string::npos ||
+						             tt.find("gy") != std::string::npos;
+						break;
+					case Interrupt::Removal: stops_top |= (tl & (LOCATION_MZONE | LOCATION_SZONE)) != 0; break;
+					case Interrupt::Other: stops_top = true; break;
+					default: break;
+					}
+				}
+			}
 		}
 		// Answering the turn player's combo with what was learned about their deck: stop a known
 		// choke point now, and stop the first play when the interruptions in hand / set are as
@@ -488,7 +544,7 @@ int LiveDuel::choose(BotLevel level) {
 		const uint8_t opp = static_cast<uint8_t>(1 - d.player);
 		const DeckKnowledge& know = knowledge_[opp];
 		const uint32_t top = duel_->chain_last_code();
-		if(use && d.type == DecisionType::Chain && duel_->turn_player() == opp && top &&
+		if(use && stops_top && d.type == DecisionType::Chain && duel_->turn_player() == opp && top &&
 		   duel_->chain_last_player() == opp) {
 			if(std::find(know.chokes.begin(), know.chokes.end(), top) != know.chokes.end()) {
 				margin = -0.01;
@@ -579,6 +635,20 @@ int LiveDuel::choose(BotLevel level) {
 				auto timing = ne_timing_set_[d.player & 1] ? ne_timing_[d.player & 1] : db_.nonengine_timing();
 				if(timing)
 					margin -= std::clamp(timing->gain(ns), -0.05, 0.05);
+			}
+		}
+		// A negation that targets a face-up card, used on the opponent's turn: worth it only if one of
+		// their face-up cards can still do something this turn (an effect it can activate now or
+		// later, or a lasting one), or the link it answers is one of those cards. Otherwise held.
+		if(use && use_code && d.player != duel_->turn_player()) {
+			const CardRole& ur = eval_->role(d.player, use_code);
+			bool only_negate = !ur.interrupts.empty() && !ur.hand_trap;
+			for(const auto& in : ur.interrupts)
+				only_negate &= in.kind == Interrupt::NegateEffect;
+			if(only_negate && !(top_code && (duel_->chain_last_loc() & (LOCATION_MZONE | LOCATION_SZONE)))) {
+				const uint8_t o2 = static_cast<uint8_t>(1 - d.player);
+				if(!live_target(o2))
+					margin = std::max(margin, 1.0);
 			}
 		}
 		bool used = !pass || (use && use->mean > pass->mean + margin);
@@ -749,11 +819,78 @@ int LiveDuel::choose(BotLevel level) {
 			}
 		}
 	}
+	// A hand trap Normal Summoned with nothing later in the line that uses it (as material, for an
+	// effect) only leaves it on the field, worth next to nothing there and gone from the hand: the
+	// best other move instead.
+	if(d.type == DecisionType::Idle && unused_summon(d, want, plan_, plan_.empty() ? 0 : 1)) {
+		int most = out.moves.front().visits;
+		double best_score = -1;
+		std::string other;
+		for(const auto& m : out.moves) {
+			if(m.visits < std::max(8, most / 6) || m.best.empty() || unused_summon(d, m.label, m.best.front().steps, 1))
+				continue;
+			double score = 0.4 * m.mean + 0.6 * m.best.front().reward;
+			if(score > best_score) {
+				best_score = score;
+				other = m.label;
+			}
+		}
+		if(!other.empty()) {
+			want = other;
+			plan_.clear();
+			plan_pos_ = 0;
+		}
+	}
 	int index = 0;
 	for(size_t i = 0; i < d.options.size(); ++i)
 		if(d.options[i].label == want)
 			index = static_cast<int>(i);
 	return index;
+}
+
+bool LiveDuel::unused_summon(const Decision& d, const std::string& label, const std::vector<Step>& line, size_t from) const {
+	if(label.rfind("Normal Summon ", 0) != 0)
+		return false;
+	uint32_t code = 0;
+	for(const auto& o : d.options)
+		if(o.label == label)
+			code = o.code;
+	if(!code || !eval_->role(d.player, code).hand_trap)
+		return false;
+	const std::string name = db_.name(code);
+	for(size_t k = from; k < line.size(); ++k) {
+		const Step& s = line[k];
+		if(s.player != d.player)
+			continue;
+		if(s.label.find(name) != std::string::npos)
+			return false;  // used later in the line (material, its own effect...)
+	}
+	return true;
+}
+
+bool LiveDuel::live_target(uint8_t p) const {
+	// A face-up card of `p` with an effect it can still activate this turn (an ignition one on its
+	// own turn, a quick or trigger one), or a lasting one while it is on the field.
+	// (EFFECT_TYPE_*; an effect without a range, like a summon trigger, has already happened by now)
+	constexpr uint32_t kIgnition = 0x40, kTriggerO = 0x80, kQuickO = 0x100, kTriggerF = 0x200, kQuickF = 0x400, kField = 0x2,
+	                   kContinuous = 0x800;
+	const Board b = duel_->board();
+	for(const auto* z : {&b.mzone[p], &b.szone[p]})
+		for(const auto& c : *z) {
+			if(!c.code || !(c.pos & POS_FACEUP) || (c.status & 0x1))  // STATUS_DISABLED: already negated
+				continue;
+			const CardInfo* ci = db_.get(db_.script_id(c.code));
+			if(!ci)
+				continue;
+			for(const auto& e : ci->effects) {
+				if(!(e.range & (LOCATION_MZONE | LOCATION_SZONE)))
+					continue;
+				if((e.type & (kQuickO | kQuickF | kTriggerO | kTriggerF | kField | kContinuous)) ||
+				   ((e.type & kIgnition) && duel_->turn_player() == p))
+					return true;
+			}
+		}
+	return false;
 }
 
 std::string LiveDuel::bot_move(BotLevel level) {

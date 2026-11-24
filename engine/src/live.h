@@ -119,6 +119,10 @@ private:
 	std::vector<RootState> hidden_roots(uint8_t me, int samples);
 	// Updates known_ after a response (hand cards drawn are hidden, the rest was seen).
 	void track_knowledge();
+	// `label` Normal Summons a hand trap that no later step of `line` (from `from`) uses.
+	bool unused_summon(const Decision& d, const std::string& label, const std::vector<Step>& line, size_t from) const;
+	// `p` has a face-up card that can still do something this turn (worth negating).
+	bool live_target(uint8_t p) const;
 	std::string card_json(uint32_t code) const;
 
 	const CardDB& db_;

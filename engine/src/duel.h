@@ -198,6 +198,8 @@ public:
 	bool zone_choices() const { return zone_choices_; }
 	// The card of the last link on the chain (script id, 0 when empty).
 	uint32_t chain_last_code() const { return chain_depth_ ? chain_last_code_ : 0; }
+	// Where the card of the last link was activated from (LOCATION_*, 0 when empty).
+	uint8_t chain_last_loc() const { return chain_depth_ ? chain_last_loc_ : 0; }
 
 	Board board(bool include_decks = false) const;
 	const CardDB& db() const { return db_; }
@@ -263,6 +265,7 @@ private:
 	// field slots (controller << 16 | location << 8 | sequence) holding a card another player put there
 	std::map<uint32_t, uint8_t> given_;
 	uint32_t chain_last_code_ = 0;
+	uint8_t chain_last_loc_ = 0;
 	size_t steps_ = 0;
 };
 
