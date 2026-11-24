@@ -39,7 +39,14 @@ mkdir -p "$OUT/libs"
 build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 \
   --out "$OUT/libs/angelechy_luna_mardelplata_2026-11.json" > "$OUT/lib.txt"
 YGOE_FOLLOW_JSONL=1 build/ygoe-cli followtest examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
-  --seed 1 --turns 4 | python3 -c "import json,sys; [print(l) for r in map(json.loads, sys.stdin) for l in r['jsonl'].splitlines() if '\"kind\":\"start\"' in l]" > "$OUT/starts.jsonl"
+  --seed 1 --turns 4 > "$OUT/follow.json"
+python3 -c "import json,sys; [print(l) for r in map(json.loads, open(sys.argv[1])) for l in r['jsonl'].splitlines() if '\"kind\":\"start\"' in l]" "$OUT/follow.json" > "$OUT/starts.jsonl"
+# the upload holds every position the follower counted (and the follower version the app checks)
+python3 -c "
+import json,sys
+r=json.loads(open(sys.argv[1]).readline())
+n=sum(1 for l in r['jsonl'].splitlines() if '\"f\":' in l)
+sys.exit(0 if r['positions'] > 0 and n == r['positions'] and r.get('follow_version', 0) >= 2 else f'positions: {n} written, {r[\"positions\"]} counted')" "$OUT/follow.json"
 build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --games 2 --iterations 40 --turns 3 --net none --libraries "$OUT/libs" --bo3 1 --explore 0.5 \
   --starts "$OUT/starts.jsonl" --start-share 0.5 --policy-out "$OUT/sp.pjsonl" --out "$OUT/sp.jsonl" \

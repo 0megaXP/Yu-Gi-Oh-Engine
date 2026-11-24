@@ -1495,6 +1495,7 @@ FollowResult Follower::run() {
 					++res.positions;
 				}
 		}
+		res.jsonl = o.str();
 		// the positions to start self-play games from, with who won (from the turn player's side)
 		for(const auto& p : pos_)
 			if(!p.start.empty()) {
@@ -1513,7 +1514,7 @@ std::string FollowResult::to_json() const {
 	std::ostringstream o;
 	o << "{\"positions\":" << positions << ",\"events\":" << events << ",\"followed\":" << followed << ",\"turns\":" << turns
 	  << ",\"turns_followed\":" << turns_followed << ",\"complete\":" << (complete ? "true" : "false") << ",\"winner\":" << winner
-	  << ",\"stopped\":" << json::quote(stopped) << ",\"stop_turn\":" << stop_turn << ",\"stop_next\":" << json::quote(stop_next)
+	  << ",\"stopped\":" << json::quote(stopped) << ",\"follow_version\":" << kFollowVersion << ",\"stop_turn\":" << stop_turn << ",\"stop_next\":" << json::quote(stop_next)
 	  << ",\"jsonl\":" << json::quote(jsonl) << "}";
 	return o.str();
 }

@@ -100,6 +100,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
             turns = o.optInt("turns"), turnsFollowed = o.optInt("turns_followed"),
             complete = o.optBoolean("complete"), winner = o.optInt("winner", -1), stopped = o.optString("stopped"),
             stopTurn = if (o.has("stop_turn")) o.optInt("stop_turn") else -1, stopNext = o.optString("stop_next"),
+            followVersion = o.optInt("follow_version", 1),
         )
     }
 

@@ -678,5 +678,7 @@ data class FollowResult(
     val stopTurn: Int = 0,
     /** The recorded events it couldn't reproduce from there (card ids only). */
     val stopNext: String = "",
+    /** The follower's version (raised when it follows more of the games): the app sends its games again when it rises. */
+    val followVersion: Int = 1,
 )
 

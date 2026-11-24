@@ -41,6 +41,12 @@ struct FollowInput {
 	int max_idle = 300;    // moves in a row that match nothing the replay shows: it stops there
 };
 
+// Raised whenever the follower follows more of the games (or fixes what it writes): the app sends
+// its games again when the engine's version is newer than the one they were sent with.
+//   2: stand-in Extra Deck cards, Deck reordering optional (Pot of Prosperity), the positions
+//      lost by version 1's start positions back
+constexpr int kFollowVersion = 2;
+
 struct FollowResult {
 	std::string jsonl;          // training positions, one JSON object per line
 	int positions = 0;

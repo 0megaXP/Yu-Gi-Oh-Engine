@@ -10,7 +10,8 @@ report: how many games were followed to the end, and the cards most often next w
 stopped (what to fix in the follower first).
 
 A game sent again (the app re-sends its games when the engine learns to read more from them)
-counts once: the lines of the newest file holding it.
+counts once: its positions from the newest file holding positions of it, its start positions
+and its follow summary likewise (so an upload without positions never wipes older ones).
 """
 import collections
 import glob
@@ -27,7 +28,8 @@ def main():
     files = sorted(glob.glob(os.path.join(src, "replays-*.jsonl.gz")),
                    key=lambda p: int(os.path.basename(p).split("-")[1]) if os.path.basename(p).split("-")[1].isdigit() else 0,
                    reverse=True)
-    seen = set()
+    seen = set()      # (game, part) taken
+    seen_any = set()  # games
     games = positions = starts = 0
     with open(pos_out, "w") as po, open(starts_out, "w") as so:
         for path in files:
@@ -46,19 +48,30 @@ def main():
             except (OSError, EOFError):
                 continue
             for game, lines in by_game.items():
-                if game in seen:
-                    continue
-                seen.add(game)
-                games += 1
+                # each part from the newest upload that has it: an upload without positions (a
+                # summary only, or the engine of 24 Nov that lost them) never replaces older ones
+                parts = {"follow": [], "start": [], "pos": []}
                 for d, line in lines:
-                    if d.get("kind") == "follow":
-                        follows.append(d)
-                    elif d.get("kind") == "start":
-                        so.write(line + "\n")
-                        starts += 1
-                    elif "f" in d:
-                        po.write(line + "\n")
-                        positions += 1
+                    kind = d.get("kind")
+                    part = "follow" if kind == "follow" else "start" if kind == "start" else "pos" if "f" in d else None
+                    if part:
+                        parts[part].append((d, line))
+                if game not in seen_any:
+                    seen_any.add(game)
+                    games += 1
+                for part, got in parts.items():
+                    if not got or (game, part) in seen:
+                        continue
+                    seen.add((game, part))
+                    for d, line in got:
+                        if part == "follow":
+                            follows.append(d)
+                        elif part == "start":
+                            so.write(line + "\n")
+                            starts += 1
+                        else:
+                            po.write(line + "\n")
+                            positions += 1
     print(f"{len(files)} files, {games} games: {positions} positions, {starts} start positions")
     if follows:
         stops = collections.Counter()
