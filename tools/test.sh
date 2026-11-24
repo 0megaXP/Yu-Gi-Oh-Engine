@@ -54,7 +54,8 @@ build/ygoe-cli arena decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_
 python3 -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if r['games']==2 and len(r['pairs'])==1 else 'arena failed')" "$OUT/arena.json"
 mkdir -p "$OUT/arena"
 cp "$OUT/arena.json" "$OUT/arena/arena-1.json"
-python3 tools/ml/arena.py "$OUT/arena" > /dev/null
+python3 tools/ml/arena.py "$OUT/arena" --pending "$OUT/none.json" --out-pending "$OUT/pending.json" --run 1 > /dev/null
+python3 -c "import json,sys; v=json.load(open(sys.argv[1])); sys.exit(0 if 'first' in v else 'no first/second rates')" "$OUT/ne_values.json"
 echo "== asset pack + JNI"
 python3 tools/make_pack.py third_party/CardScripts data "$OUT/pack" > /dev/null
 mkdir -p "$OUT/classes"

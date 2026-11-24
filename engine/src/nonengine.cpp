@@ -226,7 +226,19 @@ bool NeValues::parse(const std::string& text, std::string* err) {
 		table_[{static_cast<uint16_t>(x["me"].integer(0)), static_cast<uint16_t>(x["opp"].integer(0)), x["first"].integer(0) != 0,
 		        static_cast<uint32_t>(x["code"].integer(0))}] = en;
 	}
+	first_.clear();
+	for(const auto& x : v["first"].items()) {
+		FirstRate fr;
+		fr.rate = x["rate"].num(0.5);
+		fr.games = static_cast<int>(x["games"].integer(0));
+		first_[{static_cast<uint16_t>(x["me"].integer(0)), static_cast<uint16_t>(x["opp"].integer(0)), x["first"].integer(1) != 0}] = fr;
+	}
 	return true;
+}
+
+const NeValues::FirstRate* NeValues::first_rate(uint16_t me, uint16_t opp, bool first) const {
+	auto it = first_.find({me, opp, first});
+	return it == first_.end() ? nullptr : &it->second;
 }
 
 const NeValues::Entry* NeValues::get(uint16_t me, uint16_t opp, bool first, uint32_t sid) const {
@@ -274,6 +286,28 @@ std::vector<NeChoice> rank_nonengine(const CardDB& db, const Deck& deck, const s
 		return a.value_first + a.value_second > b.value_first + b.value_second;
 	});
 	return out;
+}
+
+bool choose_first(const CardDB& db, const Deck& deck, const Deck& opp, double* edge) {
+	if(edge)
+		*edge = 0;
+	const NeValues* values = db.nonengine_values().get();
+	if(!values)
+		return true;
+	constexpr int kMinGames = 20;
+	const uint16_t me = archetype_key(db, deck);
+	for(uint16_t o : {archetype_key(db, opp), uint16_t{0}}) {
+		const auto* f = values->first_rate(me, o, true);
+		const auto* s = values->first_rate(me, o, false);
+		if(f && s && f->games >= kMinGames && s->games >= kMinGames) {
+			if(edge)
+				*edge = f->rate - s->rate;
+			return f->rate >= s->rate;
+		}
+		if(o == 0)
+			break;
+	}
+	return true;
 }
 
 }  // namespace ygoe

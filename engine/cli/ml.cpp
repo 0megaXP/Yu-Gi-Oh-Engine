@@ -5,9 +5,10 @@
 //            [--iterations 300] [--turns 14] [--net value_net.json|none]
 //            [--libraries DIR] [--pieces phone_pieces.json] [--policy policy.json|none] [--phone-policy p.json]
 //            [--explore 0.25] [--explore-moves 2] [--bo3 1] [--starts starts.jsonl] [--start-share 0.25]
-//            [--policy-out examples.jsonl]
+//            [--policy-out examples.jsonl] [--choice-explore 0.2]
 //     Bots play each other (random deck pairs from the list). With --bo3 a pairing is a match:
-//     game 1 with a coin flip for who goes first, then the loser goes first, games 2 and 3 with
+//     game 1 with a coin flip for who goes first, then the loser chooses first or second (by the
+//     measured rates, --choice-explore 0.2 of the choices turned around), games 2 and 3 with
 //     both decks sided for the matchup (side.h) until someone has won two. With --starts, a
 //     share of the games starts from a real game's position instead (the engine's follow_replay writes
 //     them when the app follows a YGO Omega replay, and the app uploads them). The bots get the decks' combo pieces (--libraries: DIR/<deck
@@ -399,6 +400,9 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 	pc.explore = std::stod(get("explore", "0"));
 	pc.explore_moves = std::stoi(get("explore-moves", "2"));
 	const bool bo3 = get("bo3", "0") != "0";
+	// the loser of a match's game chooses to go first or second (nonengine.h choose_first); this
+	// share of the choices is turned around, so both keep being measured
+	const double choice_explore = std::stod(get("choice-explore", "0.2"));
 	const uint64_t seed = std::stoull(get("seed", "1"));
 	auto net = net_from(get("net", ""), db, err);
 	if(!err.empty()) {
@@ -585,7 +589,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			    seed * 7919 + static_cast<uint64_t>(gi), pc, match_id, nullptr);
 			continue;
 		}
-		// a match: game 1 by a coin flip, then the loser goes first; games 2-3 sided
+		// a match: game 1 by a coin flip, then the loser chooses to go first or second; games 2-3 sided
 		int wins[2] = {0, 0};
 		int first = static_cast<int>(rng() % 2);  // index into idx: who goes first
 		for(int game = 1; game <= 3 && wins[0] < 2 && wins[1] < 2; ++game) {
@@ -605,7 +609,16 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			} else {
 				loser = static_cast<int>(rng() % 2);
 			}
-			first = loser;
+			if(wins[0] >= 2 || wins[1] >= 2)
+				break;
+			double edge = 0;
+			bool goes_first = choose_first(db, decks[idx[loser]], decks[idx[1 - loser]], &edge);
+			const bool turned = unit(rng) < choice_explore;
+			if(turned)
+				goes_first = !goes_first;
+			std::printf("match %s: the loser (deck %zu) goes %s (first minus second %+.2f%s)\n", match_id.c_str(), idx[loser],
+			            goes_first ? "first" : "second", edge, turned ? ", turned around" : "");
+			first = goes_first ? loser : 1 - loser;
 		}
 	}
 	std::printf("%d positions written", written);

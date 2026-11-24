@@ -186,6 +186,8 @@ jobs:
           mkdir -p ne-history
           gh release download ml-data --pattern 'ne-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
           gh release download ml-data --pattern 'games-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
+          # parts still being tested from earlier runs (tools/ml/arena.py): their models and pairs
+          gh release download ml-data --pattern 'arena-pending.tar.gz' 2>/dev/null && tar xzf arena-pending.tar.gz || true
           cat tonight/*.nejsonl > "ne-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
           cat tonight/*.gjsonl > "games-night-${{ github.run_id }}.jsonl" 2>/dev/null || true
           gzip -kf "ne-night-${{ github.run_id }}.jsonl"
@@ -252,6 +254,23 @@ jobs:
               shutil.copy("new_ne_timing.json", "candidate/nonengine_timing.json")
           elif os.path.exists("data/nonengine_timing.json"):
               shutil.copy("data/nonengine_timing.json", "candidate/nonengine_timing.json")
+          # a part still being tested from earlier runs is tested again (its pairs add up), not
+          # tonight's new one
+          pending = {}
+          if os.path.exists("pending/state.json"):
+              pending = json.load(open("pending/state.json"))
+          names = {"value_net": "value network", "policy": "move policy", "nonengine_timing": "non-engine timing"}
+          carried = {}
+          for part, st in pending.items():
+              if os.path.exists(f"pending/{part}.json"):
+                  shutil.copy(f"pending/{part}.json", f"candidate/{part}.json")
+                  carried[part] = st
+                  print(f"{names.get(part, part)}: still testing the one from run {st.get('since')} "
+                        f"({len(st.get('pairs', []))} pairs, {st.get('runs')} runs so far)")
+          json.dump(carried, open("candidate/pending.json", "w"))
+          net_better = net_better or "value_net" in carried
+          pol_better = pol_better or "policy" in carried
+          ne_better = ne_better or "nonengine_timing" in carried
           # measured values are kept every run (they are measurements, not a bot change)
           if os.path.exists("nonengine_values.json"):
               shutil.copy("nonengine_values.json", "candidate/nonengine_values.json")
@@ -372,7 +391,9 @@ jobs:
       - name: Keep what won, and the measured non-engine values
         run: |
           mkdir -p arena
-          python3 tools/ml/arena.py arena > arena.json
+          mkdir -p pending
+          python3 tools/ml/arena.py arena --pending candidate/pending.json --out-pending pending/state.json \
+            --run "${{ github.run_id }}" > arena.json
           cat arena.json
           changed=""
           # the non-engine values are measurements: kept every run
@@ -391,6 +412,17 @@ jobs:
             done
           fi
           [ -z "$won" ] && echo "nothing new clearly better: keeping the current network, policy and timing"
+          # the parts neither clearly better nor worse: tested again next run (their models and pairs)
+          for f in $(python3 -c "import json;print(' '.join(json.load(open('pending/state.json'))))"); do
+            cp "candidate/$f.json" "pending/$f.json"
+            echo "still testing the new $f next run"
+          done
+          if [ "$(cat pending/state.json)" != "{}" ]; then
+            tar czf arena-pending.tar.gz pending
+            gh release upload ml-data arena-pending.tar.gz --clobber || true
+          else
+            gh release delete-asset ml-data arena-pending.tar.gz -y 2>/dev/null || true
+          fi
           changed="$won${won:+${changed:+, }}$changed"
           if [ -n "$changed" ]; then
             git config user.name "github-actions[bot]"
@@ -415,4 +447,5 @@ jobs:
             values_report.json
             candidate/
             arena/
+            pending/state.json
           retention-days: 14

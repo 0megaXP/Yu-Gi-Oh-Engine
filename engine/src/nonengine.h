@@ -97,13 +97,20 @@ public:
 		int games = 0;     // games the card was in the deck
 	};
 	bool parse(const std::string& json_text, std::string* err = nullptr);
-	bool empty() const { return table_.empty(); }
+	bool empty() const { return table_.empty() && first_.empty(); }
 	// The measured value of `code` for a deck of archetype `me` against `opp` (0: against the
 	// whole format), going first or second. Null when never measured.
 	const Entry* get(uint16_t me, uint16_t opp, bool first, uint32_t script_id) const;
+	struct FirstRate {
+		double rate = 0.5;  // the win rate of `me` against `opp`, going first or second
+		int games = 0;
+	};
+	// Null when never measured (opp 0: against the whole format).
+	const FirstRate* first_rate(uint16_t me, uint16_t opp, bool first) const;
 
 private:
 	std::map<std::tuple<uint16_t, uint16_t, bool, uint32_t>, Entry> table_;
+	std::map<std::tuple<uint16_t, uint16_t, bool>, FirstRate> first_;
 };
 
 // ---------------------------------------------------------------- choice (4)
@@ -118,5 +125,11 @@ struct NeChoice {
 // The deck's non-engine cards (Main and Side Deck) ranked by their measured value against
 // `opponents` (the format), going first and second averaged.
 std::vector<NeChoice> rank_nonengine(const CardDB& db, const Deck& deck, const std::vector<Deck>& opponents);
+
+// Going first or second, for the player who chooses (the loser of a match's game): by the measured
+// win rates of `deck` against `opp` going first and going second (data/nonengine_values.json),
+// against the whole format when the matchup has too few games, first when neither is measured.
+// `edge`, if given: the rate going first minus going second (0 when not measured).
+bool choose_first(const CardDB& db, const Deck& deck, const Deck& opp, double* edge = nullptr);
 
 }  // namespace ygoe

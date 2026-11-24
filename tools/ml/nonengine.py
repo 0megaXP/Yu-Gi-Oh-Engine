@@ -16,7 +16,10 @@ values: each line is a game (`ygoe-cli selfplay --games-out`): both players' arc
   went first), the result, and for each non-engine card in a player's Main Deck whether it was in
   their hand in the first 4 turns. A card's value in a matchup, going first or second, is the win
   rate when it was drawn early minus when it wasn't (each shrunk towards 0.5 by 10 games), also
-  against the whole format (opp 0). Cards need 5 games each way.
+  against the whole format (opp 0). Cards need 5 games each way. Also each matchup's win rate of
+  the player going first (`first`: shrunk towards 0.5 by 10 games, also against the whole
+  format), and of the player going second (`first` 0), for who chooses to go first or second after
+  losing a game of a match.
 """
 import argparse
 import json
@@ -105,12 +108,18 @@ def timing(a):
 def values(a):
     # key -> [wins seen, n seen, wins unseen, n unseen]
     acc = {}
+    first_acc = {}  # (me, opp, went first) -> [wins, games]
     games = 0
     for d in lines(a.data):
         arch = d.get("arch")
         if not arch or len(arch) != 2:
             continue
         games += 1
+        for p in (0, 1):
+            for o in (int(arch[1 - p]), 0):
+                f = first_acc.setdefault((int(arch[p]), o, p == 0), [0.0, 0])
+                f[0] += d["z0"] if p == 0 else 1 - d["z0"]
+                f[1] += 1
         for p in (0, 1):
             z = d["z0"] if p == 0 else 1 - d["z0"]
             me, opp, first = int(arch[p]), int(arch[1 - p]), p == 0
@@ -132,8 +141,10 @@ def values(a):
         unseen = (wu + 5) / (nu + 10)
         out.append({"me": me, "opp": opp, "first": 1 if first else 0, "code": code,
                     "delta": round(seen - unseen, 4), "games": ns + nu})
-    json.dump({"version": 1, "games": games, "entries": out}, open(a.out, "w"), separators=(",", ":"))
-    rep = {"games": games, "entries": len(out)}
+    first = [{"me": me, "opp": opp, "first": 1 if f else 0, "rate": round((w + 5) / (n + 10), 4), "games": n}
+             for (me, opp, f), (w, n) in sorted(first_acc.items()) if n >= 5]
+    json.dump({"version": 1, "games": games, "entries": out, "first": first}, open(a.out, "w"), separators=(",", ":"))
+    rep = {"games": games, "entries": len(out), "first_matchups": len(first)}
     print(json.dumps(rep))
     if a.report:
         json.dump(rep, open(a.report, "w"))

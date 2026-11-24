@@ -50,7 +50,10 @@ what they stop and their measured value.
   minus when it wasn't, per matchup (by archetype), going first and second, and against the whole
   format (`nonengine.py values`, `data/nonengine_values.json`, updated every run). Side plans
   (`side.h`) blend them into their card values as games add up (from 30 games, fully at a few
-  hundred), and `ygoe-cli nonengine` ranks a deck's non-engine slots by them.
+  hundred), and `ygoe-cli nonengine` ranks a deck's non-engine slots by them. The same file holds
+  each matchup's win rates going first and going second (`first`), which `choose_first`
+  (`nonengine.h`) uses for the loser's choice in a match (from 20 games each way, else against
+  the whole format, else first).
 
 ## The pipeline (`.github/workflows/ml.yml`, "Learn"): every 6 hours
 
@@ -61,7 +64,9 @@ what they stop and their measured value.
    deeply and splits the best lines into pieces, adding the app's pieces the deck can play. The
    bots use them as the app's bots use a deck's reference boards.
 3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 3.5 hours: game 1 with a
-   coin flip for who goes first, then the loser goes first, games 2 and 3 with both decks sided
+   coin flip for who goes first, then the loser chooses to go first or second (by the measured
+   win rates of its deck in that matchup going first and second, see Values; a fifth of the
+   choices turned around so both stay measured), games 2 and 3 with both decks sided
    for the matchup (`side.h`). Normal bots at 200 search iterations (the last 2 runners at 800),
    with the current network, the move policies and the combo pieces; in each player's first 2
    Main / Battle Phase decisions a bot plays another well-explored move a quarter of the time.
@@ -85,8 +90,13 @@ what they stop and their measured value.
    that part replaced, against the current bots (so a weak part can't hide behind a strong one).
    360 bot games on 9 runners, shared out among the parts. Each deal is played twice with the
    same decks and shuffles, the bots swapping seats, which cancels most of the luck of the draw
-   (`tools/ml/arena.py`). A part is kept only if its average pair score is at least 0.52 and more
-   than one standard error above 0.5; the commit message carries the reports.
+   (`tools/ml/arena.py`). One run's arena only tells a part worth 5-8% from luck, so a part
+   neither clearly better nor clearly worse stays a candidate: the next runs test the same part
+   again (not a newly trained one) and its pairs add up (`arena-pending.tar.gz` in `ml-data`),
+   for up to 4 runs. Kept when its average pair score over all its pairs is at least 0.51 and
+   more than 1.5 standard errors above 0.5; dropped when 1.5 standard errors below 0.5 or after 4
+   runs. A part kept restarts the others' pairs (the bots they are measured against changed). The
+   commit message carries the reports.
 
 Real games come from the app: it follows each finished YGO Omega replay in the real rules core
 (the engine's `follow_replay`, `follow.h`) and uploads what that writes: training positions (the
