@@ -41,7 +41,13 @@ struct Ev {
 	bool top = false;     // recorded stream: a card taken from the top of a Deck
 };
 
-bool soft(const Ev& e) { return e.k == PHASE || e.k == LP || e.k == POS; }
+// Events either stream may have or not: phases, LP, positions, and a card moving within its own
+// Deck (YGO Omega's scripts and the rules core's reorder excavated cards differently, e.g. Pot
+// of Prosperity putting the rest on the bottom; nobody sees the difference).
+bool soft(const Ev& e) {
+	return e.k == PHASE || e.k == LP || e.k == POS ||
+	       (e.k == MOVE && e.fl == LOCATION_DECK && e.tl == LOCATION_DECK && e.p == e.tp);
+}
 
 uint8_t norm_loc(uint32_t loc) { return (loc & LOCATION_OVERLAY) ? LOCATION_OVERLAY : static_cast<uint8_t>(loc & 0x7f); }
 bool on_field(uint8_t loc) { return loc == LOCATION_MZONE || loc == LOCATION_SZONE; }
@@ -65,6 +71,7 @@ struct Bytes {
 // their codes in hindsight (the face-down card drawn on turn 3 is the Ash Blossom played later).
 class Recorded {
 public:
+	int start_extra[2] = {0, 0};  // Extra Deck sizes at the start (MSG_START)
 	std::vector<Ev> ev;
 	std::vector<int> tops[2];  // instances taken from each Deck's top, in order
 	int first = -1;            // who took the first turn
@@ -231,6 +238,7 @@ private:
 			for(int p = 0; p < 2; ++p) {
 				side_[p].deck = r.get<uint16_t>();
 				int ex = r.get<uint16_t>();
+				start_extra[p] = ex;
 				for(int i = 0; i < ex; ++i)
 					side_[p].extra.push_back(fresh(0));
 			}
@@ -660,6 +668,9 @@ private:
 // ---------------------------------------------------------------- following
 
 constexpr uint32_t kFiller = 46986414;  // Dark Magician: stands for an opponent's card nobody saw
+// Flame Swordsman (a Fusion with no effect): stands for an Extra Deck card nobody saw, so costs
+// like Pot of Prosperity's (banish face-down cards from the Extra Deck) can be paid
+constexpr uint32_t kExtraFiller = 45231177;
 
 struct Step {
 	bool deck_top = false;
@@ -910,7 +921,8 @@ std::vector<int> Follower::rank(const Decision& d, size_t cur) const {
 							break;
 						}
 					// a hidden card (the replay doesn't say which): rather not one the player uses later
-					if(c < o.locs.size() && (o.locs[c] == LOCATION_HAND || o.locs[c] == LOCATION_DECK) && used_later(codes[c], d.player, cur))
+					if(c < o.locs.size() && (o.locs[c] == LOCATION_HAND || o.locs[c] == LOCATION_DECK || o.locs[c] == LOCATION_EXTRA) &&
+					   used_later(codes[c], d.player, cur))
 						s -= 4;
 				} else {
 					++hit;
@@ -947,9 +959,25 @@ std::vector<int> Follower::rank(const Decision& d, size_t cur) const {
 		scored.push_back({s, static_cast<int>(i)});
 	}
 	std::stable_sort(scored.begin(), scored.end(), [](auto& a, auto& b) { return a.first > b.first; });
+	// selections of the same cards from the same hidden piles (the hand, the Deck, the Extra Deck)
+	// lead to the same game: try one of them (many stand-in cards make many such choices)
+	std::set<std::vector<uint32_t>> same;
 	std::vector<int> order;
-	for(auto& p : scored)
+	for(auto& p : scored) {
+		const Option& o = d.options[static_cast<size_t>(p.second)];
+		if(o.kind == OptKind::Select && !o.codes.empty() && o.locs.size() == o.codes.size()) {
+			bool hidden = true;
+			std::vector<uint32_t> key;
+			for(size_t c = 0; c < o.codes.size(); ++c) {
+				hidden = hidden && (o.locs[c] == LOCATION_HAND || o.locs[c] == LOCATION_DECK || o.locs[c] == LOCATION_EXTRA);
+				key.push_back(o.codes[c] << 8 | o.locs[c]);
+			}
+			std::sort(key.begin(), key.end());
+			if(hidden && !same.insert(key).second)
+				continue;
+		}
 		order.push_back(p.second);
+	}
 	return order;
 }
 
@@ -1192,6 +1220,9 @@ FollowResult Follower::run() {
 		for(size_t i = top.size(); i-- > 0;)
 			main.push_back(top[i]);  // the last element is the top
 		setup_.players[e].main = main;
+		if(!in_.has_deck[r])
+			while(static_cast<int>(extra.size()) < std::min(rec.start_extra[r], 15))
+				extra.push_back(kExtraFiller);
 		setup_.players[e].extra = extra;
 		tops_[e] = top;
 		for(auto c : main)
