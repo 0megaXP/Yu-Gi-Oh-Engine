@@ -29,7 +29,8 @@ has hand-written rules plus learned weights: the app's own (learned on the phone
 replay lines) and `data/policy.json`, learned here from self-play. Every search adds the two.
 Here it learns from the bots' searches: at a decision, each option's share of the search's
 visits is its target (the AlphaZero way), so the next searches spend their iterations where
-deep search ended up anyway.
+deep search ended up anyway. Searches use it at half its weights (`Policy::kSelfPlayScale`): it
+nudges the search rather than steering it while it learns from the bots' own searches.
 
 ## Non-engine (`engine/src/nonengine.h`)
 
@@ -80,11 +81,12 @@ what they stop and their measured value.
 6. **Check**: each must predict the held-out games better than now (validation log-loss lower
    by 0.002: the network against the plain evaluator's, the policy against the current one's
    and the rules'). What passes is the candidate; the rest stays as it is.
-7. **Arena**: 320 bot games, the candidate network and policy against the current ones, on
-   8 runners. Each deal is played twice with the same decks and shuffles, the bots swapping
-   seats, which cancels most of the luck of the draw (`tools/ml/arena.py`). The candidate is
-   kept only if its average pair score is at least 0.52 and more than one standard error above
-   0.5; the commit message carries the reports.
+7. **Arena**: each new part that passed its check is tested alone: the current bots with only
+   that part replaced, against the current bots (so a weak part can't hide behind a strong one).
+   360 bot games on 9 runners, shared out among the parts. Each deal is played twice with the
+   same decks and shuffles, the bots swapping seats, which cancels most of the luck of the draw
+   (`tools/ml/arena.py`). A part is kept only if its average pair score is at least 0.52 and more
+   than one standard error above 0.5; the commit message carries the reports.
 
 Real games come from the app: it follows each finished YGO Omega replay in the real rules core
 (the engine's `follow_replay`, `follow.h`) and uploads what that writes: training positions (the

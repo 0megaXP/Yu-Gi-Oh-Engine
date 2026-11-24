@@ -29,7 +29,7 @@ env:
   ITERATIONS: "200"          # search iterations of the self-play and arena bots
   STRONG_ITERATIONS: "800"   # the last two self-play shards play stronger (fewer, better games)
   TURNS: "12"
-  ARENA_SHARDS: "8"          # arena runners, 4 processes x 5 games each
+  ARENA_SHARDS: "9"          # arena runners, 4 processes x 10 games each, shared out among the new parts
 
 jobs:
   build:
@@ -291,7 +291,7 @@ jobs:
           retention-days: 14
 
   arena:
-    # the bots with the candidate network and policy against the bots with the current ones
+    # each new part (network, policy, non-engine timing) against the current bots
     needs: [build, libraries, train]
     if: always() && needs.train.outputs.arena == 'yes'
     runs-on: ubuntu-latest
@@ -317,12 +317,23 @@ jobs:
         run: |
           chmod +x build/ygoe-cli
           decks=$(ls decks/*.ydk | sort -u)
-          new_net="none"; [ -f candidate/value_net.json ] && new_net="candidate/value_net.json"
-          old_net="none"; [ -f data/value_net.json ] && old_net="data/value_net.json"
-          new_pol="none"; [ -f candidate/policy.json ] && new_pol="candidate/policy.json"
-          old_pol="none"; [ -f data/policy.json ] && old_pol="data/policy.json"
-          new_t="none"; [ -f candidate/nonengine_timing.json ] && new_t="candidate/nonengine_timing.json"
-          old_t="none"; [ -f data/nonengine_timing.json ] && old_t="data/nonengine_timing.json"
+          # each new part is tested alone: the current bots, with only that part replaced, against
+          # the current bots (the runners are shared out among the parts in turn)
+          part=$(python3 -c "
+          import json
+          c = json.load(open('candidate/changed.json'))
+          parts = [k for k in ('value_net', 'policy', 'nonengine_timing') if c.get(k)]
+          print(parts[(${{ matrix.shard }} - 1) % len(parts)] if parts else '')")
+          [ -z "$part" ] && exit 0
+          cur() { [ -f "data/$1.json" ] && echo "data/$1.json" || echo none; }
+          old_net=$(cur value_net); old_pol=$(cur policy); old_t=$(cur nonengine_timing)
+          new_net=$old_net; new_pol=$old_pol; new_t=$old_t
+          case "$part" in
+            value_net) new_net=candidate/value_net.json ;;
+            policy) new_pol=candidate/policy.json ;;
+            nonengine_timing) new_t=candidate/nonengine_timing.json ;;
+          esac
+          echo "testing the new $part"
           extra=""
           [ -f app/app-policy.json ] && extra="--phone-policy app/app-policy.json"
           mkdir -p arena
@@ -331,7 +342,7 @@ jobs:
             build/ygoe-cli arena $decks --games 10 --net "$new_net" --vs "$old_net" --policy "$new_pol" --vs-policy "$old_pol" \
               --ne-timing "$new_t" --vs-ne-timing "$old_t" \
               --libraries libs $extra --iterations "$ITERATIONS" --turns "$TURNS" --seed "$seed" \
-              --out "arena/arena-$seed.json" > "arena/arena-$seed.txt" 2>&1 &
+              --out "arena/arena-$part-$seed.json" > "arena/arena-$part-$seed.txt" 2>&1 &
           done
           wait
           tail -n 1 arena/arena-*.txt
@@ -369,18 +380,18 @@ jobs:
             cp candidate/nonengine_values.json data/nonengine_values.json
             if [ -n "$(git status --porcelain -- data/nonengine_values.json)" ]; then changed="non-engine values"; fi
           fi
-          if [ "${{ needs.train.outputs.arena }}" = "yes" ] && python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['keep'] else 1)"; then
-            won=$(python3 -c "import json; c=json.load(open('candidate/changed.json')); print(', '.join(n for k, n in (('value_net', 'value network'), ('policy', 'move policy'), ('nonengine_timing', 'non-engine timing')) if c[k]))")
+          won=""
+          if [ "${{ needs.train.outputs.arena }}" = "yes" ]; then
             for f in value_net policy nonengine_timing; do
-              if python3 -c "import json,sys; sys.exit(0 if json.load(open('candidate/changed.json'))['$f'] else 1)"; then
+              if python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['parts'].get('$f', {}).get('keep') else 1)"; then
                 cp "candidate/$f.json" "data/$f.json"
+                score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['parts']['$f']['score'], 3))")
+                won="$won${won:+, }$(echo $f | sed 's/value_net/value network/;s/policy/move policy/;s/nonengine_timing/non-engine timing/') ($score)"
               fi
             done
-            score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['score'], 3))")
-            changed="$won (arena score $score)${changed:+, $changed}"
-          else
-            echo "no candidate, or not clearly better: keeping the current network, policy and timing"
           fi
+          [ -z "$won" ] && echo "nothing new clearly better: keeping the current network, policy and timing"
+          changed="$won${won:+${changed:+, }}$changed"
           if [ -n "$changed" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"

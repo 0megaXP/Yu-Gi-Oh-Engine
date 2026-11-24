@@ -48,14 +48,17 @@ std::string error_json(const std::string& msg) { return "{\"error\":" + quote(ms
 // The policy a request passes (the app's own, learned on the phone), plus the one learned on
 // GitHub (data/policy.json): the weights of both, added. Either alone when the other is missing.
 std::shared_ptr<const Policy> read_policy(const Value& v, const CardDB& db) {
-	auto base = db.policy();
-	if(!v.is_object())
-		return base;
-	auto p = std::make_shared<Policy>(db);
-	if(!p->from_value(v) || !p->trained())
-		return base;
-	if(base)
-		p->add(*base);
+	std::shared_ptr<Policy> p;
+	if(v.is_object()) {
+		auto q = std::make_shared<Policy>(db);
+		if(q->from_value(v) && q->trained())
+			p = q;
+	}
+	if(auto base = db.policy()) {
+		if(!p)
+			p = std::make_shared<Policy>(db);
+		p->add(*base, Policy::kSelfPlayScale);
+	}
 	return p;
 }
 

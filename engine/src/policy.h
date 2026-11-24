@@ -62,8 +62,12 @@ public:
 	std::pair<double, double> train(const std::vector<PolicyExample>& examples, int epochs = 8, double rate = 0.1,
 	                                double l2 = 1e-4);
 
-	// Adds another policy's weights to this one's (two learned corrections in one).
-	void add(const Policy& other);
+	// Adds another policy's weights to this one's (two learned corrections in one), times `scale`.
+	void add(const Policy& other, double scale = 1.0);
+	// How much of the policy learned on GitHub from self-play searches (data/policy.json) the
+	// bots use: half its weights, so it nudges the search rather than steering it while it is
+	// still learning from the bots' own searches.
+	static constexpr double kSelfPlayScale = 0.5;
 	// The average log-loss on `examples` (lower is better).
 	double loss_of(const std::vector<PolicyExample>& examples) const { return loss(examples); }
 

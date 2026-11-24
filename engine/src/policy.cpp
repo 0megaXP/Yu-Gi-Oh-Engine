@@ -174,9 +174,9 @@ std::pair<double, double> Policy::train(const std::vector<PolicyExample>& exampl
 	return {before, loss(examples)};
 }
 
-void Policy::add(const Policy& other) {
+void Policy::add(const Policy& other, double scale) {
 	for(size_t i = 0; i < w_.size() && i < other.w_.size(); ++i)
-		w_[i] += other.w_[i];
+		w_[i] += static_cast<float>(scale * other.w_[i]);
 	trained_ = trained_ || other.trained_;
 	seen_ += other.seen_;
 }

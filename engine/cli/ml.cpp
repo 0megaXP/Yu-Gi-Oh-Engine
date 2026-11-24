@@ -98,15 +98,18 @@ std::shared_ptr<const ValueNet> net_from(const std::string& path, const CardDB& 
 // The policy a bot uses: `path` ("" the data folder's, "none" none) plus the app's (`phone`).
 std::shared_ptr<const Policy> policy_from(const std::string& path, const std::string& phone, const CardDB& db) {
 	std::shared_ptr<Policy> p;
+	// the self-play policy at Policy::kSelfPlayScale, as every search in the engine uses it
 	if(path.empty()) {
 		if(db.policy()) {
 			p = std::make_shared<Policy>(db);
-			p->add(*db.policy());
+			p->add(*db.policy(), Policy::kSelfPlayScale);
 		}
 	} else if(path != "none") {
-		auto q = std::make_shared<Policy>(db);
-		if(q->from_json(read_file(path)) && q->trained())
-			p = q;
+		Policy q(db);
+		if(q.from_json(read_file(path)) && q.trained()) {
+			p = std::make_shared<Policy>(db);
+			p->add(q, Policy::kSelfPlayScale);
+		}
 	}
 	if(!phone.empty()) {
 		Policy ph(db);
