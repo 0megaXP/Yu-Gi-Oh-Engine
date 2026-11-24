@@ -29,11 +29,14 @@
 //     game cut at --turns by the evaluator's win chance) and writes each pair's score.
 //
 //   ygoe-cli library <deck.ydk> --out lib.json [--hands 40] [--iterations 1500] [--seed S] [--pieces p.json]
-//                    [--carry earlier.json --carry-out next.json | --carry-dir DIR] [--max-pieces 400]
+//                    [--pool pool.json --new-out new.json] [--max-pieces 400]
 //     Combo pieces for a deck's bot: the best lines of many opening hands found by deep search
-//     (reference.h), added to those of earlier runs (--carry, written by --carry-out: the
-//     library grows run after run, the most played pieces kept), plus the pieces of --pieces
-//     (the app's, from replays and videos) that the deck can play.
+//     (reference.h), with those of the format's shared pool the deck can play (--pool: what
+//     every deck's earlier runs found; --new-out writes this run's for it), the most played
+//     kept, plus the pieces of --pieces (the app's, from replays and videos) the deck can play.
+//
+//   ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 5000]
+//     The shared pool with the run's new pieces added (the same piece counts its lines together).
 //
 //   ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json] [--epochs 4] [--report r.json]
 //     Trains the move policy on self-play examples; 15% of the games are held out, and the report
@@ -714,40 +717,52 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 		std::fflush(stdout);
 	});
 	std::vector<LibraryPiece> lib = res.library;
-	// the lines found by earlier runs for this deck (--carry: their own pieces, without the
-	// app's): this run's are added to them, so the library grows run after run
-	size_t carried = 0;
-	int lines = static_cast<int>(res.samples.size());
-	// --carry-dir: the deck's archetype's file there (any deck: an archetype keeps its lines when
-	// a newer list of it is played; one without an archetype goes by its file name)
-	std::string carry = opt.count("carry") ? opt.at("carry") : "", carry_out = opt.count("carry-out") ? opt.at("carry-out") : "";
-	if(opt.count("carry-dir")) {
-		const uint16_t arch = archetype_key(db, d);
-		std::error_code ec;
-		std::filesystem::create_directories(opt.at("carry-dir"), ec);
-		carry = carry_out = opt.at("carry-dir") + "/library-" + (arch ? std::to_string(arch) : base_name(deck_path)) + ".json";
-		std::printf("library carried in %s\n", carry.c_str());
-	}
-	if(!carry.empty() && std::ifstream(carry).good()) {
-		const std::string text = read_file(carry);
-		const json::Value v = json::Value::parse(text);
+	const int run_lines = static_cast<int>(res.samples.size());
+	// --new-out: this run's own pieces, for the format's shared pool (ygoe-cli pool-merge)
+	if(opt.count("new-out"))
+		std::ofstream(opt.at("new-out")) << "{\"lines\":" << run_lines << ",\"pieces\":" << library_json(db, res.library, run_lines) << "}";
+	// --pool: the pieces the earlier runs of every deck found (the shared pool): all those this
+	// deck can play, whichever deck or archetype found them (an Elfnote deck's Power Patron
+	// lines reach the Power Patron decks, a hybrid gets the lines of each of its engines)
+	size_t pooled = 0;
+	if(opt.count("pool") && std::ifstream(opt.at("pool")).good()) {
+		const json::Value v = json::Value::parse(read_file(opt.at("pool")));
 		auto earlier = playable_by(db, d, parse_library(db, v.is_object() ? v["pieces"] : v));
-		carried = earlier.size();
-		if(v.is_object())
-			lines += static_cast<int>(v["lines"].integer(0));
+		pooled = earlier.size();
 		merge_library(lib, earlier);
 	}
 	sort_library(lib, static_cast<size_t>(std::stoi(get("max-pieces", "400"))));
-	if(!carry_out.empty())
-		std::ofstream(carry_out) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, lib, lines) << "}";
 	const size_t own = lib.size();
 	if(opt.count("pieces")) {
 		auto more = playable_by(db, d, parse_library(db, read_file(opt.at("pieces"))));
 		lib.insert(lib.end(), more.begin(), more.end());
 	}
 	std::ofstream(get("out", base_name(deck_path) + ".json")) << library_json(db, lib, static_cast<int>(res.samples.size()));
-	std::printf("%zu pieces from %d lines (%zu this run, %zu pieces from earlier runs), %zu from the app's replays and videos\n", own,
-	            lines, res.samples.size(), carried, lib.size() - own);
+	std::printf("%zu pieces: from %d lines this run and %zu the shared pool has that it can play; %zu from the app's replays and videos\n",
+	            own, run_lines, pooled, lib.size() - own);
+	return 0;
+}
+
+// ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 5000]: the format's shared
+// pool of combo pieces, with the pieces the decks found in this run (library --new-out) added.
+int run_pool_merge(const std::vector<std::string>& files, const CardDB& db, const Opts& opt) {
+	std::vector<LibraryPiece> pool;
+	long lines = 0;
+	size_t added = 0;
+	for(size_t i = 0; i < files.size(); ++i) {
+		if(!std::ifstream(files[i]).good())
+			continue;  // no pool yet
+		const json::Value v = json::Value::parse(read_file(files[i]));
+		auto more = parse_library(db, v.is_object() ? v["pieces"] : v);
+		if(v.is_object())
+			lines += v["lines"].integer(0);
+		if(i > 0)
+			added += more.size();
+		merge_library(pool, more);
+	}
+	sort_library(pool, static_cast<size_t>(std::stoi(opt_get(opt, "max", "5000"))));
+	std::ofstream(opt_get(opt, "out", "pool.json")) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, pool, static_cast<int>(lines)) << "}";
+	std::printf("shared pool: %zu pieces from %ld lines (%zu pieces found this run)\n", pool.size(), lines, added);
 	return 0;
 }
 

@@ -76,12 +76,14 @@ what they stop and their measured value.
    library. The run's `meta/report.json` (in the `engine` artifact) has both rankings.
 2. **Combo pieces**: for each deck in `decks/`, `ygoe-cli library` searches 40 opening hands
    deeply and splits the best lines into pieces, adding the app's pieces the deck can play. The
-   bots use them as the app's bots use a deck's reference boards. Every deck's library grows
-   run after run: the pieces earlier runs found for its archetype (`library-<archetype>.json` in
-   `ml-data`, by the engine's archetype key, so a newer list of the archetype keeps them and
-   skips the pieces it can't play) are merged with the run's (the same piece seen again counts
-   its lines together and keeps the example from the best line), the 400 most played kept.
-   Two lists of one archetype in a run: the last to finish writes the file.
+   bots use them as the app's bots use a deck's reference boards. The libraries grow run after
+   run through the format's shared pool (`combo-pool.json` in `ml-data`): each deck gets every
+   pooled piece it can play, whichever deck found it (an Elfnote deck's Power Patron lines reach
+   the Power Patron decks, a deck mixing archetypes gets the lines of each, a newer list of an
+   archetype starts from its older lists' lines), merged with the run's (the same piece seen
+   again counts its lines together and keeps the example from the best line), its 400 most
+   played kept. The **pool** job then adds every deck's new pieces to the pool
+   (`ygoe-cli pool-merge`, the 5000 most played kept).
 3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 3.5 hours: game 1 with a
    coin flip for who goes first, then the loser chooses to go first or second (by the measured
    win rates of its deck in that matchup going first and second, see Values; a fifth of the

@@ -125,21 +125,52 @@ jobs:
           name=$(basename "${{ matrix.deck }}" .ydk)
           pieces=""
           [ -f app/app-pieces.json ] && pieces="--pieces app/app-pieces.json"
-          mkdir -p libs carry
-          # the lines earlier runs found for the deck's archetype (library-<archetype>.json in
-          # ml-data): this run's 40 hands are added to them, so every deck's library grows
-          gh release download ml-data --pattern 'library-*.json' --dir carry 2>/dev/null || true
+          mkdir -p libs newpieces
+          # the format's shared pool of pieces (combo-pool.json in ml-data: what every deck's
+          # earlier runs found): the deck gets all it can play, whichever deck found them, with
+          # this run's 40 hands; this run's go to the pool job
+          gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
           build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces \
-            --carry-dir carry --out "libs/$name.json" > lib.txt
-          grep -v "^hand " lib.txt
-          f=$(sed -n 's/^library carried in //p' lib.txt)
-          if [ -n "$f" ] && [ -f "$f" ]; then gh release upload ml-data "$f" --clobber; fi
+            --pool combo-pool.json --new-out "newpieces/$name.json" --out "libs/$name.json" | grep -v "^hand " | tail -n 3
           echo "name=$name" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: library-${{ env.name }}
           path: libs/
           retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: newpieces-${{ env.name }}
+          path: newpieces/
+          retention-days: 3
+
+  pool:
+    # the shared pool grows by every deck's new pieces (one writer: nothing is overwritten)
+    needs: [build, libraries]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: newpieces-*
+          path: newpieces
+          merge-multiple: true
+      - name: Add the run's pieces to the pool
+        run: |
+          chmod +x build/ygoe-cli
+          gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
+          if ls newpieces/*.json > /dev/null 2>&1; then
+            build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --out combo-pool.json
+            gh release upload ml-data combo-pool.json --clobber
+          fi
 
   selfplay:
     needs: [build, libraries]
