@@ -559,11 +559,12 @@ int LiveDuel::choose(BotLevel level) {
 				}
 				Board b = duel_->board();
 				int mine = 0;
+				// (not counting one whose once-per-turn use is spent this turn: a second Ash after the first)
 				for(const auto& c : b.hand[d.player])
-					if(c.code && eval_->role(d.player, c.code).hand_trap)
+					if(c.code && !c.spent() && eval_->role(d.player, c.code).hand_trap)
 						++mine;
 				for(const auto& c : b.szone[d.player])
-					if(c.code && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
+					if(c.code && !c.spent() && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
 						++mine;
 				if(mine >= know.plays - theirs)
 					margin = 0.0;
@@ -624,10 +625,10 @@ int LiveDuel::choose(BotLevel level) {
 				}
 				Board b = duel_->board();
 				for(const auto& c : b.hand[d.player])
-					if(c.code && eval_->role(d.player, c.code).hand_trap)
+					if(c.code && !c.spent() && eval_->role(d.player, c.code).hand_trap)
 						++ns.my_interruptions;
 				for(const auto& c : b.szone[d.player])
-					if(c.code && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
+					if(c.code && !c.spent() && (c.pos & POS_FACEDOWN) && !eval_->role(d.player, c.code).interrupts.empty())
 						++ns.my_interruptions;
 				ns.their_hand = static_cast<int>(b.hand[o2].size());
 				ns.their_field = b.count_field(o2);
@@ -782,10 +783,18 @@ int LiveDuel::choose(BotLevel level) {
 			}
 		}
 		auto b = duel_->board();
-		std::string hand;
+		auto opt = [](const CardView& c) {
+			return c.opt_total ? " [once per turn: " + std::to_string(c.opt_left) + "/" + std::to_string(c.opt_total) + " left]" : std::string();
+		};
+		std::string hand, field;
 		for(auto& c : b.hand[d.player])
-			hand += db_.name(c.code) + "; ";
-		fprintf(stderr, "   hand: %s\n", hand.c_str());
+			hand += db_.name(c.code) + opt(c) + "; ";
+		for(int pl = 0; pl < 2; ++pl)
+			for(const auto* z : {&b.mzone[pl], &b.szone[pl]})
+				for(auto& c : *z)
+					if(c.code)
+						field += "P" + std::to_string(pl) + " " + db_.name(c.code) + opt(c) + "; ";
+		fprintf(stderr, "   hand: %s\n   field: %s\n", hand.c_str(), field.c_str());
 	}
 	plan_.clear();
 	plan_pos_ = 0;
@@ -870,7 +879,8 @@ bool LiveDuel::unused_summon(const Decision& d, const std::string& label, const 
 
 bool LiveDuel::live_target(uint8_t p) const {
 	// A face-up card of `p` with an effect it can still activate this turn (an ignition one on its
-	// own turn, a quick or trigger one), or a lasting one while it is on the field.
+	// own turn, a quick or trigger one, not a once-per-turn one it has used), or a lasting one while
+	// it is on the field.
 	// (EFFECT_TYPE_*; an effect without a range, like a summon trigger, has already happened by now)
 	constexpr uint32_t kIgnition = 0x40, kTriggerO = 0x80, kQuickO = 0x100, kTriggerF = 0x200, kQuickF = 0x400, kField = 0x2,
 	                   kContinuous = 0x800;
@@ -882,9 +892,13 @@ bool LiveDuel::live_target(uint8_t p) const {
 			const CardInfo* ci = db_.get(db_.script_id(c.code));
 			if(!ci)
 				continue;
+			// what of its once-per-turn effects is left this turn (the rules core's count)
+			const bool limited_left = c.opt_left > 0;
 			for(const auto& e : ci->effects) {
 				if(!(e.range & (LOCATION_MZONE | LOCATION_SZONE)))
 					continue;
+				if(e.count_limit > 0 && !limited_left && (e.type & (kIgnition | kQuickO | kQuickF | kTriggerO | kTriggerF)))
+					continue;  // a once-per-turn effect already used this turn
 				if((e.type & (kQuickO | kQuickF | kTriggerO | kTriggerF | kField | kContinuous)) ||
 				   ((e.type & kIgnition) && duel_->turn_player() == p))
 					return true;

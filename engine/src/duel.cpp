@@ -1407,11 +1407,23 @@ Board Duel::board(bool include_decks) const {
 			out.push_back(std::move(cv));
 		}
 	};
+	// what is left of each card's once-per-turn effects this turn
+	auto limits = [&](uint8_t p, uint8_t loc, std::vector<CardView>& v) {
+		for(auto& cv : v) {
+			const uint32_t x = OCG_DuelEffectsLeft(duel_, p, loc, cv.seq);
+			cv.opt_total = static_cast<uint8_t>(std::min<uint32_t>(x & 0xffff, 255));
+			cv.opt_left = static_cast<uint8_t>(std::min<uint32_t>(x >> 16, 255));
+		}
+	};
 	for(uint8_t p = 0; p < 2; ++p) {
 		query(p, LOCATION_HAND, b.hand[p]);
 		query(p, LOCATION_MZONE, b.mzone[p]);
 		query(p, LOCATION_SZONE, b.szone[p]);
 		query(p, LOCATION_GRAVE, b.grave[p]);
+		limits(p, LOCATION_HAND, b.hand[p]);
+		limits(p, LOCATION_MZONE, b.mzone[p]);
+		limits(p, LOCATION_SZONE, b.szone[p]);
+		limits(p, LOCATION_GRAVE, b.grave[p]);
 		query(p, LOCATION_REMOVED, b.banished[p]);
 		query(p, LOCATION_EXTRA, b.extra[p]);
 		if(include_decks)

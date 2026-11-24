@@ -1,0 +1,48 @@
+--- a/ocgapi.cpp	2026-11-25 03:40:12.894131284 +0800
++++ b/ocgapi.cpp	2026-11-25 03:40:12.913437598 +0800
+@@ -388,3 +388,32 @@
+ 	field.reset_sequence(team, LOCATION_DECK);
+ 	field.reset_sequence(team, LOCATION_HAND);
+ }
++
++uint32_t OCG_DuelEffectsLeft(OCG_Duel ocg_duel, uint8_t team, uint8_t location, uint32_t sequence) {
++	auto* pduel = static_cast<duel*>(ocg_duel);
++	if(!pduel || team > 1)
++		return 0;
++	auto& pl = pduel->game_field->player[team];
++	card* pcard = nullptr;
++	if(location == LOCATION_HAND) {
++		if(sequence < pl.list_hand.size())
++			pcard = pl.list_hand[sequence];
++	} else if(location == LOCATION_GRAVE) {
++		if(sequence < pl.list_grave.size())
++			pcard = pl.list_grave[sequence];
++	} else {
++		pcard = pduel->game_field->get_field_card(team, location, sequence);
++	}
++	if(!pcard)
++		return 0;
++	uint32_t limited = 0, left = 0;
++	for(const auto& entry : pcard->indexer) {
++		const effect* peffect = entry.first;
++		if(!(peffect->type & EFFECT_TYPE_ACTIONS) || !peffect->has_count_limit())
++			continue;
++		++limited;
++		if(peffect->check_count_limit(team))
++			++left;
++	}
++	return std::min<uint32_t>(limited, 0xffff) | std::min<uint32_t>(left, 0xffff) << 16;
++}
+--- a/ocgapi.h	2026-11-25 03:40:12.894157508 +0800
++++ b/ocgapi.h	2026-11-25 03:40:12.913463351 +0800
+@@ -48,6 +48,10 @@
+    (0: not). No message. */
+ OCGAPI void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, const uint32_t* deck,
+                               uint32_t deck_count, uint64_t seed);
++/* ygoe: the count-limited effects ("once per turn", hard or soft) of the card of `team` at
++   `location` / `sequence` (hand, GY, Monster or Spell & Trap Zone): how many it has (low 16 bits)
++   and how many can still be used this turn (high 16 bits). */
++OCGAPI uint32_t OCG_DuelEffectsLeft(OCG_Duel ocg_duel, uint8_t team, uint8_t location, uint32_t sequence);
+ 
+ OCGAPI uint32_t OCG_DuelQueryCount(OCG_Duel ocg_duel, uint8_t team, uint32_t loc);
+ OCGAPI void* OCG_DuelQuery(OCG_Duel ocg_duel, uint32_t* length, const OCG_QueryInfo* info_ptr);

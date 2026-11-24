@@ -25,6 +25,13 @@ echo "== bridges (reach.h): Elfnote joins its Power Patron cards"
 build/ygoe-cli bridges examples/decks/elfnote_koller_wien_2026-11.ydk --reach data/reach.tsv | grep -q '"bridges":\[{'
 echo "== triggers (trigger.h): Artmage Diactorus floats when destroyed"
 build/ygoe-cli triggers 27184601 | grep -q "destroyed from the Monster Zone"
+echo "== once per turn: the rules core's count of what is left reaches the board"
+YGOE_BOT_DEBUG=1 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --turns 1 --seed 3 > /dev/null 2> "$OUT/opt.txt"
+python3 -c "
+import re,sys
+used=[m for m in re.findall(r'once per turn: (\d+)/(\d+) left', open(sys.argv[1], errors='replace').read()) if int(m[0]) < int(m[1])]
+sys.exit(0 if used else 'no card showed a once-per-turn effect used')" "$OUT/opt.txt"
 echo "== JSON API"
 for call in analyze profile side; do
   build/ygoe-cli json "$call" "examples/request_$call.json" > "$OUT/$call.json"

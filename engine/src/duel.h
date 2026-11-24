@@ -110,6 +110,11 @@ struct CardView {
 	bool is_public = false;
 	uint8_t owner = 0;
 	std::vector<uint32_t> overlay;
+	// Its count-limited effects ("once per turn", hard or soft) and how many can still be used
+	// this turn, from the rules core (hand, Monster and Spell & Trap Zones, GY).
+	uint8_t opt_total = 0, opt_left = 0;
+	// Every once-per-turn effect it has is used up for this turn.
+	bool spent() const { return opt_total > 0 && opt_left == 0; }
 };
 
 struct Board {

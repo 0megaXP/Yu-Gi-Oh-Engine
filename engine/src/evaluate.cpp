@@ -137,6 +137,17 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 				}
 			}
 			double total = best + 0.35 * second;
+			// Its once-per-turn uses already spent this turn, during the other player's turn (the
+			// one it would interrupt): little left of it until that turn ends (they come back on
+			// later turns). Only when all of its interruptions here are once per turn.
+			if(cv.opt_total > 0 && b.turn_player != p && best_in) {
+				bool all_once = true;
+				for(const auto& in : r.interrupts)
+					if(in.range & loc)
+						all_once &= in.once;
+				if(all_once)
+					total *= 0.2 + 0.8 * double(cv.opt_left) / cv.opt_total;
+			}
 			if(!defending)
 				total *= 0.35;  // on your own turn they mostly protect the combo
 			if(want_notes && best_in && defending)
