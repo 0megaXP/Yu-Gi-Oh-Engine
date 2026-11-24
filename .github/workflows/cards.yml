@@ -1,0 +1,19 @@
+name: Card ids
+# What card ids the engine doesn't know are (tools/card_ids.py): prints data/passcode_map.tsv rows.
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "Card ids, separated by spaces"
+        required: true
+permissions:
+  contents: read
+jobs:
+  look-up:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look the ids up
+        run: |
+          git clone -q --depth 1 https://github.com/ProjectIgnis/BabelCDB babel
+          python3 tools/card_ids.py babel ${{ github.event.inputs.ids }}
