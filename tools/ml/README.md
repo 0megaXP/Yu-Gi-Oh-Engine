@@ -60,6 +60,13 @@ what they stop and their measured value.
 1. **The app's data**: real games the YGO Sandbox app re-played from the player's YGO Omega
    replays (`replays-*.jsonl.gz` in the `ml-data` release, see below), its combo pieces from
    replays and videos (`app-pieces.json`) and its move policy (`app-policy.json`).
+1b. **The format's decks** (`tools/ml/meta.py`): YGOPRODeck's TCG tournament top cuts of the
+   last 3 weeks, by archetype. Results: each list scores its placement (Winner 4, Runner-Up 3,
+   Top 4 2, Top 8 1, lower 0.5) times the event's size (1 + log2(players / 32), at least 0.5).
+   Usage: how many top-cut lists. The decks played are the 3 best archetypes by results, then
+   the 5 most used of the others, each as its best scoring list; `decks/` is updated with them
+   (and kept as it is when the site can't be read). All the window's lists go into the deck
+   library. The run's `meta/report.json` (in the `engine` artifact) has both rankings.
 2. **Combo pieces**: for each deck in `decks/`, `ygoe-cli library` searches 40 opening hands
    deeply and splits the best lines into pieces, adding the app's pieces the deck can play. The
    bots use them as the app's bots use a deck's reference boards.
@@ -81,7 +88,7 @@ what they stop and their measured value.
    returned to the hand or revealed stay known. (Before, only turn 1 was guessed.)
    Nor do they know the other player's list: each guess draws their unseen cards from a deck
    picked by how likely it is given the cards they have shown (`engine/src/guess.h`), out of
-   the deck library `data/deck_library.json` (the top cuts in `decks/` and the decks of the
+   the deck library `data/deck_library.json` (the last 3 weeks' top-cut lists and the decks of the
    app's real games, weighted by how often they were met; `tools/ml/decklib.py`, rebuilt and
    committed every run), or a "rogue" deck (the cards seen, their archetype, the staples).
 4. **Labels**: a finished game's result is 1 / 0. A game cut at turn 12 is labelled with the

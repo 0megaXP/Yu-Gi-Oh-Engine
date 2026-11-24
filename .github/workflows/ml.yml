@@ -48,13 +48,26 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
           cmake --build build -j4 --target ygoe-cli
+      - name: The format's decks (last 3 weeks of top cuts)
+        run: |
+          # the 3 best archetypes by results, then the 5 most used of the others (tools/ml/meta.py);
+          # the decks in the repo when the site can't be read
+          mkdir -p format meta
+          if python3 tools/ml/meta.py --out-decks format --out-lists meta/lists.json --report meta/report.json; then
+            echo "decks picked from YGOPRODeck's top cuts"
+          else
+            rm -f format/*.ydk meta/lists.json
+            cp decks/*.ydk format/
+            echo "keeping the decks in decks/"
+          fi
+          ls format
       - name: Shard and deck lists
         id: lists
         run: |
           n="${{ github.event.inputs.shards || '8' }}"
           echo "shards=$(python3 -c "import json;print(json.dumps(list(range(1, $n + 1))))")" >> "$GITHUB_OUTPUT"
           echo "arena=$(python3 -c "import json;print(json.dumps(list(range(1, $ARENA_SHARDS + 1))))")" >> "$GITHUB_OUTPUT"
-          echo "decks=$(ls decks/*.ydk | sort -u | python3 -c "import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")" >> "$GITHUB_OUTPUT"
+          echo "decks=$(ls format/*.ydk | sort -u | python3 -c "import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")" >> "$GITHUB_OUTPUT"
       - name: The app's real games, pieces and policy
         run: |
           # real games: what the YGO Sandbox app made from players' YGO Omega replays
@@ -66,7 +79,7 @@ jobs:
           python3 tools/ml/replays.py replays app/replays.jsonl app/starts.jsonl
           ls -la app
           # the decks the bots guess the opponent's from: the top cuts and the real games' decks
-          python3 tools/ml/decklib.py decks --starts app/starts.jsonl --out data/deck_library.json
+          python3 tools/ml/decklib.py format --lists meta/lists.json --starts app/starts.jsonl --out data/deck_library.json
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -75,6 +88,8 @@ jobs:
             data/
             third_party/CardScripts/
             app/
+            format/
+            meta/
           retention-days: 2
 
   libraries:
@@ -133,8 +148,8 @@ jobs:
           hours="${{ github.event.inputs.hours || '3.5' }}"
           secs=$(python3 -c "print(int(float('$hours') * 3600))")
           n="${{ github.event.inputs.shards || '8' }}"
-          # the top decks of the current format (decks/: YCS and regional top cuts)
-          decks=$(ls decks/*.ydk | sort -u)
+          # the format's decks (format/: the last 3 weeks' best and most used archetypes, meta.py)
+          decks=$(ls format/*.ydk | sort -u)
           it="$ITERATIONS"
           [ "${{ matrix.shard }}" -gt $(( n - 2 )) ] && [ "$n" -gt 2 ] && it="$STRONG_ITERATIONS"
           extra=""
@@ -337,7 +352,7 @@ jobs:
       - name: Arena
         run: |
           chmod +x build/ygoe-cli
-          decks=$(ls decks/*.ydk | sort -u)
+          decks=$(ls format/*.ydk | sort -u)
           # each new part is tested alone: the current bots, with only that part replaced, against
           # the current bots (the runners are shared out among the parts in turn)
           part=$(python3 -c "
@@ -406,6 +421,14 @@ jobs:
           if [ -f candidate/nonengine_values.json ]; then
             cp candidate/nonengine_values.json data/nonengine_values.json
             if [ -n "$(git status --porcelain -- data/nonengine_values.json)" ]; then changed="non-engine values"; fi
+          fi
+          # the format's decks (meta.py): decks/ follows them
+          if ls built/format/*.ydk > /dev/null 2>&1; then
+            git rm -q --cached decks/*.ydk > /dev/null 2>&1 || true
+            rm -f decks/*.ydk
+            cp built/format/*.ydk decks/
+            git add decks/
+            if [ -n "$(git status --porcelain -- decks/)" ]; then changed="$changed${changed:+, }the format's decks"; fi
           fi
           # the deck library (top cuts and real games' decks): kept every run, like the values
           if [ -f built/data/deck_library.json ]; then

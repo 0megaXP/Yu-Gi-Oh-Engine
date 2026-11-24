@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """The deck library the bots guess the opponent's deck from (engine/src/guess.h).
 
-usage: decklib.py <decks dir> [--starts starts.jsonl] [--cards data/cards.tsv] --out data/deck_library.json
+usage: decklib.py <decks dir> [--lists lists.json] [--starts starts.jsonl] [--cards data/cards.tsv] --out data/deck_library.json
 
-Lists: every .ydk in the decks folder (the format's top cuts: weight 1 each) and the decks of
+Lists: every .ydk in the decks folder (the format's decks: weight 1 each), every top-cut list of
+the last weeks (--lists, from meta.py: weight 1 each, so the archetypes in more top cuts weigh
+more) and the decks of
 real games, from the app's replay start positions (tools/ml/replays.py: each game's two
 decks). A replay list counts once per game it was played in, so the decks met more often weigh
 more. The replays are one player's games, so their own deck is in nearly all of them: a list in
@@ -51,6 +53,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("decks")
     ap.add_argument("--starts")
+    ap.add_argument("--lists")
     ap.add_argument("--cards", default="data/cards.tsv")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -59,6 +62,13 @@ def main():
         name, cards = read_ydk(p)
         if len(cards) >= 20:
             out.append({"name": name, "main": cards, "weight": 1, "src": "top cut"})
+    have = {tuple(sorted(x["main"])) for x in out}
+    if a.lists and os.path.exists(a.lists):
+        for x in json.load(open(a.lists)).get("lists", []):
+            k = tuple(sorted(x.get("main", [])))
+            if len(k) >= 20 and k not in have:
+                have.add(k)
+                out.append({"name": x.get("name", "top cut"), "main": list(x["main"]), "weight": x.get("weight", 1), "src": "top cut"})
     games = collections.defaultdict(set)  # list -> games
     if a.starts and os.path.exists(a.starts):
         for line in open(a.starts):

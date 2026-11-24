@@ -47,9 +47,9 @@ Run the commands from the repository root (or pass `--data` and `--scripts`).
 build/ygoe-cli analyze examples/angelechy_first_practice.txt
 build/ygoe-cli analyze examples/angelechy_first_real.txt --iterations 6000 --samples 16
 build/ygoe-cli analyze examples/angelechy_first_practice.txt --json --out result.json
-build/ygoe-cli profile decks/elfnote_koller_wien_2026-11.ydk
-build/ygoe-cli side decks/angelechy_luna_mardelplata_2026-11.ydk decks/elfnote_koller_wien_2026-11.ydk --simulate 8
-build/ygoe-cli proxy decks/elfnote_koller_wien_2026-11.ydk 5
+build/ygoe-cli profile examples/decks/elfnote_koller_wien_2026-11.ydk
+build/ygoe-cli side examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk --simulate 8
+build/ygoe-cli proxy examples/decks/elfnote_koller_wien_2026-11.ydk 5
 ```
 
 Useful `analyze` options:
@@ -117,10 +117,12 @@ CI (`.github/workflows/build.yml`) runs these and also builds the Android AAR.
 
 | Deck | Source |
 |---|---|
-| `decks/angelechy_luna_mardelplata_2026-11.ydk` | Fernando Luna, Mar Del Plata WCQ Regional Top 8 (2026-11-07) |
-| `decks/elfnote_koller_wien_2026-11.ydk` | Philipp Koller (Ars Magna Elfnote), Wien WCQ Regional Top 8 (2026-11-07) |
+| `examples/decks/angelechy_luna_mardelplata_2026-11.ydk` | Fernando Luna, Mar Del Plata WCQ Regional Top 8 (2026-11-07) |
+| `examples/decks/elfnote_koller_wien_2026-11.ydk` | Philipp Koller (Ars Magna Elfnote), Wien WCQ Regional Top 8 (2026-11-07) |
 
-Both lists come from YGOPRODeck.
+Both lists come from YGOPRODeck. They are the fixed decks of the tests and examples; `decks/`
+holds the format's decks the learning plays, picked again every Learn run from the last 3 weeks
+of top cuts (`tools/ml/meta.py`, see `tools/ml/README.md`).
 
 ## Layout
 
