@@ -210,6 +210,9 @@ jobs:
           # the app: followed here with this engine, so every follower fix counts for all of them
           mkdir -p inputs followed
           gh release download ml-data --pattern 'inputs-*.jsonl.gz' --dir inputs 2>/dev/null || true
+          # games given by hand (tools/ml/inputs/: replays attached in a chat, same format; the
+          # app's uploads of the same games are newer and win)
+          cp tools/ml/inputs/inputs-*.jsonl.gz inputs/ 2>/dev/null || true
           python3 tools/ml/replays.py inputs inputs app/inputs.jsonl
           if [ -s app/inputs.jsonl ]; then
             for k in 1 2 3 4; do
