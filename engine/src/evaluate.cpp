@@ -197,6 +197,9 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 				const CardRole& r = role(p, cv.code);
 				extra = r.passive(LOCATION_MZONE) * (defending ? 1.0 : 0.6) + (r.reusable(LOCATION_MZONE) ? 0.08 : 0.0);
 			}
+			// removing it gives its controller something back (a floater): it holds up better
+			// against the other player's turn
+			extra += role(p, cv.code).floats * (defending ? 1.0 : 0.4);
 			v += body + iv + extra;
 		}
 		for(const auto& cv : b.szone[p]) {
@@ -213,6 +216,7 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			// monster placed as a Continuous Spell that has no Spell-Zone effect) is nearly dead.
 			const CardRole& r = role(p, cv.code);
 			double worth = (cv.status & kStatusDisabled) ? 0 : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 : 0.0);
+			worth += r.floats * (defending ? 1.0 : 0.4);
 			v += std::max(0.05, iv + worth);
 		}
 		// Facing a deck with a column interruption (Infinite Impermanence): a Set or face-up

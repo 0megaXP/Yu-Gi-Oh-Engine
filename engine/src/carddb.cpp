@@ -95,6 +95,14 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		e.category = static_cast<uint32_t>(std::stoull(f[5]));
 		e.property = static_cast<uint32_t>(std::stoull(f[6]));
 		e.count_limit = std::stoi(f[7]);
+		if(f.size() >= 12) {
+			e.reasons = static_cast<uint32_t>(std::stoull(f[8]));
+			e.not_reasons = static_cast<uint32_t>(std::stoull(f[9]));
+			e.prev = static_cast<uint32_t>(std::stoull(f[10]));
+			e.by = static_cast<uint8_t>(std::stoul(f[11]));
+			if(f.size() >= 13)
+				e.now = static_cast<uint32_t>(std::stoull(f[12]));
+		}
 		it->second.effects.push_back(e);
 	}
 

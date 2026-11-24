@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "ocgapi_constants.h"
+#include "trigger.h"
 
 namespace ygoe {
 
@@ -93,7 +94,10 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 		}
 		{
 			uint32_t where = zones(e.range ? e.range : home);
-			if(e.type & (ET_IGNITION | ET_TRIGGER_O | ET_TRIGGER_F | ET_QUICK_O | ET_QUICK_F)) {
+			// (a trigger about the card itself, "if this card is summoned / sent...", is used once,
+			// when it happens: not an effect to use again from the zone)
+			const bool own_trigger = (e.type & 0x1) && (e.type & (ET_TRIGGER_O | ET_TRIGGER_F)) && !e.range;
+			if((e.type & (ET_IGNITION | ET_TRIGGER_O | ET_TRIGGER_F | ET_QUICK_O | ET_QUICK_F)) && !own_trigger) {
 				if(where & LOCATION_MZONE)
 					role.reusable_mzone = true;
 				if(where & LOCATION_SZONE)
@@ -174,6 +178,7 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 			role.interrupts.push_back(in);
 		}
 	}
+	role.floats = floats(*c);
 	bool archetype = false;
 	for(auto s : deck_sets)
 		if(c->has_setcode(s))

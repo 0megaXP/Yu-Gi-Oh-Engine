@@ -4,7 +4,11 @@
 //  1. Reach (probe_card): a card is used in a test duel (from the hand, on the field, in the GY)
 //     whose Deck and Extra Deck hold a large pool of cards; every card its effects can pick from
 //     the Deck, the Extra Deck, the GY or the banishment is noted, with what happened to the one
-//     picked (added to the hand, Special Summoned, sent to the GY). Run over the whole card pool
+//     picked (added to the hand, Special Summoned, sent to the GY). Its triggers (trigger.h) are
+//     made to happen too: a test card (duel.h kProbeCardCode) sends, banishes, destroys, Tributes,
+//     discards, Special Summons or places it, or another card while it watches from its zone, as
+//     an effect or a cost, by either player, as its script asks; it is also used as material for
+//     Extra Deck summons, and the turn is ended for "during the End Phase" ones. Run over the whole card pool
 //     once (`ygoe-cli reachscan`, the Reach workflow) into data/reach.tsv.
 //  2. Materials (probe_materials, per deck): pairs of the deck's monsters on the field, and the
 //     Extra Deck monsters they can be used to summon.

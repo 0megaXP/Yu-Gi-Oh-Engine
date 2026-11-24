@@ -51,6 +51,7 @@ add_library(ygoe STATIC
   engine/src/replay.cpp
   engine/src/follow.cpp
   engine/src/reach.cpp
+  engine/src/trigger.cpp
   engine/src/policy.cpp
   engine/src/combo.cpp
   engine/src/pieces.cpp

@@ -20,6 +20,10 @@ namespace ygoe {
 
 class ScriptCache;
 
+// A card that exists only in the engine's own test duels (reach.cpp's trigger probe): a
+// Continuous Spell whose effect moves a chosen card the way a real card's effect or cost would.
+constexpr uint32_t kProbeCardCode = 0x7ffffe01;
+
 struct PlacedCard {
 	uint32_t code = 0;   // official passcode (remapped to script id internally)
 	uint32_t loc = 0;    // LOCATION_*
@@ -144,6 +148,8 @@ public:
 
 	// Builds the duel from setup and plays it until the first decision.
 	bool start(const DuelSetup& setup, std::string* error = nullptr);
+	// Runs a piece of Lua in the duel (sets globals for kProbeCardCode's script). False on an error.
+	bool run_lua(const std::string& code);
 	// Applies one response; processes until the next decision. Returns false if the core rejected it.
 	bool respond(const std::vector<uint8_t>& response);
 	// Rebuilds a state: start(setup) then respond() each entry. False if any step fails.
@@ -268,6 +274,8 @@ public:
 	explicit ScriptCache(std::string scripts_dir, bool bytecode = true);
 	// Returns the script text, or nullptr when no such script exists.
 	const std::string* get(const std::string& name);
+	// Adds a script that isn't in the scripts folder (kept as source; one of that name stays).
+	void put(const std::string& name, std::string text);
 	bool has_card_script(uint32_t code) { return get("c" + std::to_string(code) + ".lua") != nullptr; }
 
 private:

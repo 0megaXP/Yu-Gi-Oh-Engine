@@ -22,6 +22,7 @@
 #include "api.h"
 #include "follow.h"
 #include "reach.h"
+#include "trigger.h"
 #include "live.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
@@ -92,6 +93,9 @@ int usage() {
 	             "  ygoe-cli nonengine <deck.ydk> [opponent.ydk ...]   (non-engine cards: role, measured value)\n"
 	             "  ygoe-cli library <deck.ydk> --out lib.json [--hands 40 --iterations 1500 --pieces app_pieces.json]\n"
 	             "  ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json --epochs 4 --report r.json]\n"
+	             "  ygoe-cli bridges <deck.ydk> [--reach data/reach.tsv]   (cards taking the deck into another archetype)\n"
+	             "  ygoe-cli reachscan <a.ydk> [b.ydk ...] [--shard I/N] [--out reach.tsv]\n"
+	             "  ygoe-cli triggers <deck.ydk | passcode ...>   (each card's triggers, classified)\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
 	             "  ygoe-cli followall <inputs.jsonl> --out positions.jsonl --summary follows.jsonl [--shard i/n]\n"
 	             "                   (follows the app's uploaded games: one follow request per line)\n"
@@ -351,6 +355,42 @@ int main(int argc, char** argv) {
 		if(a.pos.size() < 2)
 			return usage();
 		return run_policy_train(std::vector<std::string>(a.pos.begin() + 1, a.pos.end()), db, a.opt);
+	}
+	if(cmd == "triggers") {
+		// ygoe-cli triggers deck.ydk | passcode ...: each card's triggers (trigger.h), one per line
+		if(a.pos.size() < 2)
+			return usage();
+		std::vector<uint32_t> codes;
+		for(size_t i = 1; i < a.pos.size(); ++i) {
+			if(a.pos[i].find_first_not_of("0123456789") == std::string::npos) {
+				codes.push_back(static_cast<uint32_t>(std::stoul(a.pos[i])));
+				continue;
+			}
+			Deck d;
+			std::string err;
+			if(!load_ydk(a.pos[i], d, &err)) {
+				std::fprintf(stderr, "%s\n", err.c_str());
+				return 1;
+			}
+			for(const auto* v : {&d.main, &d.extra, &d.side})
+				for(uint32_t c : *v)
+					if(std::find(codes.begin(), codes.end(), c) == codes.end())
+						codes.push_back(c);
+		}
+		for(uint32_t c : codes) {
+			const CardInfo* ci = db.get(db.script_id(c));
+			if(!ci)
+				continue;
+			auto ts = triggers_of(*ci);
+			if(ts.empty())
+				continue;
+			std::printf("%s (%u)\n", db.name(db.script_id(c)).c_str(), c);
+			for(const auto& t : ts)
+				std::printf("  - %s\n", describe(t).c_str());
+			if(double f = floats(*ci))
+				std::printf("  leaves something behind when removed: %.2f\n", f);
+		}
+		return 0;
 	}
 	if(cmd == "bridges" || cmd == "reachscan") {
 		// ygoe-cli bridges deck.ydk [--reach data/reach.tsv]: the deck's bridge cards (reach.h)

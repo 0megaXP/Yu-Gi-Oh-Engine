@@ -2,7 +2,8 @@ name: Reach
 
 # What each card of the format's decks can reach (engine/src/reach.h): every card is used in the
 # rules core against all the cards of decks/ (the format's decks, kept current by Learn), and
-# what its effects can add, summon or send is written to data/reach.tsv, with the Extra Deck
+# what its effects can add, summon or send (also its triggers, made to happen: engine/src/trigger.h)
+# is written to data/reach.tsv, with the Extra Deck
 # monsters pairs of each deck's monsters can be materials for. Bots find their deck's bridge
 # cards from it (cards that take the deck into another of its archetypes). Runs when the decks
 # or the probe change, and weekly (new scripts).
@@ -13,6 +14,8 @@ on:
     paths:
       - decks/**
       - engine/src/reach.*
+      - engine/src/trigger.*
+      - tools/analyze_scripts.py
       - .github/workflows/reach.yml
   schedule:
     - cron: "17 3 * * 1"

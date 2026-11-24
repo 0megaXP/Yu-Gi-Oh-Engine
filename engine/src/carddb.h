@@ -18,6 +18,12 @@ struct EffectInfo {
 	uint32_t category = 0;  // CATEGORY_* bits
 	uint32_t property = 0;  // EFFECT_FLAG_* bits
 	int count_limit = 0;    // 0 = unlimited
+	// A trigger's condition (trigger.h), as tools/analyze_scripts.py read it from the script.
+	uint32_t reasons = 0;      // REASON_* it checks for (any of them)
+	uint32_t not_reasons = 0;  // REASON_* it rules out
+	uint32_t prev = 0;         // LOCATION_* the card had to come from (0: anywhere)
+	uint8_t by = 0;            // whose action: 0 anyone, 1 the card's controller, 2 the opponent
+	uint32_t now = 0;          // LOCATION_* the card has to be in afterwards (0: not checked)
 };
 
 struct CardInfo {

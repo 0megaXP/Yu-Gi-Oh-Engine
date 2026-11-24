@@ -202,6 +202,12 @@ bool ScriptCache::read_source(const std::string& name, std::string& out) {
 	return true;
 }
 
+void ScriptCache::put(const std::string& name, std::string text) {
+	std::lock_guard<std::mutex> lock(mu_);
+	// kept if there is one already: a duel may be loading it (its text must stay where it is)
+	cache_.emplace(name, std::make_unique<std::string>(std::move(text)));
+}
+
 const std::string* ScriptCache::get(const std::string& name) {
 	std::lock_guard<std::mutex> lock(mu_);
 	auto it = cache_.find(name);
@@ -248,6 +254,10 @@ void card_reader(void* payload, uint32_t code, OCG_CardData* data) {
 	auto* c = pl->db->get(code);
 	auto* sets = new uint16_t[5]{};
 	data->setcodes = sets;
+	if(code == kProbeCardCode) {
+		data->type = TYPE_SPELL | TYPE_CONTINUOUS;
+		return;
+	}
 	if(!c)
 		return;
 	data->alias = c->alias;
@@ -402,6 +412,12 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	OCG_StartDuel(duel_);
 	process();
 	return true;
+}
+
+bool Duel::run_lua(const std::string& code) {
+	if(!duel_)
+		return false;
+	return OCG_LoadScript(duel_, code.data(), static_cast<uint32_t>(code.size()), "ygoe_probe") != 0;
 }
 
 bool Duel::respond(const std::vector<uint8_t>& response) {

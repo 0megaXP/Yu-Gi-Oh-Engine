@@ -61,6 +61,10 @@ struct CardRole {
 	// cards, Infinite Impermanence from the hand): with a board it is a dead card there, the
 	// one to pay a discard or "from your hand" cost with.
 	bool needs_empty_field = false;
+	// What it leaves behind when the opponent removes it from the field: its own triggers on being
+	// destroyed, sent to the GY, banished or leaving the field (trigger.h floats). A board of
+	// such monsters loses less to removal.
+	double floats = 0;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };

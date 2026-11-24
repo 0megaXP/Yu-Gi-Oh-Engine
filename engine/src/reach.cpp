@@ -13,6 +13,7 @@
 #include "duel.h"
 #include "json.h"
 #include "ocgapi_constants.h"
+#include "trigger.h"
 
 namespace ygoe {
 
@@ -150,7 +151,8 @@ private:
 };
 
 // Plays out one use of the card: its own options and triggers taken, the first choice elsewhere.
-void drive(Duel& d, uint32_t sid, int max_steps = 60) {
+// `prefer`: a card picked first when a selection offers it (once: the material a summon uses).
+void drive(Duel& d, uint32_t sid, int max_steps = 60, uint32_t prefer = 0) {
 	for(int step = 0; step < max_steps && !d.ended(); ++step) {
 		const Decision& dec = d.decision();
 		if(dec.type == DecisionType::None || dec.options.empty())
@@ -184,6 +186,13 @@ void drive(Duel& d, uint32_t sid, int max_steps = 60) {
 					pick = &o;
 					break;
 				}
+			if(prefer)
+				for(const auto& o : dec.options)
+					if(o.kind == OptKind::Select && o.code == prefer) {
+						pick = &o;
+						prefer = 0;
+						break;
+					}
 			break;
 		default:
 			break;
@@ -209,6 +218,69 @@ void settle(Duel& d) {
 			return;
 	}
 }
+
+// The trigger probe's mover (duel.h kProbeCardCode): a Continuous Spell whose effect (or its
+// cost) moves the card YGOE_CODE in YGOE_LOC the way YGOE_ACT says, as player YGOE_RP did it.
+const char* kMoverScript = R"LUA(
+local s,id=GetID()
+function s.initial_effect(c)
+	local e0=Effect.CreateEffect(c)
+	e0:SetType(EFFECT_TYPE_ACTIVATE)
+	e0:SetCode(EVENT_FREE_CHAIN)
+	c:RegisterEffect(e0)
+	local e1=Effect.CreateEffect(c)
+	e1:SetType(EFFECT_TYPE_IGNITION)
+	e1:SetRange(LOCATION_SZONE)
+	e1:SetCost(s.cost)
+	e1:SetOperation(s.op)
+	c:RegisterEffect(e1)
+end
+function s.subject(e)
+	if not YGOE_CODE then return nil end
+	return Duel.GetFirstMatchingCard(function(tc) return tc:IsCode(YGOE_CODE) and tc~=e:GetHandler() end,0,YGOE_LOC,0,nil)
+end
+function s.act(tc,reason)
+	local rp=YGOE_RP or 0
+	local a=YGOE_ACT
+	if a=="grave" then Duel.SendtoGrave(tc,reason,PLAYER_NONE,rp)
+	elseif a=="discard" then Duel.SendtoGrave(tc,reason|REASON_DISCARD,PLAYER_NONE,rp)
+	elseif a=="banish" then Duel.Remove(tc,POS_FACEUP,reason,PLAYER_NONE,rp)
+	elseif a=="destroy" then Duel.Destroy(tc,reason,LOCATION_GRAVE,rp)
+	elseif a=="release" then Duel.Release(tc,reason,rp)
+	elseif a=="hand" then Duel.SendtoHand(tc,PLAYER_NONE,reason,rp)
+	elseif a=="deck" then Duel.SendtoDeck(tc,PLAYER_NONE,SEQ_DECKSHUFFLE,reason,rp)
+	elseif a=="spsummon" then Duel.SpecialSummon(tc,0,0,0,true,false,POS_FACEUP_ATTACK)
+	elseif a=="place" then Duel.MoveToField(tc,0,0,LOCATION_SZONE,POS_FACEUP,true)
+	end
+end
+function s.cost(e,tp,eg,ep,ev,re,r,rp,chk)
+	if chk==0 then return true end
+	if YGOE_COST then
+		local tc=s.subject(e)
+		if tc then s.act(tc,REASON_COST) end
+	end
+end
+function s.op(e,tp,eg,ep,ev,re,r,rp)
+	if YGOE_COST then return end
+	local tc=s.subject(e)
+	if tc then s.act(tc,REASON_EFFECT) end
+end
+)LUA";
+
+// One way to set a trigger off: where the probed card starts, what the mover does to which card.
+struct TriggerScenario {
+	uint32_t subject_loc = 0;  // LOCATION_* the probed card starts in
+	uint32_t target = 0;       // the card moved (passcode); 0: the probed card itself
+	uint32_t target_loc = 0;   // where that one starts
+	const char* act = "";      // the mover's action (kMoverScript); "" with `material`
+	bool cost = false;         // done as the mover's cost
+	int rp = 0;                // the player doing it
+	bool material = false;     // instead: the probed card on the field used for Extra Deck summons
+	std::string key() const {
+		return std::to_string(subject_loc) + "/" + std::to_string(target) + "/" + std::to_string(target_loc) + "/" + act +
+		       (cost ? "c" : "") + std::to_string(rp) + (material ? "m" : "");
+	}
+};
 
 uint32_t pick_normal(const CardDB& db, const std::vector<uint32_t>& pool, uint32_t attr_not) {
 	for(uint32_t c : pool) {
@@ -325,6 +397,235 @@ std::vector<ReachEdge> probe_card(const CardDB& db, ScriptCache& scripts, uint32
 						add(c, pk.how);
 			// moves its effect didn't choose (the top cards, at random) aren't reach
 		}
+	}
+
+	// Triggers (trigger.h): each way the card's script listens for is made to happen (the card
+	// sent, banished, destroyed, Tributed, discarded, Special Summoned, placed, used as material,
+	// or another card moved while it watches from its zone) and what its triggers reach is noted.
+	scripts.put("c" + std::to_string(kProbeCardCode) + ".lua", kMoverScript);
+	const auto trig = triggers_of(*ci);
+	bool delayed = false;
+	for(const auto& t : trig)
+		delayed |= t.delayed;
+	// a card for "another card" triggers: one of the probed card's archetypes when the pool has
+	// one (most conditions ask for it), else the plain monster
+	auto partner = [&](bool need_monster) -> uint32_t {
+		for(uint32_t c : main_pool) {
+			const CardInfo* pi = db.get(db.script_id(c));
+			if(!pi || c == code || (need_monster && !(pi->type & TYPE_MONSTER)))
+				continue;
+			for(int k = 0; k < 4; ++k)
+				if(uint16_t st = static_cast<uint16_t>((ci->setcode >> (16 * k)) & 0xffff); st && pi->has_setcode(st))
+					return c;
+		}
+		return a;
+	};
+	const uint32_t field = monster ? (uint32_t)LOCATION_MZONE : (uint32_t)LOCATION_SZONE;
+	auto starts = [&](uint32_t from, std::initializer_list<uint32_t> dflt) {
+		std::vector<uint32_t> v;
+		auto ok = [&](uint32_t l) {
+			if(extra && (l & (LOCATION_HAND | LOCATION_DECK)))
+				return false;
+			return !(l == LOCATION_SZONE && monster) && !(l == LOCATION_MZONE && !monster);
+		};
+		const uint32_t f = from ? from : 0;
+		if(f) {
+			for(uint32_t l : {(uint32_t)LOCATION_MZONE, (uint32_t)LOCATION_SZONE, (uint32_t)LOCATION_HAND,
+			                  (uint32_t)LOCATION_DECK, (uint32_t)LOCATION_GRAVE, (uint32_t)LOCATION_REMOVED})
+				if((f & l) || ((l == LOCATION_SZONE) && (f & 0x700)) || ((l == LOCATION_MZONE) && (f & 0x1800)))
+					if(ok(l))
+						v.push_back(l);
+		} else {
+			for(uint32_t l : dflt)
+				if(ok(l == 0 ? field : l))
+					v.push_back(l == 0 ? field : l);
+		}
+		return v;
+	};
+	std::vector<TriggerScenario> plan;
+	std::set<std::string> planned;
+	auto want = [&](TriggerScenario sc) {
+		if(plan.size() < 12 && planned.insert(sc.key()).second)
+			plan.push_back(sc);
+	};
+	for(const auto& t : trig) {
+		const int rp = t.by == 2 ? 1 : 0;
+		const bool cost = (t.reasons & REASON_COST) && !(t.reasons & REASON_EFFECT);
+		if(t.self) {
+			auto each = [&](std::initializer_list<uint32_t> dflt, const char* act, bool as_cost = false) {
+				for(uint32_t l : starts(t.from, dflt))
+					want(TriggerScenario{l, 0, 0, act, as_cost, rp});
+			};
+			switch(t.event) {
+			case TrigEvent::ToGrave:
+				if(t.reasons & REASON_DISCARD)
+					each({LOCATION_HAND}, "discard", cost);
+				else if(t.reasons & REASON_DESTROY)
+					each({0}, "destroy");
+				else
+					each({0, LOCATION_HAND, LOCATION_DECK}, "grave", cost);
+				break;
+			case TrigEvent::Banished: each({LOCATION_GRAVE, 0, LOCATION_HAND}, "banish", cost); break;
+			case TrigEvent::LeftField: each({0}, "grave"); break;
+			case TrigEvent::Destroyed: each({0}, "destroy"); break;
+			case TrigEvent::Tributed: each({0}, "release", cost); break;
+			case TrigEvent::Discarded: each({LOCATION_HAND}, "discard", cost); break;
+			case TrigEvent::ToHand: each({LOCATION_GRAVE, LOCATION_DECK}, "hand"); break;
+			case TrigEvent::ToDeck: each({0, LOCATION_GRAVE}, "deck"); break;
+			case TrigEvent::LeftGrave: each({LOCATION_GRAVE}, "hand"); break;
+			case TrigEvent::Placed: each({LOCATION_HAND, LOCATION_DECK}, "place"); break;
+			case TrigEvent::SpSummoned:
+				if(monster)
+					each({LOCATION_HAND, LOCATION_GRAVE, LOCATION_DECK}, "spsummon");
+				break;
+			case TrigEvent::Material:
+				if(monster && !extra_pool.empty())
+					want(TriggerScenario{LOCATION_MZONE, 0, 0, "", false, 0, true});
+				break;
+			default: break;
+			}
+			continue;
+		}
+		// another card's move, seen from where this card waits
+		uint32_t at = 0;
+		for(uint32_t l : {(uint32_t)LOCATION_MZONE, (uint32_t)LOCATION_SZONE, (uint32_t)LOCATION_GRAVE,
+		                  (uint32_t)LOCATION_REMOVED, (uint32_t)LOCATION_HAND})
+			if(!at && (((t.watch & l) || (l == LOCATION_SZONE && (t.watch & 0x700)) || (l == LOCATION_MZONE && (t.watch & 0x1800)))) &&
+			   !(l == LOCATION_MZONE && !monster) && !(l == LOCATION_SZONE && monster && !(t.watch & 0x700)) &&
+			   !(extra && l == LOCATION_HAND))
+				at = l;
+		if(!at)
+			continue;
+		auto other = [&](std::initializer_list<uint32_t> dflt, const char* act, bool need_monster, bool as_cost = false) {
+			const uint32_t p = partner(need_monster);
+			const CardInfo* pi = db.get(db.script_id(p));
+			const bool pm = pi && (pi->type & TYPE_MONSTER);
+			for(uint32_t l : t.from ? std::vector<uint32_t>{(t.from & LOCATION_ONFIELD) ? (pm ? (uint32_t)LOCATION_MZONE : (uint32_t)LOCATION_SZONE)
+			                                               : (t.from & LOCATION_HAND) ? (uint32_t)LOCATION_HAND
+			                                               : (t.from & LOCATION_GRAVE) ? (uint32_t)LOCATION_GRAVE
+			                                               : (uint32_t)LOCATION_DECK}
+			                        : std::vector<uint32_t>(dflt))
+				want(TriggerScenario{at, p, l == 0 ? (pm ? (uint32_t)LOCATION_MZONE : (uint32_t)LOCATION_SZONE) : l, act, as_cost, rp});
+		};
+		switch(t.event) {
+		case TrigEvent::ToGrave: other({LOCATION_DECK, 0}, "grave", false, cost); break;
+		case TrigEvent::Banished: other({LOCATION_GRAVE}, "banish", false, cost); break;
+		case TrigEvent::LeftField: other({0}, "grave", false); break;
+		case TrigEvent::Destroyed: other({0}, "destroy", false); break;
+		case TrigEvent::Tributed: other({0}, "release", true, cost); break;
+		case TrigEvent::Discarded: other({LOCATION_HAND}, "discard", false, cost); break;
+		case TrigEvent::ToHand: other({LOCATION_DECK}, "hand", false); break;
+		case TrigEvent::ToDeck: other({LOCATION_GRAVE}, "deck", false); break;
+		case TrigEvent::LeftGrave: other({LOCATION_GRAVE}, "hand", false); break;
+		case TrigEvent::Placed: other({LOCATION_HAND}, "place", false); break;
+		case TrigEvent::SpSummoned: other({LOCATION_HAND, LOCATION_GRAVE}, "spsummon", true); break;
+		default: break;
+		}
+	}
+	for(const TriggerScenario& sc : plan) {
+		DuelSetup s;
+		s.seed = {code, 17, 19, 23};
+		auto& p0 = s.players[0];
+		p0.main = main_pool;
+		p0.extra = extra_pool;
+		p0.hand = {a, b};
+		p0.placed = {{a, LOCATION_MZONE, 0, POS_FACEUP_ATTACK}, {b, LOCATION_MZONE, 1, POS_FACEUP_ATTACK},
+		             {kProbeCardCode, LOCATION_SZONE, 4, POS_FACEUP}};
+		for(size_t i = 0; i < gy.size(); ++i)
+			p0.placed.push_back({gy[i], LOCATION_GRAVE, static_cast<uint32_t>(i), POS_FACEUP});
+		s.players[1].main.assign(40, kFiller);
+		uint32_t grave_seq = static_cast<uint32_t>(gy.size()), banish_seq = 0;
+		auto put = [&](uint32_t c, uint32_t loc, uint32_t zone) {
+			const CardInfo* pi = db.get(db.script_id(c));
+			const bool m = pi && (pi->type & TYPE_MONSTER);
+			const bool ex = pi && pi->is_extra_deck();
+			switch(loc) {
+			case LOCATION_HAND: p0.hand.push_back(c); break;
+			case LOCATION_DECK: p0.main.push_back(c); break;
+			case LOCATION_GRAVE: p0.placed.push_back({c, LOCATION_GRAVE, grave_seq++, POS_FACEUP}); break;
+			case LOCATION_REMOVED: p0.placed.push_back({c, LOCATION_REMOVED, banish_seq++, POS_FACEUP}); break;
+			case LOCATION_MZONE: p0.placed.push_back({c, LOCATION_MZONE, zone, POS_FACEUP_ATTACK}); break;
+			default:
+				p0.placed.push_back({c, LOCATION_SZONE, (pi && (pi->type & TYPE_FIELD)) ? 5u : zone, POS_FACEUP});
+				break;
+			}
+			if(ex && !m)
+				return;
+			if(ex && loc != LOCATION_MZONE && loc != LOCATION_GRAVE && loc != LOCATION_REMOVED)
+				p0.extra.push_back(c);
+		};
+		put(code, sc.subject_loc, 2);
+		if(sc.target && !(sc.target == a && sc.target_loc == LOCATION_MZONE))
+			put(sc.target, sc.target_loc, 3);
+		const uint32_t moved = sc.target ? db.script_id(sc.target) : sid;
+		const uint32_t moved_loc = sc.target ? sc.target_loc : sc.subject_loc;
+		auto run = [&](size_t opt_index, bool use_mover) {
+			Duel d(db, scripts);
+			Watch watch(sid);
+			d.set_tap([&](const uint8_t* buf, uint32_t n) { watch.read(buf, n); });
+			if(!d.start(s))
+				return;
+			settle(d);
+			if(d.decision().type != DecisionType::Idle)
+				return;
+			size_t pick = opt_index;
+			if(use_mover) {
+				char lua[160];
+				std::snprintf(lua, sizeof(lua), "YGOE_CODE=%u YGOE_LOC=%u YGOE_ACT=\"%s\" YGOE_COST=%s YGOE_RP=%d", moved,
+				              moved_loc == LOCATION_MZONE || moved_loc == LOCATION_SZONE ? (uint32_t)LOCATION_ONFIELD : moved_loc,
+				              sc.act, sc.cost ? "true" : "false", sc.rp);
+				if(!d.run_lua(lua))
+					return;
+				pick = d.decision().options.size();
+				for(size_t i = 0; i < d.decision().options.size(); ++i) {
+					const Option& o = d.decision().options[i];
+					if(o.kind == OptKind::Activate && o.code == kProbeCardCode) {
+						pick = i;
+						break;
+					}
+				}
+			}
+			if(pick >= d.decision().options.size())
+				return;
+			watch.picks.clear();
+			watch.direct.clear();
+			if(!d.respond(d.decision().options[pick].response))
+				return;
+			drive(d, sid, 80, sc.material ? sid : 0);
+			// "during the End Phase of the turn this card was sent": end the turn and see
+			if(delayed && !d.ended() && d.decision().type == DecisionType::Idle)
+				for(const auto& o : d.decision().options)
+					if(o.kind == OptKind::ToEnd) {
+						if(d.respond(o.response))
+							drive(d, sid, 80);
+						break;
+					}
+			for(const auto& pk : watch.picks)
+				if(pk.how)
+					for(uint32_t c : pk.codes)
+						add(c, pk.how);
+			if(std::getenv("YGOE_REACH_DEBUG"))
+				std::fprintf(stderr, "trigger probe %u %s: %zu picks\n", code, sc.key().c_str(), watch.picks.size());
+		};
+		if(!sc.material) {
+			run(0, true);
+			continue;
+		}
+		// used as material: the Extra Deck summons it can be part of, a few
+		Duel d(db, scripts);
+		if(!d.start(s))
+			continue;
+		settle(d);
+		if(d.decision().type != DecisionType::Idle)
+			continue;
+		std::vector<size_t> summons;
+		for(size_t i = 0; i < d.decision().options.size() && summons.size() < 4; ++i) {
+			const Option& o = d.decision().options[i];
+			if(o.kind == OptKind::SpSummon && (o.loc & LOCATION_EXTRA))
+				summons.push_back(i);
+		}
+		for(size_t i : summons)
+			run(i, false);
 	}
 	return out;
 }

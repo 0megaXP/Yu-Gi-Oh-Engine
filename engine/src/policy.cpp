@@ -1,5 +1,6 @@
 #include <locale>
 #include "policy.h"
+#include "trigger.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,6 +50,11 @@ Policy::Policy(const CardDB& db) : db_(db), w_(kDim, 0.0f) {
 			if(cats & (1u << b))
 				t.push_back(tok('C', static_cast<uint32_t>(b)));
 		t.push_back(tok('N', std::min<uint32_t>(static_cast<uint32_t>(c.effects.size()), 6)));
+		// its triggers (trigger.h): what sets it off, about itself or another card
+		for(const auto& tr : triggers_of(c))
+			t.push_back(tok('G', static_cast<uint32_t>(tr.event) * 2 + (tr.self ? 1u : 0u)));
+		if(floats(c) > 0)
+			t.push_back(tok('F', 1));
 		t.push_back(tok('I', code));  // the card itself: a deck's own patterns
 		tokens_.emplace(code, std::move(t));
 	}

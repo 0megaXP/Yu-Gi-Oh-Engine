@@ -1,4 +1,5 @@
 #include "search.h"
+#include "trigger.h"
 #include "policy.h"
 
 #include <algorithm>
@@ -701,6 +702,9 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				w *= cfg.policy->factor(dd, o, PolicyContext{duel.turn_player(), steps_this_turn, duel.chain_depth()});
 			if(cfg.priorities && dd.player == me)
 				w *= cfg.priorities->factor(dd, o, dd.player == duel.turn_player());
+			// what a cost, discard, material or removal sets off (trigger.h): own triggers first,
+			// the other player's last, GY effects kept out of the banishment
+			w *= selection_factor(db_, dd, o);
 			if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
 				w *= 0.1;
 			// The other player answering an open window (a phase change, nothing on the chain)
