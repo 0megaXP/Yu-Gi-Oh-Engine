@@ -1,6 +1,7 @@
 #include "follow.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1290,6 +1291,13 @@ FollowResult Follower::run() {
 	int trials = 0;
 	bool dirty = false;
 	size_t best_dbg = 0;
+	// a game must not run on: a time limit, and a limit on moves that reproduce nothing
+	const auto started = std::chrono::steady_clock::now();
+	auto out_of_time = [&] {
+		return in_.max_ms > 0 && std::chrono::steady_clock::now() - started > std::chrono::milliseconds(in_.max_ms);
+	};
+	int idle = 0;
+	bool timed_out = false;
 	// the deepest point reached: what is kept when the game can't be followed to its end
 	size_t best = cur;
 	std::vector<Pos> best_pos;
@@ -1329,6 +1337,10 @@ FollowResult Follower::run() {
 			stack.erase(stack.begin());
 		bool advanced = false;
 		while(!stack.empty() && trials < in_.max_trials) {
+			if(out_of_time()) {
+				timed_out = true;
+				break;
+			}
 			Frame& f = stack.back();
 			if(f.next >= f.order.size()) {
 				stack.pop_back();
@@ -1397,8 +1409,13 @@ FollowResult Follower::run() {
 			Step s;
 			s.response = resp;
 			hist_.push_back(std::move(s));
+			idle = static_cast<size_t>(m) == cur ? idle + 1 : 0;
 			cur = static_cast<size_t>(m);
 			advanced = true;
+			break;
+		}
+		if(advanced && in_.max_idle > 0 && idle > in_.max_idle) {
+			res.stopped = "many moves in a row that the replay doesn't show";
 			break;
 		}
 		if(!advanced && kDebug) {
@@ -1427,7 +1444,7 @@ FollowResult Follower::run() {
 			std::fprintf(stderr, "\n");
 		}
 		if(!advanced) {
-			res.stopped = trials >= in_.max_trials ? "too many tries" : "the game went differently from here";
+			res.stopped = timed_out ? "took too long" : trials >= in_.max_trials ? "too many tries" : "the game went differently from here";
 			break;
 		}
 	}

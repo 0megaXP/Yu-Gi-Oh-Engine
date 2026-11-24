@@ -37,6 +37,8 @@ struct FollowInput {
 	std::string game;      // written with the positions (keeps a game's positions together)
 	int per_turn = 6;      // positions kept per turn at most
 	int max_trials = 3000; // options tried in all (a bound on the time a game takes)
+	int max_ms = 60000;    // time a game may take; past it, what was followed is kept
+	int max_idle = 300;    // moves in a row that match nothing the replay shows: it stops there
 };
 
 struct FollowResult {

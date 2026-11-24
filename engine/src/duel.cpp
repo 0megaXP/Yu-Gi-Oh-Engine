@@ -453,7 +453,14 @@ void Duel::set_deck_top(uint8_t player, const std::vector<uint32_t>& codes) {
 
 void Duel::process() {
 	decision_ = {};
-	while(true) {
+	// the rules core going round without ever asking or ending (a loop in a card script): ended
+	constexpr long kMaxSteps = 2000000;
+	for(long steps = 0;; ++steps) {
+		if(steps > kMaxSteps) {
+			ended_ = true;
+			winner_ = 2;
+			return;
+		}
 		int status = OCG_DuelProcess(duel_);
 		uint32_t len = 0;
 		auto* buf = static_cast<const uint8_t*>(OCG_DuelGetMessage(duel_, &len));

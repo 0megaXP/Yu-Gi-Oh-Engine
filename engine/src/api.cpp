@@ -658,6 +658,7 @@ std::string Engine::follow_replay(const std::string& request) {
 	in.game = req["game"].str();
 	in.per_turn = static_cast<int>(req["per_turn"].integer(6));
 	in.max_trials = static_cast<int>(req["max_trials"].integer(3000));
+	in.max_ms = static_cast<int>(req["max_ms"].integer(60000));
 	return follow_replay_impl(in);
 }
 
