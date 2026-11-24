@@ -12,10 +12,9 @@ import glob
 import json
 import sqlite3
 import sys
-import time
 import urllib.request
 
-API = "https://db.ygoprodeck.com/api/v7/cardinfo.php?id="
+API = "https://db.ygoprodeck.com/api/v7/cardinfo.php?misc=yes"
 
 
 def babel(path):
@@ -32,12 +31,23 @@ def babel(path):
 def main():
     path, ids = sys.argv[1], [int(x) for x in sys.argv[2:]]
     by_name, known = babel(path)
+    # the whole card list (as the app downloads it): each card with all its artworks' ids
+    req = urllib.request.Request(API.split("?")[0], headers={"User-Agent": "Yu-Gi-Oh-Engine card ids"})
+    cards = json.loads(urllib.request.urlopen(req, timeout=120).read())["data"]
+    by_id = {}
+    for c in cards:
+        by_id.setdefault(c["id"], c)
+        for im in c.get("card_images", []):
+            by_id.setdefault(im["id"], c)
+        for k in ("misc_info",):
+            for m in c.get(k, []) or []:
+                if m.get("beta_id"):
+                    by_id.setdefault(int(m["beta_id"]), c)
+    print(f"# {len(cards)} cards on YGOPRODeck")
     for i in ids:
-        try:
-            req = urllib.request.Request(API + str(i), headers={"User-Agent": "Yu-Gi-Oh-Engine card ids"})
-            data = json.loads(urllib.request.urlopen(req, timeout=30).read())["data"][0]
-        except Exception as e:
-            print(f"# {i}: not on YGOPRODeck ({e})")
+        data = by_id.get(i)
+        if not data:
+            print(f"# {i}: not on YGOPRODeck")
             continue
         name, main = data["name"], data["id"]
         arts = [im["id"] for im in data.get("card_images", [])]
@@ -49,8 +59,6 @@ def main():
             print(f"# {i}\t{name}: already known to BabelCDB")
         else:
             print(f"{i}\t{script}\t{name}\tygoprodeck ({how}; artworks {arts})")
-        time.sleep(0.1)
-
 
 if __name__ == "__main__":
     main()
