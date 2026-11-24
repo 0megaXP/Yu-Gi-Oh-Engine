@@ -42,6 +42,16 @@ struct DuelSetup {
 	// turn player, put that side's cards in players[0].
 	bool no_shuffle = false;    // keep Main Deck order as given (top = last element)
 	uint64_t flags = 0;         // 0 = Master Rule 5 (current TCG/OCG)
+	// Hidden information for a search (one guess of what the searching player can't see): after
+	// `hidden_at` responses of a replay, each entry's hand cards at the indices with a code are
+	// swapped with a Main Deck card of that code, and that player's Deck is shuffled.
+	struct Hidden {
+		uint8_t player = 0;
+		std::vector<uint32_t> hand;  // per hand index (Board::hand order): script id, 0 = keep
+		uint64_t seed = 0;           // shuffle seed (0: keep the order)
+	};
+	std::vector<Hidden> hidden;
+	size_t hidden_at = 0;
 };
 
 enum class DecisionType : uint8_t {
@@ -187,6 +197,16 @@ public:
 	void set_tap(std::function<void(const uint8_t*, uint32_t)> tap) { tap_ = std::move(tap); }
 	// Puts these Main Deck cards (script ids) on top of `player`'s Deck, codes[0] topmost.
 	void set_deck_top(uint8_t player, const std::vector<uint32_t>& codes);
+	// See DuelSetup::Hidden.
+	void set_hidden(const DuelSetup::Hidden& h);
+	// Cards that went into a hand since the last call, for what the other player knows:
+	// drawn (the other player doesn't see them) or shown to the other player (MSG_CONFIRM_CARDS).
+	struct HandNews {
+		uint8_t player;  // whose hand
+		uint32_t code;   // script id
+		bool drawn;      // false: shown
+	};
+	std::vector<HandNews> take_hand_news() { auto out = std::move(hand_news_); hand_news_.clear(); return out; }
 
 private:
 	void process();
@@ -210,6 +230,7 @@ private:
 	uint16_t phase_ = 0;
 	std::array<uint64_t, 2> last_hint_{0, 0};
 	std::vector<Event> events_;
+	std::vector<HandNews> hand_news_;
 	bool log_enabled_ = false;
 	std::vector<std::string> log_;
 	std::vector<int8_t> log_players_;

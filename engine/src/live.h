@@ -2,6 +2,7 @@
 #pragma once
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -103,10 +104,12 @@ private:
 	int choose(BotLevel level);
 	// The plan's next non-Set, non-Normal-Summon play available now, when plan_[at] is one of those (-1: none).
 	int later_play(const Decision& d, size_t at) const;
-	// Roots for the bot's search that hide the other player's hand: on turn 1 the cards still in
-	// their hand are re-drawn from their deck (keeping what they already used), each sample
-	// checked to replay to the same public position. Falls back to the true state.
+	// Roots for the bot's search that hide what it can't see: in each, the other player's hand
+	// cards it doesn't know (drawn, never shown) are swapped with random cards of their Deck,
+	// and both Decks are shuffled (DuelSetup::Hidden, applied after the history's replay).
 	std::vector<RootState> hidden_roots(uint8_t me, int samples);
+	// Updates known_ after a response (hand cards drawn are hidden, the rest was seen).
+	void track_knowledge();
 	std::string card_json(uint32_t code) const;
 
 	const CardDB& db_;
@@ -149,6 +152,10 @@ private:
 	std::shared_ptr<const CardPriorities> priorities_[2];
 	std::vector<SearchConfig::Imitation> imitate_[2];
 	uint32_t last_action_[2] = {0, 0};  // the last card each player activated or summoned
+	// Cards in each player's hand that the other player knows (script id -> copies), and the
+	// hand as it was at the last update.
+	std::map<uint32_t, int> known_[2];
+	std::map<uint32_t, int> last_hand_[2];
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;

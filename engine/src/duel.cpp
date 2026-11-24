@@ -323,6 +323,7 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	phase_ = 0;
 	steps_ = 0;
 	events_.clear();
+	hand_news_.clear();
 	log_.clear();
 	log_players_.clear();
 	moves_.clear();
@@ -422,14 +423,26 @@ bool Duel::respond(const std::vector<uint8_t>& response) {
 bool Duel::replay(const DuelSetup& setup, const std::vector<std::vector<uint8_t>>& responses, std::string* error) {
 	if(!start(setup, error))
 		return false;
+	auto hide = [&](size_t done) {
+		if(done == setup.hidden_at)
+			for(const auto& h : setup.hidden)
+				set_hidden(h);
+	};
+	hide(0);
 	for(size_t i = 0; i < responses.size(); ++i) {
 		if(!respond(responses[i])) {
 			if(error)
 				*error = "response " + std::to_string(i) + " rejected during replay";
 			return false;
 		}
+		hide(i + 1);
 	}
 	return true;
+}
+
+void Duel::set_hidden(const DuelSetup::Hidden& h) {
+	if(duel_ && h.player < 2)
+		OCG_DuelSetHidden(duel_, h.player, h.hand.data(), static_cast<uint32_t>(h.hand.size()), h.seed);
 }
 
 void Duel::set_deck_top(uint8_t player, const std::vector<uint32_t>& codes) {
@@ -579,7 +592,27 @@ void Duel::parse_messages(const uint8_t* data, uint32_t len) {
 		}
 		case MSG_DRAW: {
 			uint8_t player = m.get<uint8_t>();
-			events_.push_back({Event::Draw, player, 0, m.get<uint32_t>()});
+			const uint32_t n = m.get<uint32_t>();
+			events_.push_back({Event::Draw, player, 0, n});
+			for(uint32_t k = 0; k < n && m.p + 8 <= m.end; ++k) {
+				const uint32_t code = m.get<uint32_t>();
+				m.get<uint32_t>();  // position
+				if(player < 2)
+					hand_news_.push_back({player, code, true});
+			}
+			break;
+		}
+		case MSG_CONFIRM_CARDS: {
+			m.get<uint8_t>();  // shown to
+			const uint32_t n = m.get<uint32_t>();
+			for(uint32_t k = 0; k < n && m.p + 10 <= m.end; ++k) {
+				const uint32_t code = m.get<uint32_t>();
+				const uint8_t con = m.get<uint8_t>();
+				const uint8_t loc = m.get<uint8_t>();
+				m.get<uint32_t>();  // sequence
+				if(con < 2 && (loc & LOCATION_HAND))
+					hand_news_.push_back({con, code, false});
+			}
 			break;
 		}
 		case MSG_SELECT_BATTLECMD:

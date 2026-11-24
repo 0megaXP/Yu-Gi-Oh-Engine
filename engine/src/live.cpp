@@ -120,6 +120,12 @@ void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
 	steps_turn_ = duel_->turn();
+	// the starting hands are hidden from the other player (a replay's start position too)
+	duel_->take_hand_news();
+	for(uint8_t p = 0; p < 2; ++p)
+		for(const auto& c : duel_->board().hand[p])
+			if(c.code)
+				++last_hand_[p][c.code];
 	ok_ = true;
 	auto_resolve();
 }
@@ -137,6 +143,7 @@ bool LiveDuel::respond_internal(size_t index) {
 	   (type == DecisionType::Idle || type == DecisionType::Chain || type == DecisionType::EffectYesNo))
 		last_action_[who] = opt.code;
 	history_.push_back(opt.response);
+	track_knowledge();
 	if(duel_->turn() != steps_turn_) {
 		steps_turn_ = duel_->turn();
 		steps_this_turn_ = 0;
@@ -182,67 +189,111 @@ bool LiveDuel::respond(size_t index) {
 }
 
 std::vector<RootState> LiveDuel::hidden_roots(uint8_t me, int samples) {
-	std::vector<RootState> roots;
 	const uint8_t opp = static_cast<uint8_t>(1 - me);
-	if(duel_->turn() != 1)
-		return {{setup_, history_}};
-	const Board truth = duel_->board();
-	auto multiset = [](const std::vector<CardView>& v) {
-		std::vector<uint32_t> out;
-		for(const auto& c : v)
-			if(c.code)
-				out.push_back(c.code);
-		std::sort(out.begin(), out.end());
-		return out;
-	};
-	auto public_of = [&](const Board& b, uint8_t p) {
-		std::vector<uint32_t> out;
-		for(const auto* z : {&b.mzone[p], &b.szone[p], &b.grave[p], &b.banished[p]})
-			for(const auto& c : *z)
-				if(c.code)
-					out.push_back(c.code);
-		std::sort(out.begin(), out.end());
-		return out;
-	};
-	const auto my_hand = multiset(truth.hand[me]);
-	const auto their_public = public_of(truth, opp);
-	const auto my_public = public_of(truth, me);
-	const auto& ps = setup_.players[opp];
-	// On turn 1 everything of theirs outside the hand and deck came from their opening hand.
-	std::vector<uint32_t> used;  // official ids
-	std::vector<uint32_t> pool = ps.hand;
-	pool.insert(pool.end(), ps.main.begin(), ps.main.end());
-	for(uint32_t sid : their_public)
-		for(size_t i = 0; i < pool.size(); ++i)
-			if(db_.script_id(pool[i]) == sid) {
-				used.push_back(pool[i]);
-				pool.erase(pool.begin() + static_cast<long>(i));
-				break;
+	const Board truth = duel_->board(true);
+	// their hand cards `me` doesn't know, and the cards they could be: those plus their Deck
+	std::map<uint32_t, int> known = known_[opp];
+	std::vector<size_t> hidden_idx;
+	std::vector<uint32_t> pool;
+	for(size_t i = 0; i < truth.hand[opp].size(); ++i) {
+		const CardView& c = truth.hand[opp][i];
+		auto k = known.find(c.code);
+		if(c.is_public || (k != known.end() && k->second > 0)) {
+			if(!c.is_public)
+				--k->second;
+			continue;
+		}
+		hidden_idx.push_back(i);
+		pool.push_back(c.code);
+	}
+	for(const auto& c : truth.deck[opp])
+		if(c.code)
+			pool.push_back(c.code);
+	std::vector<RootState> roots;
+	for(int k = 0; k < samples; ++k) {
+		RootState r{setup_, history_};
+		r.setup.hidden_at = history_.size();
+		DuelSetup::Hidden h;
+		h.player = opp;
+		h.hand.assign(truth.hand[opp].size(), 0);
+		std::shuffle(pool.begin(), pool.end(), rng_);
+		for(size_t j = 0; j < hidden_idx.size(); ++j)
+			h.hand[hidden_idx[j]] = pool[j];
+		h.seed = rng_() | 1;
+		DuelSetup::Hidden mine;  // `me` doesn't know their own Deck's order either
+		mine.player = me;
+		mine.seed = rng_() | 1;
+		r.setup.hidden = {h, mine};
+		roots.push_back(std::move(r));
+	}
+	static const bool dbg = std::getenv("YGOE_HIDDEN_DEBUG") != nullptr;
+	if(dbg && !roots.empty()) {
+		// each guess must keep everything `me` sees and the decision, and change only their hidden cards
+		Duel check(db_, scripts_);
+		check.set_declare_pool(declare_pool(sc_));
+		int changed = 0, bad = 0;
+		for(const auto& r : roots) {
+			if(!check.replay(r.setup, r.history)) {
+				++bad;
+				continue;
 			}
-	if(used.size() != their_public.size() || used.size() > ps.hand.size())
-		return {{setup_, history_}};
-	roots.push_back({setup_, history_});  // the true hand is one of the possibilities
-	Duel check(db_, scripts_);
-	check.set_declare_pool(declare_pool(sc_));
-	for(int attempt = 0; attempt < samples * 3 && static_cast<int>(roots.size()) < samples; ++attempt) {
-		std::vector<uint32_t> rest = pool;
-		std::shuffle(rest.begin(), rest.end(), rng_);
-		DuelSetup s = setup_;
-		auto& o = s.players[opp];
-		o.hand = used;
-		size_t need = ps.hand.size() - used.size();
-		o.hand.insert(o.hand.end(), rest.begin(), rest.begin() + static_cast<long>(need));
-		o.main.assign(rest.begin() + static_cast<long>(need), rest.end());
-		if(!check.replay(s, history_))
-			continue;
-		Board b = check.board();
-		if(multiset(b.hand[me]) != my_hand || public_of(b, opp) != their_public || public_of(b, me) != my_public ||
-		   b.hand[opp].size() != truth.hand[opp].size() || check.decision().player != duel_->decision().player ||
-		   check.decision().options.size() != duel_->decision().options.size())
-			continue;
-		roots.push_back({std::move(s), history_});
+			const Board b = check.board(true);
+			auto codes = [](const std::vector<CardView>& v) {
+				std::vector<uint32_t> o;
+				for(const auto& c : v)
+					o.push_back(c.code);
+				return o;
+			};
+			auto sorted = [&](std::vector<CardView> v) {
+				auto o = codes(v);
+				std::sort(o.begin(), o.end());
+				return o;
+			};
+			std::vector<CardView> all_t = truth.hand[opp], all_b = b.hand[opp];
+			all_t.insert(all_t.end(), truth.deck[opp].begin(), truth.deck[opp].end());
+			all_b.insert(all_b.end(), b.deck[opp].begin(), b.deck[opp].end());
+			const bool same_public = codes(b.hand[me]) == codes(truth.hand[me]) && codes(b.mzone[opp]) == codes(truth.mzone[opp]) &&
+			                         codes(b.grave[opp]) == codes(truth.grave[opp]) && sorted(all_b) == sorted(all_t) &&
+			                         b.hand[opp].size() == truth.hand[opp].size() &&
+			                         check.decision().options.size() == duel_->decision().options.size();
+			if(!same_public)
+				++bad;
+			if(codes(b.hand[opp]) != codes(truth.hand[opp]))
+				++changed;
+		}
+		std::fprintf(stderr, "hidden: turn %u, player %d, their hand %zu (%zu hidden), %zu guesses: %d with another hand, %d bad\n",
+		             truth.turn, me, truth.hand[opp].size(), hidden_idx.size(), roots.size(), changed, bad);
 	}
 	return roots;
+}
+
+void LiveDuel::track_knowledge() {
+	const Board b = duel_->board();
+	std::map<uint32_t, int> drawn[2], shown[2];
+	for(const auto& n : duel_->take_hand_news())
+		++(n.drawn ? drawn : shown)[n.player][n.code];
+	for(uint8_t p = 0; p < 2; ++p) {
+		std::map<uint32_t, int> hand;
+		for(const auto& c : b.hand[p])
+			if(c.code)
+				++hand[c.code];
+		auto& known = known_[p];
+		for(const auto& [code, n] : hand) {
+			const int before = last_hand_[p].count(code) ? last_hand_[p][code] : 0;
+			const int added = std::max(0, n - before);
+			// new cards not drawn came from a public place or were searched (shown)
+			const int d = drawn[p].count(code) ? drawn[p][code] : 0;
+			known[code] += std::max(0, added - d);
+			if(shown[p].count(code))
+				known[code] += shown[p][code];
+		}
+		for(auto it = known.begin(); it != known.end();) {
+			const int n = hand.count(it->first) ? hand[it->first] : 0;
+			it->second = std::min(it->second, n);
+			it = it->second > 0 ? std::next(it) : known.erase(it);
+		}
+		last_hand_[p] = std::move(hand);
+	}
 }
 
 namespace {
@@ -316,7 +367,7 @@ int LiveDuel::choose(BotLevel level) {
 	cfg.imitate = imitate_[d.player];
 	cfg.policy = policies_[d.player];
 	cfg.priorities = priorities_[d.player];
-	// The bot does not see the other player's hand: on turn 1 its search samples it.
+	// The bot does not see the other player's hidden cards: its search samples them.
 	std::vector<RootState> roots = hidden_roots(d.player, 8);
 	auto out = searcher_->run(roots, d.player, cfg);
 	if(out.moves.empty())

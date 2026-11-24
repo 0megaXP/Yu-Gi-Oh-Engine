@@ -1,0 +1,58 @@
+--- a/ocgapi.cpp	2026-11-24 15:56:58.443972521 +0800
++++ b/ocgapi.cpp	2026-11-24 15:56:58.445583050 +0800
+@@ -4,6 +4,8 @@
+  *
+  * SPDX-License-Identifier: AGPL-3.0-or-later
+  */
++#include <algorithm>
++#include <random>
+ #include <cstring> //std::memcpy
+ #include <new> //std::nothrow
+ #include <vector>
+@@ -322,3 +324,33 @@
+ 	pduel->game_field->reset_sequence(team, LOCATION_DECK);
+ }
+ 
++void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, uint64_t seed) {
++	auto* pduel = static_cast<duel*>(ocg_duel);
++	if(!pduel || team > 1)
++		return;
++	auto& pl = pduel->game_field->player[team];
++	for(uint32_t i = 0; hand && i < count && i < pl.list_hand.size(); ++i) {
++		card* h = pl.list_hand[i];
++		if(!hand[i] || h->data.code == hand[i])
++			continue;
++		for(auto& slot : pl.list_main) {
++			card* c = slot;
++			if(c->data.code != hand[i])
++				continue;
++			h->enable_field_effect(false);
++			c->enable_field_effect(false);
++			std::swap(h->current, c->current);
++			pl.list_hand[i] = c;
++			slot = h;
++			h->enable_field_effect(true);
++			c->enable_field_effect(true);
++			break;
++		}
++	}
++	if(seed) {
++		std::mt19937_64 rng(seed);
++		std::shuffle(pl.list_main.begin(), pl.list_main.end(), rng);
++	}
++	pduel->game_field->reset_sequence(team, LOCATION_DECK);
++	pduel->game_field->reset_sequence(team, LOCATION_HAND);
++}
+--- a/ocgapi.h	2026-11-24 15:56:58.443999241 +0800
++++ b/ocgapi.h	2026-11-24 15:56:58.445609452 +0800
+@@ -41,6 +41,10 @@
+ /* ygoe: puts the Main Deck cards with these codes on top, codes[0] topmost (for following a
+    recorded duel: the recorded draws come next). Cards not found are skipped. No message. */
+ OCGAPI void OCG_DuelSetDeckTop(OCG_Duel ocg_duel, uint8_t team, const uint32_t* codes, uint32_t count);
++/* ygoe: hidden information for a search: the cards in `team`'s hand at the indices where
++   hand[i] != 0 are swapped with a Main Deck card of that code (if any), then the Main Deck is
++   shuffled with `seed` (0: not). No message. */
++OCGAPI void OCG_DuelSetHidden(OCG_Duel ocg_duel, uint8_t team, const uint32_t* hand, uint32_t count, uint64_t seed);
+ 
+ OCGAPI uint32_t OCG_DuelQueryCount(OCG_Duel ocg_duel, uint8_t team, uint32_t loc);
+ OCGAPI void* OCG_DuelQuery(OCG_Duel ocg_duel, uint32_t* length, const OCG_QueryInfo* info_ptr);

@@ -74,6 +74,11 @@ what they stop and their measured value.
    decks, hands, field, GY, banished cards and LP at a turn's Main Phase 1) and are played on.
    Games are cut at turn 12. Each Main Phase decision is written from both sides, and each
    search with something to learn as a policy example.
+   The bots don't see what a player couldn't: at each decision the search plays out 8 guesses
+   where the other player's hand cards it hasn't seen (drawn, never shown) are random cards of
+   their Deck, and both Decks are shuffled (`LiveDuel::hidden_roots`, the rules core's
+   `OCG_DuelSetHidden`, `tools/patches/ygopro-core/0003-set-hidden.patch`). Cards searched,
+   returned to the hand or revealed stay known. (Before, only turn 1 was guessed.)
 4. **Labels**: a finished game's result is 1 / 0. A game cut at turn 12 is labelled with the
    current evaluator's win chance there (cards in hand, board and GY count, not only LP).
    Training targets are TD(λ), λ = 0.95: a position's target blends the result with the
