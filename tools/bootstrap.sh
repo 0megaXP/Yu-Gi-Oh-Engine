@@ -35,19 +35,17 @@ for d in "${DEPS[@]}"; do
   fetch "$name" "$url" "$commit"
 done
 
-# Our fixes to the fetched code: tools/patches/<dependency>/*.patch, applied in name order.
-# Each is applied once (skipped when it is already in place).
+# Our fixes to the fetched code: tools/patches/<dependency>/*.patch, applied in name order on
+# the pinned files (put back first, so running this again gives the same result even where a
+# later patch changes the lines next to an earlier one's).
 for dir in "$ROOT"/tools/patches/*/; do
   [ -d "$dir" ] || continue
   dep="$(basename "$dir")"
+  git -C "$TP/$dep" checkout -q -- .
   for patch in "$dir"*.patch; do
     [ -f "$patch" ] || continue
-    if git -C "$TP/$dep" apply --reverse --check "$patch" 2>/dev/null; then
-      echo "ok    patch $dep/$(basename "$patch")"
-    else
-      git -C "$TP/$dep" apply "$patch"
-      echo "patch $dep/$(basename "$patch")"
-    fi
+    git -C "$TP/$dep" apply "$patch"
+    echo "patch $dep/$(basename "$patch")"
   done
 done
 
