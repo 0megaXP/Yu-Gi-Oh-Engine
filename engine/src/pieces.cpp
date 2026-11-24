@@ -343,6 +343,31 @@ void add_to_library(std::vector<LibraryPiece>& lib, const LineSplit& split, doub
 	}
 }
 
+void merge_library(std::vector<LibraryPiece>& lib, const std::vector<LibraryPiece>& more) {
+	for(const auto& m : more) {
+		std::string k = key_of(m.piece);
+		auto it = std::find_if(lib.begin(), lib.end(), [&](const LibraryPiece& l) { return key_of(l.piece) == k; });
+		if(it == lib.end()) {
+			lib.push_back(m);
+			continue;
+		}
+		auto stops = m.piece.stopped_by;
+		if(m.best > it->best) {
+			stops = it->piece.stopped_by;
+			it->piece = m.piece;
+			it->best = m.best;
+		}
+		for(auto& s : stops)
+			if(std::find_if(it->piece.stopped_by.begin(), it->piece.stopped_by.end(), [&](auto& x) { return x.first == s.first; }) ==
+			   it->piece.stopped_by.end())
+				it->piece.stopped_by.push_back(s);
+		const int n = it->count + m.count;
+		if(n > 0)
+			it->value = (it->value * it->count + m.value * m.count) / n;
+		it->count = n;
+	}
+}
+
 void sort_library(std::vector<LibraryPiece>& lib, size_t max) {
 	std::stable_sort(lib.begin(), lib.end(), [](const LibraryPiece& a, const LibraryPiece& b) {
 		if(a.piece.starter() != b.piece.starter())

@@ -108,6 +108,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
     strategy:
       fail-fast: false
       matrix:
@@ -123,9 +125,15 @@ jobs:
           name=$(basename "${{ matrix.deck }}" .ydk)
           pieces=""
           [ -f app/app-pieces.json ] && pieces="--pieces app/app-pieces.json"
-          mkdir -p libs
+          mkdir -p libs carry
+          # the lines earlier runs found for the deck's archetype (library-<archetype>.json in
+          # ml-data): this run's 40 hands are added to them, so every deck's library grows
+          gh release download ml-data --pattern 'library-*.json' --dir carry 2>/dev/null || true
           build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces \
-            --out "libs/$name.json" | tail -n 3
+            --carry-dir carry --out "libs/$name.json" > lib.txt
+          grep -v "^hand " lib.txt
+          f=$(sed -n 's/^library carried in //p' lib.txt)
+          if [ -n "$f" ] && [ -f "$f" ]; then gh release upload ml-data "$f" --clobber; fi
           echo "name=$name" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:

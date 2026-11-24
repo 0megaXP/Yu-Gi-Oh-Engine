@@ -29,14 +29,17 @@
 //     game cut at --turns by the evaluator's win chance) and writes each pair's score.
 //
 //   ygoe-cli library <deck.ydk> --out lib.json [--hands 40] [--iterations 1500] [--seed S] [--pieces p.json]
+//                    [--carry earlier.json --carry-out next.json | --carry-dir DIR] [--max-pieces 400]
 //     Combo pieces for a deck's bot: the best lines of many opening hands found by deep search
-//     (reference.h), plus the pieces of --pieces (the app's, from replays and videos) that the
-//     deck can play.
+//     (reference.h), added to those of earlier runs (--carry, written by --carry-out: the
+//     library grows run after run, the most played pieces kept), plus the pieces of --pieces
+//     (the app's, from replays and videos) that the deck can play.
 //
 //   ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json] [--epochs 4] [--report r.json]
 //     Trains the move policy on self-play examples; 15% of the games are held out, and the report
 //     gives their log-loss with the rule prior alone, the starting policy and the trained one.
 #include <algorithm>
+#include <filesystem>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -711,13 +714,40 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 		std::fflush(stdout);
 	});
 	std::vector<LibraryPiece> lib = res.library;
+	// the lines found by earlier runs for this deck (--carry: their own pieces, without the
+	// app's): this run's are added to them, so the library grows run after run
+	size_t carried = 0;
+	int lines = static_cast<int>(res.samples.size());
+	// --carry-dir: the deck's archetype's file there (any deck: an archetype keeps its lines when
+	// a newer list of it is played; one without an archetype goes by its file name)
+	std::string carry = opt.count("carry") ? opt.at("carry") : "", carry_out = opt.count("carry-out") ? opt.at("carry-out") : "";
+	if(opt.count("carry-dir")) {
+		const uint16_t arch = archetype_key(db, d);
+		std::error_code ec;
+		std::filesystem::create_directories(opt.at("carry-dir"), ec);
+		carry = carry_out = opt.at("carry-dir") + "/library-" + (arch ? std::to_string(arch) : base_name(deck_path)) + ".json";
+		std::printf("library carried in %s\n", carry.c_str());
+	}
+	if(!carry.empty() && std::ifstream(carry).good()) {
+		const std::string text = read_file(carry);
+		const json::Value v = json::Value::parse(text);
+		auto earlier = playable_by(db, d, parse_library(db, v.is_object() ? v["pieces"] : v));
+		carried = earlier.size();
+		if(v.is_object())
+			lines += static_cast<int>(v["lines"].integer(0));
+		merge_library(lib, earlier);
+	}
+	sort_library(lib, static_cast<size_t>(std::stoi(get("max-pieces", "400"))));
+	if(!carry_out.empty())
+		std::ofstream(carry_out) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, lib, lines) << "}";
 	const size_t own = lib.size();
 	if(opt.count("pieces")) {
 		auto more = playable_by(db, d, parse_library(db, read_file(opt.at("pieces"))));
 		lib.insert(lib.end(), more.begin(), more.end());
 	}
 	std::ofstream(get("out", base_name(deck_path) + ".json")) << library_json(db, lib, static_cast<int>(res.samples.size()));
-	std::printf("%zu pieces from %zu lines, %zu from the app's replays and videos\n", own, res.samples.size(), lib.size() - own);
+	std::printf("%zu pieces from %d lines (%zu this run, %zu pieces from earlier runs), %zu from the app's replays and videos\n", own,
+	            lines, res.samples.size(), carried, lib.size() - own);
 	return 0;
 }
 

@@ -75,6 +75,9 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 // Adds the pieces of one line (with its end value) to `lib`.
 void add_to_library(std::vector<LibraryPiece>& lib, const LineSplit& split, double value);
 void sort_library(std::vector<LibraryPiece>& lib, size_t max);
+// Adds `more` (another library: an earlier run's) to `lib`, pieces with the same needs merged
+// (lines counted together, the example from the best line kept).
+void merge_library(std::vector<LibraryPiece>& lib, const std::vector<LibraryPiece>& more);
 // Reads pieces back from pieces_json / library_json output (official ids → script ids).
 std::vector<LibraryPiece> parse_library(const CardDB& db, const std::string& json_array);
 namespace json { class Value; }

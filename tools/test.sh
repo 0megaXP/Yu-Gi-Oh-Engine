@@ -40,8 +40,12 @@ python3 -c "import json,sys; t=json.load(open(sys.argv[1]))['totals']; sys.exit(
 echo "== learning: combo pieces, self-play (best of 3, starts), training, policy, arena (tiny)"
 rm -f "$OUT/sp.jsonl" "$OUT/sp.pjsonl" "$OUT/sp.nejsonl" "$OUT/sp.gjsonl"
 mkdir -p "$OUT/libs"
+rm -rf "$OUT/carry"
 build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 \
-  --out "$OUT/libs/angelechy_luna_mardelplata_2026-11.json" > "$OUT/lib.txt"
+  --carry-dir "$OUT/carry" --out "$OUT/libs/angelechy_luna_mardelplata_2026-11.json" > "$OUT/lib.txt"
+# the library carries over: a second run starts from the first's pieces
+build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 --seed 2 \
+  --carry-dir "$OUT/carry" --out "$OUT/lib2.json" | grep -q "lines (1 this run, [1-9][0-9]* pieces from earlier runs)"
 YGOE_FOLLOW_JSONL=1 build/ygoe-cli followtest examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --seed 1 --turns 4 > "$OUT/follow.json"
 python3 -c "import json,sys; [print(l) for r in map(json.loads, open(sys.argv[1])) for l in r['jsonl'].splitlines() if '\"kind\":\"start\"' in l]" "$OUT/follow.json" > "$OUT/starts.jsonl"
