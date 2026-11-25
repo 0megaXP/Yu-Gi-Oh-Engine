@@ -737,7 +737,11 @@ private:
 			return true;
 		const CardInfo* l = db_.get(live);
 		const CardInfo* r = db_.get(a);
-		return (l && l->alias && (l->alias == a || l->alias == rec)) || (r && r->alias && r->alias == live);
+		if((l && l->alias && (l->alias == a || l->alias == rec)) || (r && r->alias && r->alias == live))
+			return true;
+		// two tokens: YGO Omega's scripts and the core's may make the same token under different
+		// ids (Girsu's World Legacy Token: 69811711 there, 46647145 here); a token is a token
+		return l && r && (l->type & TYPE_TOKEN) && (r->type & TYPE_TOKEN);
 	}
 	bool eq(const Ev& r, const Ev& l) const {
 		if(r.k != l.k)
@@ -992,6 +996,7 @@ bool Follower::apply(const Step& s) {
 
 bool Follower::rebuild(size_t steps) {
 	duel_ = std::make_unique<Duel>(db_, scripts_);
+	duel_->set_every_zone(true);
 	duel_->set_tap(nullptr);
 	if(!duel_->start(setup_))
 		return false;
@@ -1269,6 +1274,7 @@ FollowResult Follower::run() {
 
 	live_ = Live{};
 	duel_ = std::make_unique<Duel>(db_, scripts_);
+	duel_->set_every_zone(true);  // the replay names the exact zone
 	duel_->set_tap([this](const uint8_t* b, uint32_t n) { live_.read(b, n); });
 	if(!duel_->start(setup_)) {
 		res.stopped = "the rules core couldn't start the duel";

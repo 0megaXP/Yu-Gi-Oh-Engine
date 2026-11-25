@@ -1094,7 +1094,7 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 			// Where a card in the duel cares about columns, the zone is a real decision. Only zones
 			// that differ in what shares their column are offered (the first free zone first): one
 			// per mix of "a card of yours / of the opponent in this column / next to it".
-			if(count == 1 && zone_choices_ && d.options.size() > 1) {
+			if(count == 1 && zone_choices_ && !every_zone_ && d.options.size() > 1) {
 				d.minor = false;
 				auto column = [](uint8_t pl, uint8_t loc, uint8_t seq) -> int {
 					// absolute column 0..4 seen from player 0 (Extra Monster Zones: 1 and 3)

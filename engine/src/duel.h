@@ -201,6 +201,9 @@ public:
 	// A card in either deck cares about columns (Angelechy, Infinite Impermanence): zone choices
 	// are real decisions, with a few distinct zones offered. Otherwise the first free zone.
 	bool zone_choices() const { return zone_choices_; }
+	// Offer every free zone as is, none merged by what shares its column (the replay follower:
+	// a replay names the exact zone).
+	void set_every_zone(bool on) { every_zone_ = on; }
 	// The card of the last link on the chain (script id, 0 when empty).
 	uint32_t chain_last_code() const { return chain_depth_ ? chain_last_code_ : 0; }
 	// Where the card of the last link was activated from (LOCATION_*, 0 when empty).
@@ -267,6 +270,7 @@ private:
 	int chain_last_owner_ = -1;
 	// Some card in the duel cares about columns: zones are a real choice (else the first free one).
 	bool zone_choices_ = false;
+	bool every_zone_ = false;
 	// field slots (controller << 16 | location << 8 | sequence) holding a card another player put there
 	std::map<uint32_t, uint8_t> given_;
 	uint32_t chain_last_code_ = 0;

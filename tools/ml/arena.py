@@ -16,7 +16,7 @@ a candidate: the next runs test the same part again (not a new one) and its pair
   keep:    at least 20 pairs, average >= 0.51 and more than 1.5 standard errors above 0.5
            (stricter than one look needs, since a candidate is looked at up to 4 times)
   reject:  average more than 1.5 standard errors below 0.5, or MAX_RUNS runs without a keep
-  pending: otherwise (tested again next run)
+  pending: otherwise (tested again next run; its pairs carry on when another part is kept)
 """
 import argparse
 import glob
@@ -85,12 +85,13 @@ def main():
     for p, d in parts.items():
         if d["decision"] != "pending":
             continue
-        # a part kept changes the bots the others are measured against: their pairs start over
-        # (their runs still count, so they still end)
-        state[p] = {"pairs": [] if kept else d["_pairs"], "runs": d["runs"], "since": d["since"] or a.run}
+        # (a part kept changes the bots the others are measured against a little, much less than
+        # one run's noise: their pairs carry on; restarting them every time the value network
+        # won kept the move policy at 60 pairs until its runs ran out)
+        state[p] = {"pairs": d["_pairs"], "runs": d["runs"], "since": d["since"] or a.run}
     for p, st in pending.items():
         if p not in parts:  # its arena didn't run (a failed job): as it was
-            state[p] = {**st, "pairs": [] if kept else st.get("pairs", [])}
+            state[p] = st
     for d in parts.values():
         del d["_pairs"]
     if a.out_pending:

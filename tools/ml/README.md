@@ -126,7 +126,8 @@ what they stop and their measured value.
    again (not a newly trained one) and its pairs add up (`arena-pending.tar.gz` in `ml-data`),
    for up to 4 runs. Kept when its average pair score over all its pairs is at least 0.51 and
    more than 1.5 standard errors above 0.5; dropped when 1.5 standard errors below 0.5 or after 4
-   runs. A part kept restarts the others' pairs (the bots they are measured against changed). The
+   runs. A part kept doesn't restart the others' pairs (it changes the bots they are measured
+   against far less than one run's noise). The
    commit message carries the reports.
 
 Real games come from the app: it follows each finished YGO Omega replay in the real rules core
