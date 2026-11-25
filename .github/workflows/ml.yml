@@ -4,18 +4,10 @@ name: Learn
 # a new network and policy are trained on those games plus the last nights' and the app's real
 # games, and they replace data/value_net.json and data/policy.json only if they predict better
 # and the bots using them beat the current ones in bot duels (the arena). See tools/ml/README.md.
-# A push that changes the engine also starts a run: it waits for the one in progress to finish
-# (the "learn" concurrency group keeps one run going and the newest one waiting), so what's
-# learned next is learned with the new engine. The run's own commits (made with the workflow's
-# token) don't start another.
+# Only these scheduled runs (and a manual start): pushes don't start one. Each run builds the
+# engine as it is when it starts. The "learn" concurrency group keeps one run going at a time.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - engine/**
-      - tools/**
-      - CMakeLists.txt
   schedule:
     - cron: "17 1,7,13,19 * * *"   # every 6 hours from 01:17 UTC (a run takes about 4.5 h, the rest is left for other pipelines)
   workflow_dispatch:
