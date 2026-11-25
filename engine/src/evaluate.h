@@ -57,6 +57,9 @@ private:
 	mutable std::mutex mu_;
 	mutable std::unordered_map<uint32_t, CardRole> roles_[2];
 	double column_threat_[2] = {0, 0};
+	// The deck puts its own cards in its Spell & Trap Zone ("place ... in your Spell & Trap Zone as
+	// a face-up Continuous Spell": Angelechy Synchros): a zone used by a Set card is missed.
+	bool fills_st_zones_[2] = {false, false};
 	std::shared_ptr<const class ValueNet> net_;  // chance each deck opens with a column interruption (Imperm)
 };
 

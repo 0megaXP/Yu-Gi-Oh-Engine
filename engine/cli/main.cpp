@@ -166,6 +166,19 @@ int cmd_profile(const CardDB& db, const Args& a) {
 			std::printf("    %dx %-45s %s from %s (%.2f)%s\n", n, db.name(db.script_id(code)).c_str(), bi->name(),
 			            (bi->range & LOCATION_HAND) ? "hand" : (bi->range & LOCATION_GRAVE) ? "GY" : (bi->range & LOCATION_SZONE) ? "S/T zone" : "field",
 			            best, r.engine ? " [engine]" : "");
+		if(!r.tiers.empty() || r.rider_type || !r.gy_target.empty()) {
+			std::printf("    %dx %-45s depends on the board:", n, db.name(db.script_id(code)).c_str());
+			if(!r.tiers.empty()) {
+				std::printf(" tiers by \"%s\"%s in 0x%x:", r.tier_name.c_str(), r.tier_monsters ? " monsters" : "", r.tier_loc);
+				for(auto& t : r.tiers)
+					std::printf(" %d+ %.2f", t.min, t.value);
+			}
+			if(r.rider_type)
+				std::printf(" (needs a 0x%x monster for its last part)", r.rider_type);
+			if(!r.gy_target.empty())
+				std::printf(" (a \"%s\" monster in the GY to target)", r.gy_target.c_str());
+			std::printf("\n");
+		}
 	}
 	return 0;
 }
@@ -763,6 +776,20 @@ int main(int argc, char** argv) {
 				live.set_guide(1, g);
 			}
 			live.state_json();  // the log so far
+			// --force "label prefix": answer that first (what the bot does after it)
+			if(a.has("force")) {
+				const std::string want = a.get("force", "");
+				const Decision& fd = live.duel().decision();
+				size_t at2 = fd.options.size();
+				for(size_t k = 0; k < fd.options.size() && at2 == fd.options.size(); ++k)
+					if(fd.options[k].label.rfind(want, 0) == 0)
+						at2 = k;
+				if(at2 == fd.options.size() || !live.respond(at2)) {
+					std::fprintf(stderr, "no option '%s' here\n", want.c_str());
+					return 1;
+				}
+				std::printf("  > forced: %s\n", want.c_str());
+			}
 			int moves = std::stoi(a.get("moves", "1"));
 			for(int m = 0; m < moves && !live.duel().ended(); ++m) {
 				const Decision& dec = live.duel().decision();
@@ -778,6 +805,14 @@ int main(int argc, char** argv) {
 				std::fflush(stdout);
 				if(a.has("turn-end") && live.duel().turn() != static_cast<uint32_t>(std::stoul(a.get("turn-end", "0"))))
 					break;
+			}
+			if(a.has("eval")) {  // the board as the evaluator sees it, for player --eval, the other player next
+				const uint8_t ep = static_cast<uint8_t>(std::stoi(a.get("eval", "0")));
+				const Board eb = live.duel().board();
+				auto e = live.evaluator().evaluate(eb, ep, static_cast<uint8_t>(1 - ep), false, -1, true);
+				std::printf("eval P%d: score %.3f raw %.2f\n", ep, e.score, e.raw);
+				for(const auto& n : e.notes)
+					std::printf("   P%d %s (%s): %s %.2f\n", n.player, db.name(n.code).c_str(), n.where.c_str(), n.what.c_str(), n.value);
 			}
 			return 0;
 		}

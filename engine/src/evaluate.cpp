@@ -31,6 +31,14 @@ Evaluator::Evaluator(const CardDB& db, const Deck& d0, const Deck& d1) : db_(db)
 					if(c->attribute & (1u << bit))
 						++by_attribute_[p][bit];
 			}
+	for(int p = 0; p < 2; ++p)
+		for(const auto* list : {&decks[p]->main, &decks[p]->extra})
+			for(uint32_t code : *list) {
+				std::string t = db.text(db.script_id(code));
+				for(auto& ch : t)
+					ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+				fills_st_zones_[p] = fills_st_zones_[p] || t.find("spell & trap zone as a face-up continuous spell") != std::string::npos;
+			}
 	// Interruptions that hit a whole column (Infinite Impermanence: negate a monster, and the
 	// Spell/Trap Zone cards in its column can't be activated that turn): how likely each deck
 	// holds one in its opening six cards.
@@ -117,6 +125,70 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			const CardInfo* c = db_.get(cv.code);
 			return c && (c->type & TYPE_MONSTER) && (c->attribute & locked) && !(cv.type & (TYPE_SPELL | TYPE_TRAP));
 		};
+		// Board-dependent parts (CardRole::tiers / rider_type / gy_target).
+		auto lower_name = [&](uint32_t code) {
+			std::string n = db_.name(code);
+			for(auto& ch : n)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			return n;
+		};
+		auto count_in = [&](uint32_t loc, const std::string& name, bool monsters) {
+			int n = 0;
+			auto zone = [&](const std::vector<CardView>& z) {
+				for(const auto& c : z) {
+					if(!c.code)
+						continue;
+					const CardInfo* ci = db_.get(c.code);
+					if(monsters && !(ci && (ci->type & TYPE_MONSTER)))
+						continue;
+					if(!name.empty() && lower_name(c.code).find(name) == std::string::npos)
+						continue;
+					++n;
+				}
+			};
+			if(loc & LOCATION_MZONE)
+				zone(b.mzone[p]);
+			if(loc & LOCATION_SZONE)
+				zone(b.szone[p]);
+			if(loc & LOCATION_GRAVE)
+				zone(b.grave[p]);
+			if(loc & LOCATION_REMOVED)
+				zone(b.banished[p]);
+			if(loc & LOCATION_HAND)
+				zone(b.hand[p]);
+			return n;
+		};
+		auto tier_worth = [&](const CardRole& r) {
+			if(r.tiers.empty())
+				return 0.0;
+			const int n = count_in(r.tier_loc, r.tier_name, r.tier_monsters);
+			double w = 0;
+			for(const auto& t : r.tiers)
+				if(n >= t.min)
+					w += t.value;
+			return w * (defending ? 1.0 : 0.6);
+		};
+		bool controls_type[5] = {false, false, false, false, false};  // fusion synchro xyz link (any)
+		for(const auto& c : b.mzone[p])
+			if(c.code && (c.pos & POS_FACEUP)) {
+				const CardInfo* ci = db_.get(c.code);
+				const uint32_t ty = ci ? ci->type : 0;
+				controls_type[0] |= (ty & TYPE_FUSION) != 0;
+				controls_type[1] |= (ty & TYPE_SYNCHRO) != 0;
+				controls_type[2] |= (ty & TYPE_XYZ) != 0;
+				controls_type[3] |= (ty & TYPE_LINK) != 0;
+			}
+		auto conditions = [&](const CardRole& r) {
+			double f = 1.0;
+			if(r.rider_type) {
+				const bool ok = (r.rider_type == TYPE_FUSION && controls_type[0]) || (r.rider_type == TYPE_SYNCHRO && controls_type[1]) ||
+				                (r.rider_type == TYPE_XYZ && controls_type[2]) || (r.rider_type == TYPE_LINK && controls_type[3]);
+				f *= ok ? 1.0 : 0.5;
+			}
+			if(!r.gy_target.empty() && count_in(LOCATION_GRAVE, r.gy_target, true) == 0)
+				f *= 0.5;
+			return f;
+		};
 		// Best interrupt a card offers from where it currently is.
 		auto interrupts_from = [&](const CardView& cv, uint32_t loc, const char* where) {
 			if(locked_out(cv))
@@ -136,7 +208,7 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 					second = val;
 				}
 			}
-			double total = best + 0.35 * second;
+			double total = (best + 0.35 * second) * conditions(r);
 			// Its once-per-turn uses already spent this turn, during the other player's turn (the
 			// one it would interrupt): little left of it until that turn ends (they come back on
 			// later turns). Only when all of its interruptions here are once per turn.
@@ -191,6 +263,21 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 				continue;
 			}
 			double iv = interrupts_from(cv, LOCATION_HAND, "hand");
+			{
+				// A Trap usable from the hand: only in the opponent's first turn for some (Opening to
+				// e4); and what activating it from there locks costs the deck's own monsters that share
+				// (Dominus Impulse in a LIGHT deck is worth little from the hand; Purge there, its full worth).
+				const CardRole& hr = role(p, cv.code);
+				if(hr.from_hand && hr.from_hand_first_turn && b.turn > 1)
+					iv = 0;
+				if(hr.from_hand && hr.hand_lock && effect_monsters_[p] > 0) {
+					int hit = 0;
+					for(int bit = 0; bit < 8; ++bit)
+						if(hr.hand_lock & (1u << bit))
+							hit += by_attribute_[p][bit];
+					iv *= 1.0 - std::min(1.0, double(hit) / effect_monsters_[p]);
+				}
+			}
 			if(iv > 0 && role(p, cv.code).hand_trap) {
 				// A hand trap is worth most where it is: hidden in the hand, used when it counts.
 				// A second copy of the same one adds less.
@@ -225,7 +312,7 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			double extra = 0;
 			if(live) {
 				const CardRole& r = role(p, cv.code);
-				extra = r.passive(LOCATION_MZONE) * (defending ? 1.0 : 0.6) + (r.reusable(LOCATION_MZONE) ? 0.08 : 0.0);
+				extra = r.passive(LOCATION_MZONE) * (defending ? 1.0 : 0.6) + (r.reusable(LOCATION_MZONE) ? 0.08 : 0.0) + tier_worth(r);
 			}
 			// removing it gives its controller something back (a floater): it holds up better
 			// against the other player's turn
@@ -238,14 +325,19 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			const bool facedown = cv.pos & POS_FACEDOWN;
 			double iv = (cv.status & kStatusDisabled) ? 0 : interrupts_from(cv, LOCATION_SZONE, facedown ? "set" : "S/T zone");
 			if(facedown) {
-				v += std::max(iv, 0.1);
+				// Set, a Trap that could wait in the hand takes a zone: one the deck's own cards
+				// (Angelechy Synchros placed as Continuous Spells) need.
+				const double zone = role(p, cv.code).from_hand ? (fills_st_zones_[p] ? 0.12 : 0.03) : 0.0;
+				v += std::max(iv, 0.1) - zone;
 				continue;
 			}
 			// Face-up Spell/Trap Zone cards are worth what they do from there: static effects,
 			// effects you can use again, interruptions. A card with nothing to do there (e.g. a
 			// monster placed as a Continuous Spell that has no Spell-Zone effect) is nearly dead.
 			const CardRole& r = role(p, cv.code);
-			double worth = (cv.status & kStatusDisabled) ? 0 : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 : 0.0);
+			double worth = (cv.status & kStatusDisabled) ? 0
+			                                             : r.passive(LOCATION_SZONE) + (r.reusable(LOCATION_SZONE) ? 0.15 * conditions(r) : 0.0) +
+			                                                   tier_worth(r);
 			worth += r.floats * (defending ? 1.0 : 0.4);
 			v += std::max(0.05, iv + worth);
 		}

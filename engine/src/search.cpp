@@ -200,6 +200,91 @@ bool has_attacker(const Board& b, uint8_t p) {
 	return false;
 }
 
+// Battles in the imagined games, played the way players do (random attacks made a Kusanagi
+// board, which attacks every monster for piercing damage, look harmless):
+//  - a Battle Phase decision: attack directly when nothing blocks (the strongest first), else with
+//    a monster that beats something; nothing to gain: SIZE_MAX (the usual weights decide);
+//  - choosing what to attack: the strongest monster it beats, else the weakest;
+//  - ending Main Phase 1 with an attacker that gets through: the Battle Phase instead.
+// `picked` is what the weights chose; returns the index to play (SIZE_MAX: keep `picked`).
+int stat_of(const CardView& c) {
+	if(c.pos & POS_FACEDOWN)
+		return 1500;
+	return (c.pos & POS_ATTACK) ? c.atk : c.def;
+}
+
+size_t battle_pick(const Duel& duel, const Decision& dec, size_t picked) {
+	if(dec.options.empty())
+		return SIZE_MAX;
+	const uint8_t me = dec.player, opp = static_cast<uint8_t>(1 - dec.player);
+	auto board = [&] { return duel.board(); };
+	if(dec.type == DecisionType::Battle && me == duel.turn_player()) {
+		const Board b = board();
+		int weakest = INT32_MAX;
+		bool open = true;
+		for(const auto& c : b.mzone[opp])
+			if(c.code)
+				open = false, weakest = std::min(weakest, stat_of(c));
+		size_t best = SIZE_MAX;
+		int best_atk = 0;
+		for(size_t i = 0; i < dec.options.size(); ++i) {
+			const Option& o = dec.options[i];
+			if(o.kind != OptKind::Attack)
+				continue;
+			int atk = 0;
+			for(const auto& c : b.mzone[me])
+				if(c.code == o.code && (c.seq == o.seq || atk == 0))
+					atk = c.atk;
+			if(atk > best_atk && (open || atk > weakest))
+				best = i, best_atk = atk;
+		}
+		return best;
+	}
+	if(dec.type == DecisionType::Card && dec.hint == 549) {  // HINTMSG_ATTACKTARGET
+		const Board b = board();
+		int atk = 0;  // the attacker: the strongest face-up Attack Position monster (close enough)
+		for(const auto& c : b.mzone[duel.turn_player()])
+			if(c.code && (c.pos & POS_FACEUP_ATTACK))
+				atk = std::max(atk, c.atk);
+		size_t beat = SIZE_MAX, low = SIZE_MAX;
+		int beat_v = -1, low_v = INT32_MAX;
+		for(size_t i = 0; i < dec.options.size(); ++i) {
+			const Option& o = dec.options[i];
+			int v = -1;
+			for(const auto& c : b.mzone[1 - duel.turn_player()])
+				if(c.code && c.code == o.code && (c.seq == o.seq || v < 0))
+					v = stat_of(c);
+			if(v < 0)
+				continue;
+			if(v < atk && v > beat_v)
+				beat = i, beat_v = v;
+			if(v < low_v)
+				low = i, low_v = v;
+		}
+		return beat != SIZE_MAX ? beat : low;
+	}
+	if(dec.type == DecisionType::Idle && picked < dec.options.size() && dec.options[picked].kind == OptKind::ToEnd &&
+	   me == duel.turn_player() && duel.phase() == PHASE_MAIN1) {
+		size_t battle = SIZE_MAX;
+		for(size_t i = 0; i < dec.options.size(); ++i)
+			if(dec.options[i].kind == OptKind::ToBattle)
+				battle = i;
+		if(battle == SIZE_MAX)
+			return SIZE_MAX;
+		const Board b = board();
+		int strongest = 0, weakest = INT32_MAX;
+		bool open = true;
+		for(const auto& c : b.mzone[me])
+			if(c.code && (c.pos & POS_FACEUP_ATTACK))
+				strongest = std::max(strongest, c.atk);
+		for(const auto& c : b.mzone[opp])
+			if(c.code)
+				open = false, weakest = std::min(weakest, stat_of(c));
+		return strongest > 0 && (open || strongest > weakest) ? battle : SIZE_MAX;
+	}
+	return SIZE_MAX;
+}
+
 size_t weighted_pick(const std::vector<double>& w, std::mt19937_64& rng) {
 	double total = 0;
 	for(double x : w)
@@ -488,6 +573,32 @@ bool Searcher::drop_idle_responses(const RootState& root, Trajectory& t, uint8_t
 	return changed;
 }
 
+void Searcher::run_out(Duel& d, uint32_t last_turn, std::vector<std::vector<uint8_t>>* out) const {
+	if(std::getenv("YGOE_NO_RUN_OUT"))
+		return;
+	for(int guard = 0; guard < 40 && !d.ended() && d.turn() == last_turn && d.phase() < PHASE_MAIN1; ++guard) {
+		const Decision& dec = d.decision();
+		if(dec.options.empty())
+			break;
+		size_t pick = SIZE_MAX;
+		const bool turn_player = dec.player == d.turn_player();
+		for(size_t o = 0; o < dec.options.size() && pick == SIZE_MAX; ++o) {
+			const OptKind k = dec.options[o].kind;
+			if(turn_player ? (k == OptKind::Pass || k == OptKind::No)
+			               : (dec.type == DecisionType::EffectYesNo || dec.type == DecisionType::YesNo ? k == OptKind::Yes
+			                                                                                             : k == OptKind::Pass))
+				pick = o;
+		}
+		if(pick == SIZE_MAX)
+			pick = 0;
+		const auto resp = dec.options[pick].response;
+		if(!d.respond(resp))
+			break;
+		if(out)
+			out->push_back(resp);
+	}
+}
+
 bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns, double min_reward,
                              bool lenient) {
 	static const bool dbg = std::getenv("YGOE_DEFER_DEBUG") != nullptr;
@@ -586,6 +697,8 @@ bool Searcher::replay_labels(const RootState& root, Trajectory& t, uint8_t playe
 		out.responses.push_back(std::move(resp));
 		out.steps.push_back(std::move(done));
 	}
+	if(d.turn() == root_turn + static_cast<uint32_t>(horizon_turns))
+		run_out(d, d.turn());
 	uint8_t next = d.turn() >= root_turn + static_cast<uint32_t>(horizon_turns) ? d.turn_player()
 	                                                                             : static_cast<uint8_t>(1 - d.turn_player());
 	auto evr = eval_.evaluate(d.board(), player, next, d.ended(), d.winner(), dbg);
@@ -904,6 +1017,9 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 						idx = weighted_pick(w, rng);
 						if(tried[idx])
 							idx = SIZE_MAX;
+						const size_t bp = battle_pick(duel, dec, idx);
+						if(bp < dec.options.size() && !tried[bp])
+							idx = bp;
 					}
 					if(idx == SIZE_MAX || idx >= dec.options.size())
 						break;  // nothing legal left
@@ -951,6 +1067,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				guide_done += static_cast<long>(std::min(plan_pos, plan.size()));
 				++guide_runs;
 			}
+			// The next turn's Draw and Standby Phase, played out: what resolves there counts
+			// (traj keeps its steps: the plan is only followed within the turn).
+			if(duel.turn() == root_turn + static_cast<uint32_t>(cfg.horizon_turns))
+				run_out(duel, duel.turn());
 			// Who acts next decides whose interruptions count.
 			uint8_t next = duel.turn() >= root_turn + static_cast<uint32_t>(cfg.horizon_turns)
 			                   ? duel.turn_player()
@@ -1108,6 +1228,11 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 						w[i] = weight(d, dec, dec.options[i], this_turn);
 					pick = weighted_pick(w, rng);
 				}
+				if(!dec.minor) {
+					const size_t bp = battle_pick(d, dec, pick);
+					if(bp < dec.options.size())
+						pick = bp;
+				}
 			}
 			const Option& o = dec.options[pick];
 			Step st{dec.player, dec.type, o.label, dec.minor, answering(d, dec, o)};
@@ -1123,6 +1248,8 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 			out.steps.push_back(std::move(st));
 			++this_turn;
 		}
+		if(d.turn() == root_turn + static_cast<uint32_t>(cfg.horizon_turns))
+			run_out(d, d.turn());
 		uint8_t next = d.turn() >= root_turn + static_cast<uint32_t>(cfg.horizon_turns) ? d.turn_player()
 		                                                                                : static_cast<uint8_t>(1 - d.turn_player());
 		out.reward = eval_.evaluate(d.board(), me, next, d.ended(), d.winner()).score;

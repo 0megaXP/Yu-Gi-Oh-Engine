@@ -55,6 +55,75 @@ const char* Interrupt::name() const {
 	}
 }
 
+namespace {
+// The board-dependent parts of a card's text (lower case): see CardRole::tiers / rider_type / gy_target.
+void board_tiers(const std::string& t, CardRole& role) {
+	auto quoted_before = [&](size_t at, size_t from) -> std::string {  // a "name" between from and at
+		const size_t q1 = t.find('"', from);
+		if(q1 == std::string::npos || q1 > at)
+			return {};
+		const size_t q2 = t.find('"', q1 + 1);
+		return q2 == std::string::npos || q2 > at ? std::string() : t.substr(q1 + 1, q2 - q1 - 1);
+	};
+	size_t b = t.find("based on the number of ");
+	if(b != std::string::npos) {
+		const size_t end = t.find('.', b);
+		const std::string cond = t.substr(b, end == std::string::npos ? std::string::npos : end - b);
+		struct L {
+			const char* text;
+			uint32_t loc;
+		};
+		for(const L& l : {L{"in your spell & trap zone", (uint32_t)LOCATION_SZONE}, L{"in your gy", (uint32_t)LOCATION_GRAVE},
+		                  L{"in your graveyard", (uint32_t)LOCATION_GRAVE}, L{"in your monster zone", (uint32_t)LOCATION_MZONE},
+		                  L{"you control", (uint32_t)(LOCATION_MZONE | LOCATION_SZONE)}, L{"banished", (uint32_t)LOCATION_REMOVED},
+		                  L{"in your hand", (uint32_t)LOCATION_HAND}})
+			if(cond.find(l.text) != std::string::npos) {
+				role.tier_loc = l.loc;
+				break;
+			}
+		role.tier_name = quoted_before(b + cond.size(), b);
+		role.tier_monsters = cond.find("monster") != std::string::npos;
+		// the tiers: "● 3+: ..." up to the next bullet
+		const std::string bullet = "\xe2\x97\x8f";  // ●
+		size_t at = t.find(bullet, b);
+		while(role.tier_loc && at != std::string::npos) {
+			size_t k = at + bullet.size();
+			while(k < t.size() && t[k] == ' ')
+				++k;
+			int n = 0;
+			while(k < t.size() && std::isdigit(static_cast<unsigned char>(t[k])))
+				n = n * 10 + (t[k++] - '0');
+			const size_t next = t.find(bullet, k);
+			const std::string part = t.substr(k, next == std::string::npos ? std::string::npos : next - k);
+			auto has = [&](const char* w) { return part.find(w) != std::string::npos; };
+			double v = 0.12;
+			if(has("you choose the zone") || has("the turn it was set"))
+				v = 0.15;
+			else if(has("negate") || has("banish") || has("destroy"))
+				v = 0.35;
+			else if(has("unaffected") || has("cannot be destroyed") || has("cannot be targeted"))
+				v = 0.25;
+			else if(has("draw") || has("special summon") || has("add"))
+				v = 0.25;
+			if(n > 0)
+				role.tiers.push_back({n, v});
+			at = next;
+		}
+		if(role.tiers.empty())
+			role.tier_loc = 0;
+	}
+	for(const auto& [w, type] : {std::pair<const char*, uint32_t>{"then if you control a synchro monster", TYPE_SYNCHRO},
+	                             {"then if you control a fusion monster", TYPE_FUSION},
+	                             {"then if you control an xyz monster", TYPE_XYZ},
+	                             {"then if you control a link monster", TYPE_LINK}})
+		if(t.find(w) != std::string::npos)
+			role.rider_type = type;
+	const size_t g = t.find("monster in your gy");
+	if(g != std::string::npos && t.rfind("target", g) != std::string::npos && g - t.rfind("target", g) < 60)
+		role.gy_target = quoted_before(g, t.rfind("target", g));
+}
+}  // namespace
+
 CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& deck_sets) {
 	CardRole role;
 	auto c = db.get(db.script_id(code));
@@ -66,6 +135,23 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 			ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 		role.needs_empty_field = t.find("if you control no cards") != std::string::npos;
 		role.column = column_rule(t);
+		board_tiers(t, role);
+		if((c->type & TYPE_TRAP) && t.find("activate this card from your hand") != std::string::npos) {
+			role.from_hand = true;
+			role.from_hand_first_turn = t.find("their first turn") != std::string::npos;
+			const size_t lk = t.find("if you activated this card from your hand");
+			if(lk != std::string::npos) {
+				const size_t end = t.find('.', lk);
+				const std::string sent = t.substr(lk, end == std::string::npos ? std::string::npos : end - lk);
+				static const std::pair<const char*, uint32_t> names[] = {
+					{"earth", ATTRIBUTE_EARTH}, {"water", ATTRIBUTE_WATER}, {"fire", ATTRIBUTE_FIRE}, {"wind", ATTRIBUTE_WIND},
+					{"light", ATTRIBUTE_LIGHT}, {"dark", ATTRIBUTE_DARK}, {"divine", ATTRIBUTE_DIVINE}};
+				if(sent.find("cannot activate") != std::string::npos)
+					for(auto& [n, bit] : names)
+						if(sent.find(n) != std::string::npos)
+							role.hand_lock |= bit;
+			}
+		}
 	}
 	const bool is_trap = c->type & TYPE_TRAP;
 	const bool is_quickplay = (c->type & TYPE_SPELL) && (c->type & TYPE_QUICKPLAY);
@@ -179,6 +265,10 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 			role.interrupts.push_back(in);
 		}
 	}
+	if(role.from_hand)
+		for(auto& in : role.interrupts)
+			if(in.range & LOCATION_SZONE)
+				in.range |= LOCATION_HAND;
 	role.floats = floats(*c);
 	bool archetype = false;
 	for(auto s : deck_sets)

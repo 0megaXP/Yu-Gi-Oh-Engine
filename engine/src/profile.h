@@ -69,6 +69,31 @@ struct CardRole {
 	// What its effects reach by its column (column.h: Angelechy Synchros, Elfnote Regina's center
 	// zone, a Set Infinite Impermanence's column).
 	ColumnRule column;
+	// A Trap its controller can activate from the hand ("If your opponent controls a card, you can
+	// activate this card from your hand": the Dominus cards; Angelechy Opening to e4 in the
+	// opponent's first turn): an interruption from the hand too, that needs no Spell & Trap Zone.
+	bool from_hand = false;
+	bool from_hand_first_turn = false;  // only "during the Standby Phase of their first turn"
+	// Attributes whose monster effects its controller can't activate for the rest of the Duel
+	// after activating it from the hand (Dominus Impulse: LIGHT, EARTH and WIND).
+	uint32_t hand_lock = 0;
+	// Values that depend on the board (board_tiers in profile.cpp).
+	//  Tiers: "This card gains the following effects, based on the number of "Angelechy" Monster
+	//  Cards in your Spell & Trap Zone. ● 1+: ... ● 3+: ..." (Angelechy Endgame Problem): each
+	//  tier whose count is reached adds its value while the card is face-up on the field.
+	struct Tier {
+		int min = 0;
+		double value = 0;
+	};
+	std::vector<Tier> tiers;
+	std::string tier_name;      // the quoted name the counted cards have ("" = any card)
+	uint32_t tier_loc = 0;      // where they are counted (LOCATION_SZONE, LOCATION_GRAVE...)
+	bool tier_monsters = false;  // "Monster Cards" / "monsters" only
+	//  A part that needs another card: "..., then if you control a Synchro Monster, you can negate"
+	//  (Elfnotes: Rhapsodia of Madness): without one, its interruption is worth half.
+	uint32_t rider_type = 0;
+	//  "target 1 "Elfnote" monster in your GY": with none there, its effect has nothing to use.
+	std::string gy_target;
 	double passive(uint32_t loc) const { return (loc & 0x4) ? passive_mzone : passive_szone; }
 	bool reusable(uint32_t loc) const { return (loc & 0x4) ? reusable_mzone : reusable_szone; }
 };

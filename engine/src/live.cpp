@@ -719,6 +719,17 @@ int LiveDuel::choose(BotLevel level) {
 						margin = 0.03;
 				}
 		}
+		// An optional trigger ("Use X?": Endgame Problem's draw in the opponent's Standby Phase) is
+		// now or never: there is no better moment to save it for, so no margin. (Not a negate: one
+		// that waits for a better target keeps it.)
+		if(use_code && d.type == DecisionType::EffectYesNo && !eval_->role(d.player, use_code).hand_trap) {
+			bool negates = false;
+			for(const auto& in : eval_->role(d.player, use_code).interrupts)
+				negates |= in.kind == Interrupt::NegateActivation || in.kind == Interrupt::NegateEffect ||
+				           in.kind == Interrupt::NegateSummon;
+			if(!negates)
+				margin = 0.0;
+		}
 		// A hand trap on its owner's own turn answers the opponent's link (Ash on their Ash...);
 		// with none on top, using it (Mulcharmy Fuwalos in its own Standby Phase) mostly throws it
 		// away: only for a very clear gain.
@@ -881,26 +892,27 @@ int LiveDuel::choose(BotLevel level) {
 			if(wipe && duel_->board().count_field(static_cast<uint8_t>(1 - d.player)) < 3)
 				margin = std::max(margin, 0.08);
 		}
-		// A negate (or removal) on the opponent's turn waits for their activation: it answers the
-		// effect activated, on the link it stops. In an open window (a Summon, a phase change) it is held,
-		// except when waiting doesn't work: a card with a lasting effect (no activation to wait for), a
-		// deck that can take its monster away in response to the negate (Regina sending Lucina, so
-		// Veiler goes on Lucina before her effect), or the turn's End Phase (no later window).
+		// A negate on the opponent's turn waits for their activation: it answers the effect activated,
+		// on the link it stops. In an open window (a Summon, a phase change) it needs a very clear gain
+		// (a lethal board coming), a clear one where waiting doesn't work: a card with a lasting effect
+		// (no activation to wait for), a deck that can take its monster away in response to the negate
+		// (Regina sending Lucina, so Veiler goes on Lucina before her effect), or the turn's End Phase
+		// (no later window). Removal isn't held: answering a Summon or an attacker is its normal use.
 		if(use && use_code && d.player != duel_->turn_player()) {
 			const CardRole& ur = eval_->role(d.player, use_code);
 			bool stopper = false, on_summon = false;
 			for(const auto& in : ur.interrupts) {
-				stopper |= in.kind == Interrupt::NegateActivation || in.kind == Interrupt::NegateEffect || in.kind == Interrupt::Removal;
+				stopper |= in.kind == Interrupt::NegateActivation || in.kind == Interrupt::NegateEffect;
 				on_summon |= in.kind == Interrupt::NegateSummon;
 			}
 			const uint8_t o2 = static_cast<uint8_t>(1 - d.player);
 			const bool answers = duel_->chain_depth() > 0 && duel_->chain_last_player() == o2;
 			if(stopper && !on_summon && !answers) {
 				const bool early_ok = lasting_target(o2) || (dodges_[o2] && live_target(o2)) || duel_->phase() == PHASE_END;
-				margin = std::max(margin, early_ok ? 0.06 : 1.0);
+				margin = std::max(margin, early_ok ? 0.06 : 0.10);
 				if(std::getenv("YGOE_BOT_DEBUG"))
 					std::fprintf(stderr, "   %s: no activation to answer, %s\n", db_.name(use_code).c_str(),
-					             early_ok ? "used early only for a clear gain" : "held");
+					             early_ok ? "used early only for a clear gain" : "used only for a very clear gain");
 			}
 		}
 		bool used = !pass || (use && use->mean > pass->mean + margin);

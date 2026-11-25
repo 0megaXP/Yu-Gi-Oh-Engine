@@ -141,6 +141,11 @@ public:
 	// as well without them): an effect activated just because it can be, a Link Summon that leads
 	// nowhere, a Normal Spell set for no reason. True if `t` changed.
 	bool drop_idle_plays(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
+	// After the horizon's last turn: the next turn's Draw and Standby Phase, played out (its turn
+	// player only passes and draws; the other player uses its optional effects: Angelechy Endgame
+	// Problem's draw, Opening to e4 placing its cards), so the board is scored as their Main Phase 1
+	// starts. Responses are appended to `out` if given.
+	void run_out(Duel& d, uint32_t last_turn, std::vector<std::vector<uint8_t>>* out = nullptr) const;
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 
