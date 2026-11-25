@@ -18,6 +18,12 @@ namespace ygoe {
 
 enum class BotLevel { Easy, Normal, Strong };
 
+namespace json { class Value; }
+// A saved simulator duel (the app's replay file, or LiveDuel::setup_json()): its setup.
+bool setup_from_json(const json::Value& v, DuelSetup& out, std::string* error = nullptr);
+std::string hex(const std::vector<uint8_t>& bytes);
+bool unhex(const std::string& s, std::vector<uint8_t>& out);
+
 class LiveDuel {
 public:
 	// The other player's Main Deck cards `me` has seen: on the field face-up, in the GY or
@@ -105,6 +111,10 @@ public:
 	void set_priorities(int player, std::shared_ptr<const CardPriorities> p) { priorities_[player & 1] = std::move(p); }
 
 	const Duel& duel() const { return *duel_; }
+	// For saving the duel as a replay: how it was set up (decks in order, hands, seed) and the
+	// answers given so far, hex. state_json() carries the setup once and each new answer once.
+	std::string setup_json() const;
+	const std::vector<std::vector<uint8_t>>& history() const { return history_; }
 
 private:
 	void begin(const Deck& d0, const Deck& d1);
@@ -136,11 +146,14 @@ private:
 	int iterations_ = 0;
 	std::unique_ptr<Searcher> searcher_;
 	std::vector<std::vector<uint8_t>> history_;
+	bool setup_sent_ = false;
+	size_t history_sent_ = 0;
 	std::vector<std::string> log_;
 	int human_ = -1;
 	std::vector<int8_t> log_players_;
 	std::vector<Duel::Move> moves_;
 	std::vector<Duel::Activation> activations_;
+	std::vector<Duel::Pick> picks_;
 	std::string last_move_;
 	// The bot's current plan: the expected sequence of decision labels (both players).
 	std::vector<Step> plan_;

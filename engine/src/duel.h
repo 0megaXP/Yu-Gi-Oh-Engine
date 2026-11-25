@@ -188,6 +188,31 @@ public:
 		uint32_t after;
 	};
 	std::vector<Activation> take_activations() { auto out = std::move(activations_); activations_.clear(); return out; }
+	// A card an effect targets (or, shown with Duel.HintSelection, picks without targeting), for
+	// showing it (only collected with the log). `link`: the chain link (1 = first) doing it.
+	struct Pick {
+		uint32_t code;   // 0 until known (resolved at the end of the message batch)
+		uint8_t con, loc;
+		uint32_t seq, pos;
+		bool target;     // targeted (else selected)
+		int link;
+		uint32_t after;  // moves taken together with it that happened before it
+		uint32_t source = 0;  // the card whose effect it is (script id)
+		uint32_t chain_gen = 0;
+	};
+	std::vector<Pick> take_picks() { auto out = std::move(picks_); picks_.clear(); return out; }
+	// The chain being built or resolved (only collected with the log), first link first.
+	struct ChainLink {
+		uint32_t code;
+		uint8_t con, loc;
+		uint32_t seq, pos;
+		uint64_t desc;   // the effect's description (string id), 0 if none
+		std::vector<Pick> picks;
+		bool negated = false;  // activation or effect negated
+		bool resolving = false;
+		bool resolved = false;
+	};
+	const std::vector<ChainLink>& chain() const { return chain_; }
 	void clear_events() { events_.clear(); }
 	size_t steps() const { return steps_; }
 	// Links on the chain being built (0 = an open window: a phase change, after a summon...).
@@ -256,6 +281,14 @@ private:
 	std::vector<int8_t> log_players_;
 	std::vector<Move> moves_;
 	std::vector<Activation> activations_;
+	std::vector<Pick> picks_;
+	std::vector<ChainLink> chain_;
+	int resolving_link_ = 0;
+	uint32_t chain_gen_ = 0;  // goes up at every chain's end  // the link resolving (1 = first), 0: none
+	uint32_t code_at(uint8_t con, uint8_t loc, uint32_t seq) const;
+	struct PendingPicks { size_t begin, end, line; };
+	std::vector<PendingPicks> pending_picks_;
+	void resolve_picks();
 	void push_log(int player, std::string line) {
 		log_.push_back(std::move(line));
 		log_players_.push_back(static_cast<int8_t>(player < 2 ? player : -1));

@@ -117,6 +117,7 @@ void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	log_players_ = duel_->take_log_players();
 	moves_ = duel_->take_moves();
 	activations_ = duel_->take_activations();
+	picks_ = duel_->take_picks();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
 	steps_turn_ = duel_->turn();
@@ -165,6 +166,10 @@ bool LiveDuel::respond_internal(size_t index) {
 	for(auto& a : acts)
 		a.after += static_cast<uint32_t>(moves_.size());
 	activations_.insert(activations_.end(), acts.begin(), acts.end());
+	auto picks = duel_->take_picks();
+	for(auto& k : picks)
+		k.after += static_cast<uint32_t>(moves_.size());
+	picks_.insert(picks_.end(), picks.begin(), picks.end());
 	auto moves = duel_->take_moves();
 	moves_.insert(moves_.end(), moves.begin(), moves.end());
 	return true;
@@ -1032,12 +1037,130 @@ std::string LiveDuel::state_json() {
 		o << (i ? "," : "") << "{\"code\":" << db_.official_id(a.code) << ",\"place\":[" << int(a.con) << "," << int(a.loc)
 		  << "," << a.seq << "," << a.pos << "],\"after\":" << a.after << "}";
 	}
+	auto place = [](uint8_t con, uint8_t loc, uint32_t seq, uint32_t pos) {
+		return "[" + std::to_string(con) + "," + std::to_string(loc) + "," + std::to_string(seq) + "," + std::to_string(pos) + "]";
+	};
+	auto pick_json = [&](const Duel::Pick& k) {
+		return "{\"code\":" + std::to_string(db_.official_id(k.code)) + ",\"name\":" + quote(k.code ? db_.name(k.code) : "") +
+		       ",\"place\":" + place(k.con, k.loc, k.seq, k.pos) + ",\"target\":" + (k.target ? "true" : "false") +
+		       ",\"link\":" + std::to_string(k.link) + ",\"source\":" + std::to_string(db_.official_id(k.source)) +
+		       ",\"after\":" + std::to_string(k.after) + "}";
+	};
+	o << "],\"picks\":[";
+	for(size_t i = 0; i < picks_.size(); ++i)
+		o << (i ? "," : "") << pick_json(picks_[i]);
+	// The chain as it stands (being built, or resolving): first link first, with what each targets.
+	o << "],\"chain\":[";
+	const auto& chain = duel_->chain();
+	for(size_t i = 0; i < chain.size(); ++i) {
+		const Duel::ChainLink& c = chain[i];
+		std::string desc = c.desc > 0xfffff ? db_.description(c.desc) : std::string();
+		o << (i ? "," : "") << "{\"code\":" << db_.official_id(c.code) << ",\"name\":" << quote(db_.name(c.code))
+		  << ",\"player\":" << int(c.con) << ",\"place\":" << place(c.con, c.loc, c.seq, c.pos) << ",\"effect\":" << quote(desc)
+		  << ",\"negated\":" << (c.negated ? "true" : "false") << ",\"state\":\""
+		  << (c.resolved ? "resolved" : c.resolving ? "resolving" : "waiting") << "\",\"picks\":[";
+		for(size_t j = 0; j < c.picks.size(); ++j)
+			o << (j ? "," : "") << pick_json(c.picks[j]);
+		o << "]}";
+	}
+	o << "],\"step\":" << history_.size();
+	if(!setup_sent_) {
+		o << ",\"setup\":" << setup_json();
+		setup_sent_ = true;
+	}
+	o << ",\"responses\":[";
+	for(size_t i = history_sent_; i < history_.size(); ++i)
+		o << (i > history_sent_ ? "," : "") << "\"" << hex(history_[i]) << "\"";
+	history_sent_ = history_.size();
 	log_.clear();
 	log_players_.clear();
 	moves_.clear();
 	activations_.clear();
+	picks_.clear();
 	o << "]}";
 	return o.str();
+}
+
+std::string hex(const std::vector<uint8_t>& bytes) {
+	static const char* digits = "0123456789abcdef";
+	std::string s;
+	for(uint8_t b : bytes) {
+		s += digits[b >> 4];
+		s += digits[b & 15];
+	}
+	return s;
+}
+
+bool unhex(const std::string& s, std::vector<uint8_t>& out) {
+	auto val = [](char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; };
+	if(s.size() % 2)
+		return false;
+	out.clear();
+	for(size_t i = 0; i < s.size(); i += 2) {
+		int h = val(s[i]), l = val(s[i + 1]);
+		if(h < 0 || l < 0)
+			return false;
+		out.push_back(static_cast<uint8_t>(h << 4 | l));
+	}
+	return true;
+}
+
+std::string LiveDuel::setup_json() const {
+	std::ostringstream o;
+	o.imbue(std::locale::classic());
+	auto list = [&](const std::vector<uint32_t>& v) {
+		std::string s = "[";
+		for(size_t i = 0; i < v.size(); ++i)
+			s += (i ? "," : "") + std::to_string(v[i]);
+		return s + "]";
+	};
+	o << "{\"seed\":[";
+	for(int i = 0; i < 4; ++i)
+		o << (i ? "," : "") << "\"" << setup_.seed[i] << "\"";  // strings: 64-bit numbers don't fit a JSON double
+	o << "],\"flags\":\"" << setup_.flags << "\",\"no_shuffle\":" << (setup_.no_shuffle ? "true" : "false") << ",\"players\":[";
+	for(int p = 0; p < 2; ++p) {
+		const PlayerSetup& ps = setup_.players[p];
+		o << (p ? "," : "") << "{\"lp\":" << ps.lp << ",\"main\":" << list(ps.main) << ",\"extra\":" << list(ps.extra)
+		  << ",\"hand\":" << list(ps.hand) << ",\"placed\":[";
+		for(size_t i = 0; i < ps.placed.size(); ++i) {
+			const PlacedCard& c = ps.placed[i];
+			o << (i ? "," : "") << "[" << c.code << "," << c.loc << "," << c.seq << "," << c.pos << "]";
+		}
+		o << "]}";
+	}
+	o << "]}";
+	return o.str();
+}
+
+bool setup_from_json(const json::Value& v, DuelSetup& out, std::string* error) {
+	auto fail = [&](const char* why) {
+		if(error)
+			*error = why;
+		return false;
+	};
+	if(!v.is_object() || !v["players"].is_array() || v["players"].size() != 2 || v["seed"].size() != 4)
+		return fail("not a duel setup");
+	out = DuelSetup{};
+	for(int i = 0; i < 4; ++i)
+		out.seed[i] = std::stoull(v["seed"][i].str().empty() ? "0" : v["seed"][i].str());
+	out.flags = v["flags"].str().empty() ? 0 : std::stoull(v["flags"].str());
+	out.no_shuffle = v["no_shuffle"].boolean();
+	for(int p = 0; p < 2; ++p) {
+		const json::Value& j = v["players"][p];
+		PlayerSetup& ps = out.players[p];
+		ps.lp = static_cast<uint32_t>(j["lp"].integer(8000));
+		auto list = [&](const json::Value& a, std::vector<uint32_t>& to) {
+			for(const auto& x : a.items())
+				to.push_back(static_cast<uint32_t>(x.integer()));
+		};
+		list(j["main"], ps.main);
+		list(j["extra"], ps.extra);
+		list(j["hand"], ps.hand);
+		for(const auto& c : j["placed"].items())
+			ps.placed.push_back({static_cast<uint32_t>(c[0].integer()), static_cast<uint32_t>(c[1].integer()),
+			                     static_cast<uint32_t>(c[2].integer()), static_cast<uint32_t>(c[3].integer())});
+	}
+	return true;
 }
 
 }  // namespace ygoe

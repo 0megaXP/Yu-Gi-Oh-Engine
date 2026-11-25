@@ -99,7 +99,8 @@ int usage() {
 	             "  ygoe-cli bridges <deck.ydk> [--reach data/reach.tsv]   (cards taking the deck into another archetype)\n"
 	             "  ygoe-cli reachscan <a.ydk> [b.ydk ...] [--shard I/N] [--out reach.tsv]\n"
 	             "  ygoe-cli triggers <deck.ydk | passcode ...>   (each card's triggers, classified)\n"
-	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S]\n"
+	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S] [--save replay.json]\n"
+	             "  ygoe-cli simreplay <replay.json> [--at N]   (a duel saved from the app's simulator)\n"
 	             "  ygoe-cli followall <inputs.jsonl> --out positions.jsonl --summary follows.jsonl [--shard i/n]\n"
 	             "                   (follows the app's uploaded games: one follow request per line)\n"
 	             "options: --data DIR  --scripts DIR\n");
@@ -635,6 +636,67 @@ int main(int argc, char** argv) {
 	}
 	if(cmd == "proxy")
 		return cmd_proxy(db, a);
+	if(cmd == "simreplay") {
+		// A duel saved from the app's simulator: rebuilt in the rules core, its log printed (up to
+		// answer --at N), then where it stands.
+		if(a.pos.size() < 2)
+			return usage();
+		std::ifstream f(a.pos[1]);
+		std::stringstream ss;
+		ss << f.rdbuf();
+		auto v = json::Value::parse(ss.str(), &err);
+		DuelSetup setup;
+		if(!err.empty() || !setup_from_json(v["setup"], setup, &err)) {
+			std::fprintf(stderr, "%s\n", err.empty() ? "not a replay" : err.c_str());
+			return 1;
+		}
+		std::vector<std::vector<uint8_t>> responses;
+		for(const auto& r : v["responses"].items()) {
+			responses.emplace_back();
+			if(!unhex(r.str(), responses.back())) {
+				std::fprintf(stderr, "bad response %zu\n", responses.size() - 1);
+				return 1;
+			}
+		}
+		size_t at = std::min(responses.size(), static_cast<size_t>(std::stoul(a.get("at", std::to_string(responses.size())))));
+		Duel d(db, scripts);
+		d.enable_log(true);
+		auto flush = [&] {
+			for(auto& line : d.take_log())
+				std::printf("%s\n", line.c_str());
+			d.take_log_players();
+		};
+		if(!d.start(setup, &err)) {
+			std::fprintf(stderr, "%s\n", err.c_str());
+			return 1;
+		}
+		flush();
+		for(size_t i = 0; i < at; ++i) {
+			const Decision& dec = d.decision();
+			std::string label;
+			for(const auto& o : dec.options)
+				if(o.response == responses[i])
+					label = o.label;
+			std::printf("  > [%zu] P%d: %s\n", i, dec.player, label.empty() ? "(answer)" : label.c_str());
+			if(!d.respond(responses[i])) {
+				std::fprintf(stderr, "answer %zu rejected: the engine plays this duel differently now\n", i);
+				return 1;
+			}
+			flush();
+		}
+		auto b = d.board();
+		std::printf("\nafter %zu of %zu answers: turn %u, LP %d / %d%s\n", at, responses.size(), d.turn(), b.lp[0], b.lp[1],
+		            d.ended() ? (", winner P" + std::to_string(d.winner())).c_str() : "");
+		for(const auto& c : d.chain()) {
+			std::printf("  chain: P%d %s", c.con, db.name(c.code).c_str());
+			for(const auto& k : c.picks)
+				std::printf(" -> %s%s", k.target ? "" : "(picks) ", db.name(k.code).c_str());
+			std::printf("\n");
+		}
+		if(!d.ended())
+			std::printf("  next: P%d %s (%zu options)\n", d.decision().player, decision_name(d.decision().type), d.decision().options.size());
+		return 0;
+	}
 	if(cmd == "duel") {
 		if(a.pos.size() < 3)
 			return usage();
@@ -683,6 +745,13 @@ int main(int argc, char** argv) {
 			print_log();
 		}
 		double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		if(a.has("save")) {
+			std::ofstream out(a.get("save", ""));
+			out << "{\"format\":\"ygo-sandbox-replay\",\"version\":1,\"setup\":" << live.setup_json() << ",\"responses\":[";
+			for(size_t i = 0; i < live.history().size(); ++i)
+				out << (i ? "," : "") << "\"" << hex(live.history()[i]) << "\"";
+			out << "]}\n";
+		}
 		auto b = live.duel().board();
 		std::printf("\n%d bot decisions in %.1fs; LP %d / %d; %s\n", moves, secs, b.lp[0], b.lp[1],
 		            live.duel().ended() ? ("winner P" + std::to_string(live.duel().winner())).c_str() : "not finished");

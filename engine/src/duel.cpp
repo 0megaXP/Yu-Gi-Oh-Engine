@@ -504,7 +504,66 @@ void Duel::process() {
 	}
 }
 
+uint32_t Duel::code_at(uint8_t con, uint8_t loc, uint32_t seq) const {
+	OCG_QueryInfo qi{};
+	qi.flags = QUERY_CODE;
+	qi.con = con;
+	qi.loc = loc;
+	qi.seq = seq;
+	uint32_t len = 0;
+	auto* buf = static_cast<const uint8_t*>(OCG_DuelQuery(duel_, &len, &qi));
+	Reader r{buf, buf + len};
+	while(r.p + 2 <= r.end) {
+		uint16_t sz = r.get<uint16_t>();
+		if(sz < 4)
+			break;
+		uint32_t flag = r.get<uint32_t>();
+		if(flag == QUERY_CODE && sz >= 8)
+			return r.get<uint32_t>();
+		r.skip(sz - 4);
+	}
+	return 0;
+}
+
+void Duel::resolve_picks() {
+	auto name = [&](const Pick& k) {
+		bool hidden = (k.pos & POS_FACEDOWN) && (k.loc & (LOCATION_MZONE | LOCATION_SZONE));
+		if(hidden || !k.code)
+			return std::string(k.loc & LOCATION_MZONE ? "a face-down monster" : k.loc & LOCATION_SZONE ? "a Set card" : "a card");
+		return db_.name(k.code);
+	};
+	for(const auto& pp : pending_picks_) {
+		for(size_t i = pp.begin; i < pp.end && i < picks_.size(); ++i) {
+			Pick& k = picks_[i];
+			// the card that was there: the first move after it from that place, else what is there now
+			for(size_t j = k.after; j < moves_.size() && !k.code; ++j) {
+				const Move& mv = moves_[j];
+				if(mv.from_con == k.con && mv.from_loc == k.loc && mv.from_seq == k.seq)
+					k.code = mv.code;
+			}
+			if(!k.code && !(k.loc & LOCATION_OVERLAY))
+				k.code = code_at(k.con, k.loc, k.seq);
+			if(k.chain_gen == chain_gen_ && k.link >= 1 && k.link <= static_cast<int>(chain_.size()))
+				chain_[k.link - 1].picks.push_back(k);
+		}
+		if(pp.begin >= picks_.size() || pp.line >= log_.size())
+			continue;
+		const Pick& f = picks_[pp.begin];
+		std::string what;
+		size_t n = std::min(pp.end, picks_.size()) - pp.begin;
+		for(size_t i = 0; i < n; ++i)
+			what += (i ? (i + 1 == n ? " and " : ", ") : "") + name(picks_[pp.begin + i]);
+		std::string src = f.source ? db_.name(f.source) : "An effect";
+		log_[pp.line] = "   " + src + (f.target ? " targets " : " picks ") + what;
+	}
+	pending_picks_.clear();
+}
+
 void Duel::parse_messages(const uint8_t* data, uint32_t len) {
+	struct ResolveAtEnd {
+		Duel* d;
+		~ResolveAtEnd() { if(!d->pending_picks_.empty()) d->resolve_picks(); }
+	} resolve_at_end{this};
 	Reader r{data, data + len};
 	while(r.p + 4 <= r.end) {
 		uint32_t size = r.get<uint32_t>();
@@ -731,6 +790,12 @@ void Duel::log_message(uint8_t type, const uint8_t* begin, const uint8_t* end) {
 	case MSG_CHAINING: {
 		uint32_t code = m.get<uint32_t>();
 		auto li = read_loc(m);
+		m.get<uint8_t>();   // triggering controller, location, sequence
+		m.get<uint8_t>();
+		m.get<uint32_t>();
+		uint64_t desc = m.get<uint64_t>();
+		ChainLink link{code, li.con, li.loc, li.seq, li.pos, desc, {}};
+		chain_.push_back(std::move(link));
 		chain_codes_.push_back(code);
 		chain_players_.push_back(li.con);
 		activations_.push_back({code, li.con, li.loc, li.seq, li.pos, static_cast<uint32_t>(moves_.size())});
@@ -744,11 +809,53 @@ void Duel::log_message(uint8_t type, const uint8_t* begin, const uint8_t* end) {
 		std::string what = link >= 1 && link <= chain_codes_.size() ? name(chain_codes_[link - 1]) : "the effect";
 		int owner = link >= 1 && link <= chain_players_.size() ? chain_players_[link - 1] : -1;
 		push_log(owner, "   " + what + (type == MSG_CHAIN_NEGATED ? " is negated" : "'s effect is negated"));
+		if(link >= 1 && link <= chain_.size())
+			chain_[link - 1].negated = true;
+		break;
+	}
+	case MSG_CHAIN_SOLVING: {
+		uint8_t link = m.get<uint8_t>();
+		resolving_link_ = link;
+		if(link >= 1 && link <= chain_.size())
+			chain_[link - 1].resolving = true;
+		break;
+	}
+	case MSG_CHAIN_SOLVED: {
+		uint8_t link = m.get<uint8_t>();
+		if(link >= 1 && link <= chain_.size()) {
+			chain_[link - 1].resolving = false;
+			chain_[link - 1].resolved = true;
+		}
+		resolving_link_ = 0;
+		break;
+	}
+	case MSG_BECOME_TARGET:
+	case MSG_CARD_SELECTED: {
+		// Cards an effect targets (while it is activated, or a resolving effect showing what it
+		// picked): the link resolving, else the last one put on the chain.
+		int link = resolving_link_ ? resolving_link_ : static_cast<int>(chain_.size());
+		uint32_t n = m.get<uint32_t>();
+		size_t first = picks_.size();
+		for(uint32_t i = 0; i < n && i < 64; ++i) {
+			auto li = read_loc(m);
+			uint32_t source = link >= 1 && link <= static_cast<int>(chain_codes_.size()) ? chain_codes_[link - 1] : 0;
+			picks_.push_back({0, li.con, li.loc, li.seq, li.pos, type == MSG_BECOME_TARGET, link,
+			                  static_cast<uint32_t>(moves_.size()), source, chain_gen_});
+		}
+		if(picks_.size() > first)
+			pending_picks_.push_back({first, picks_.size(), log_.size()});
+		// the line is written once the cards are known (end of the batch)
+		int owner = link >= 1 && link <= static_cast<int>(chain_players_.size()) ? chain_players_[link - 1] : -1;
+		if(picks_.size() > first)
+			push_log(owner, "");
 		break;
 	}
 	case MSG_CHAIN_END:
 		chain_codes_.clear();
 		chain_players_.clear();
+		chain_.clear();
+		resolving_link_ = 0;
+		++chain_gen_;
 		break;
 	case MSG_ATTACK: {
 		auto a = read_loc(m);

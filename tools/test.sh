@@ -25,6 +25,11 @@ echo "== bridges (reach.h): Elfnote joins its Power Patron cards"
 build/ygoe-cli bridges examples/decks/elfnote_koller_wien_2026-11.ydk --reach data/reach.tsv | grep -q '"bridges":\[{'
 echo "== triggers (trigger.h): Artmage Diactorus floats when destroyed"
 build/ygoe-cli triggers 27184601 | grep -q "destroyed from the Monster Zone"
+echo "== simulator replays: a saved duel is rebuilt with the same log, and targets are shown"
+build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"
+build/ygoe-cli simreplay "$OUT/sim.json" | grep -v "^  >\|^after\|  chain:\|  next:\|^$" | diff -q - "$OUT/sim.txt" > /dev/null
+grep -q " targets " "$OUT/sim.txt"
 echo "== once per turn: the rules core's count of what is left reaches the board"
 YGOE_BOT_DEBUG=1 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --turns 1 --seed 3 > /dev/null 2> "$OUT/opt.txt"

@@ -112,6 +112,40 @@ data class DuelMove(val code: Long, val from: DuelPlace, val to: DuelPlace)
 /** A card or effect activated at [place]; [afterMoves] of this state's [DuelState.moves] came before it. */
 data class DuelActivation(val code: Long, val place: DuelPlace, val afterMoves: Int)
 
+/**
+ * A card an effect targets ([target]), or picks without targeting (shown by its script), at
+ * [place]; [link] is the chain link doing it (1 = first), [source] that link's card.
+ * [afterMoves] of this state's [DuelState.moves] came before it. [name] can be a face-down card's.
+ */
+data class DuelPick(
+    val code: Long,
+    val name: String,
+    val place: DuelPlace,
+    val target: Boolean,
+    val link: Int,
+    val source: Long,
+    val afterMoves: Int,
+)
+
+/** One link of the chain on the board. [state]: "waiting", "resolving" or "resolved". */
+data class DuelChainLink(
+    val code: Long,
+    val name: String,
+    val player: Int,
+    val place: DuelPlace,
+    /** The effect's own text when the card has more than one ("" otherwise). */
+    val effect: String,
+    val negated: Boolean,
+    val state: String,
+    val picks: List<DuelPick>,
+)
+
+/**
+ * For saving the duel as a replay: the setup (sent once, in the first state) and the answers
+ * given since the previous state, in order. Engines before Nov 2026 send neither.
+ */
+data class DuelRecord(val setup: String?, val responses: List<String>, val step: Int)
+
 data class DuelState(
     val turn: Int,
     val turnPlayer: Int,
@@ -131,6 +165,12 @@ data class DuelState(
     val moves: List<DuelMove> = emptyList(),
     /** Cards and effects activated since the previous state, in order. */
     val activations: List<DuelActivation> = emptyList(),
+    /** Cards targeted or picked by effects since the previous state, in order. */
+    val picks: List<DuelPick> = emptyList(),
+    /** The chain as it stands now (being built or resolving), link 1 first; empty when none. */
+    val chain: List<DuelChainLink> = emptyList(),
+    /** Null with an engine that can't save replays. */
+    val record: DuelRecord? = null,
 )
 
 internal object DuelParse {
@@ -186,6 +226,25 @@ internal object DuelParse {
                 a.getJSONObject(i).let { x -> DuelActivation(x.optLong("code"), place(x.optJSONArray("place")), x.optInt("after")) }
             }
         } ?: emptyList()
+        fun pick(x: JSONObject) = DuelPick(x.optLong("code"), x.optString("name"), place(x.optJSONArray("place")),
+            x.optBoolean("target"), x.optInt("link"), x.optLong("source"), x.optInt("after"))
+        val picks = o.optJSONArray("picks")?.let { a -> (0 until a.length()).map { pick(a.getJSONObject(it)) } } ?: emptyList()
+        val chain = o.optJSONArray("chain")?.let { a ->
+            (0 until a.length()).map { i ->
+                a.getJSONObject(i).let { c ->
+                    DuelChainLink(
+                        c.optLong("code"), c.optString("name"), c.optInt("player"), place(c.optJSONArray("place")),
+                        c.optString("effect"), c.optBoolean("negated"), c.optString("state"),
+                        c.optJSONArray("picks")?.let { p -> (0 until p.length()).map { pick(p.getJSONObject(it)) } } ?: emptyList(),
+                    )
+                }
+            }
+        } ?: emptyList()
+        val record = if (!o.has("step")) null else DuelRecord(
+            setup = o.optJSONObject("setup")?.toString(),
+            responses = o.optJSONArray("responses")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+            step = o.optInt("step"),
+        )
         return DuelState(
             turn = o.optInt("turn"),
             turnPlayer = o.optInt("turn_player"),
@@ -199,6 +258,9 @@ internal object DuelParse {
             logPlayers = logPlayers,
             moves = moves,
             activations = activations,
+            picks = picks,
+            chain = chain,
+            record = record,
         )
     }
 }
