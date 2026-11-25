@@ -134,7 +134,7 @@ CI (`.github/workflows/build.yml`) runs these and also builds the Android AAR.
 | `examples/decks/elfnote_koller_wien_2026-11.ydk` | Philipp Koller (Ars Magna Elfnote), Wien WCQ Regional Top 8 (2026-11-07) |
 
 Both lists come from YGOPRODeck. They are the fixed decks of the tests and examples; `decks/`
-holds the format's decks the learning plays, picked again every Learn run from the last 3 weeks
+holds the format's decks the learning plays, picked again every Learn run from the last 2 weeks
 of top cuts (`tools/ml/meta.py`, see `tools/ml/README.md`).
 
 ## Layout

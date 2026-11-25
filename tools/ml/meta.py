@@ -2,7 +2,7 @@
 """The format's decks for learning: picked from the last weeks' tournament top cuts.
 
 usage: meta.py --out-decks format/ --out-lists lists.json --report meta_report.json
-               [--weeks 3] [--by-results 3] [--by-usage 5] [--cache pages.json]
+               [--weeks 2] [--by-results 3] [--by-usage 5] [--cache pages.json]
 
 Reads YGOPRODeck's "Tournament Meta Decks" (TCG top cuts: deck, tournament, placement, players,
 date, the lists) for the last --weeks weeks, and groups them by archetype (YGOPRODeck's deck
@@ -112,7 +112,7 @@ def main():
     ap.add_argument("--out-decks", required=True)
     ap.add_argument("--out-lists", required=True)
     ap.add_argument("--report", required=True)
-    ap.add_argument("--weeks", type=int, default=3)
+    ap.add_argument("--weeks", type=int, default=2)
     ap.add_argument("--by-results", type=int, default=3)
     ap.add_argument("--by-usage", type=int, default=5)
     ap.add_argument("--cache", help="read the pages from this file instead of the site (tests)")

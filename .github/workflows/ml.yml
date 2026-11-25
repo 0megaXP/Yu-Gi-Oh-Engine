@@ -50,7 +50,7 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null
           cmake --build build -j4 --target ygoe-cli
-      - name: The format's decks (last 3 weeks of top cuts)
+      - name: The format's decks (last 2 weeks of top cuts)
         run: |
           # the 3 best archetypes by results, then the 5 most used of the others (tools/ml/meta.py);
           # the decks in the repo when the site can't be read
@@ -196,7 +196,7 @@ jobs:
           hours="${{ github.event.inputs.hours || '3.5' }}"
           secs=$(python3 -c "print(int(float('$hours') * 3600))")
           n="${{ github.event.inputs.shards || '8' }}"
-          # the format's decks (format/: the last 3 weeks' best and most used archetypes, meta.py)
+          # the format's decks (format/: the last 2 weeks' best and most used archetypes, meta.py)
           decks=$(ls format/*.ydk | sort -u)
           it="$ITERATIONS"
           [ "${{ matrix.shard }}" -gt $(( n - 2 )) ] && [ "$n" -gt 2 ] && it="$STRONG_ITERATIONS"
