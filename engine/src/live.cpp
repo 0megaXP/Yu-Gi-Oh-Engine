@@ -157,6 +157,26 @@ void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	activations_ = duel_->take_activations();
 	picks_ = duel_->take_picks();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
+	for(int pl = 0; pl < 2; ++pl) {
+		dodges_[pl] = false;
+		const Deck& dk = pl == 0 ? d0 : d1;
+		for(const auto* v : {&dk.main, &dk.extra})
+			for(uint32_t c : *v) {
+				std::string t = db_.text(db_.script_id(c));
+				for(auto& ch : t)
+					ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+				size_t q = t.find("(quick effect)");
+				while(q != std::string::npos && !dodges_[pl]) {
+					const size_t end = t.find('.', q);
+					const std::string sent = t.substr(q, end == std::string::npos ? std::string::npos : end - q);
+					for(const char* k : {"face-up field to the gy", "from your field to the gy", "monster you control to the hand",
+					                     "return this card to the hand", "return this card to the extra deck", "banish this card",
+					                     "tribute this card", "tribute 1 monster"})
+						dodges_[pl] = dodges_[pl] || sent.find(k) != std::string::npos;
+					q = t.find("(quick effect)", q + 1);
+				}
+			}
+	}
 	searcher_ = std::make_unique<Searcher>(db_, scripts_, *eval_, declare_pool(sc_));
 	steps_turn_ = duel_->turn();
 	// the starting hands are hidden from the other player (a replay's start position too)
@@ -861,6 +881,28 @@ int LiveDuel::choose(BotLevel level) {
 			if(wipe && duel_->board().count_field(static_cast<uint8_t>(1 - d.player)) < 3)
 				margin = std::max(margin, 0.08);
 		}
+		// A negate (or removal) on the opponent's turn waits for their activation: it answers the
+		// effect activated, on the link it stops. In an open window (a Summon, a phase change) it is held,
+		// except when waiting doesn't work: a card with a lasting effect (no activation to wait for), a
+		// deck that can take its monster away in response to the negate (Regina sending Lucina, so
+		// Veiler goes on Lucina before her effect), or the turn's End Phase (no later window).
+		if(use && use_code && d.player != duel_->turn_player()) {
+			const CardRole& ur = eval_->role(d.player, use_code);
+			bool stopper = false, on_summon = false;
+			for(const auto& in : ur.interrupts) {
+				stopper |= in.kind == Interrupt::NegateActivation || in.kind == Interrupt::NegateEffect || in.kind == Interrupt::Removal;
+				on_summon |= in.kind == Interrupt::NegateSummon;
+			}
+			const uint8_t o2 = static_cast<uint8_t>(1 - d.player);
+			const bool answers = duel_->chain_depth() > 0 && duel_->chain_last_player() == o2;
+			if(stopper && !on_summon && !answers) {
+				const bool early_ok = lasting_target(o2) || (dodges_[o2] && live_target(o2)) || duel_->phase() == PHASE_END;
+				margin = std::max(margin, early_ok ? 0.06 : 1.0);
+				if(std::getenv("YGOE_BOT_DEBUG"))
+					std::fprintf(stderr, "   %s: no activation to answer, %s\n", db_.name(use_code).c_str(),
+					             early_ok ? "used early only for a clear gain" : "held");
+			}
+		}
 		bool used = !pass || (use && use->mean > pass->mean + margin);
 		if(ne_card && ne_explore_ > 0 && std::uniform_real_distribution<double>(0, 1)(rng_) < ne_explore_)
 			used = !used;  // self-play: both choices get seen
@@ -1139,6 +1181,23 @@ bool LiveDuel::unused_summon(const Decision& d, const std::string& label, const 
 			return false;  // used later in the line (material, its own effect...)
 	}
 	return true;
+}
+
+bool LiveDuel::lasting_target(uint8_t p) const {
+	constexpr uint32_t kField = 0x2, kContinuous = 0x800;
+	const Board b = duel_->board();
+	for(const auto* z : {&b.mzone[p], &b.szone[p]})
+		for(const auto& c : *z) {
+			if(!c.code || !(c.pos & POS_FACEUP) || (c.status & 0x1))
+				continue;
+			const CardInfo* ci = db_.get(db_.script_id(c.code));
+			if(!ci)
+				continue;
+			for(const auto& e : ci->effects)
+				if((e.range & (LOCATION_MZONE | LOCATION_SZONE)) && (e.type & (kField | kContinuous)))
+					return true;
+		}
+	return false;
 }
 
 bool LiveDuel::live_target(uint8_t p) const {

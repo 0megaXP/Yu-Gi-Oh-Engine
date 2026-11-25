@@ -141,6 +141,13 @@ private:
 	bool unused_summon(const Decision& d, const std::string& label, const std::vector<Step>& line, size_t from) const;
 	// `p` has a face-up card that can still do something this turn (worth negating).
 	bool live_target(uint8_t p) const;
+	// `p` has a face-up card with a lasting effect (a lock, a continuous effect): nothing to wait for,
+	// it can only be negated while it is there.
+	bool lasting_target(uint8_t p) const;
+	// Per player: their deck can take its own monster off the field as a Quick Effect (Elfnote
+	// Regina sending a face-up Elfnote as cost), so a negate that waits for the activation can be
+	// dodged: then it is used before.
+	bool dodges_[2] = {false, false};
 	std::string card_json(uint32_t code) const;
 
 	const CardDB& db_;
