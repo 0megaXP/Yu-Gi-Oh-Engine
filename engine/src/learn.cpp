@@ -264,6 +264,26 @@ private:
 
 // A best-of-3 match: game 1 by a coin flip, then the loser chooses to go first or second, games
 // 2 and 3 with both decks sided for the matchup. `on_game` after each game (false: stop).
+// A training game cut for time (PlayConfig::max_seconds): its last moves, kept in the folder
+// (slow_games.jsonl, the latest 20) to see what the bots kept doing.
+void note_slow_game(const fs::path& dir, const std::string& gid, const Game& g) {
+	if(!g.timed_out && g.last_moves.empty())
+		return;
+	std::ostringstream o;
+	o << "{\"game\":" << json::quote(gid) << ",\"at\":" << std::time(nullptr) << ",\"timed_out\":" << (g.timed_out ? "true" : "false")
+	  << ",\"turns\":" << g.turns << ",\"moves\":" << g.moves << ",\"last_moves\":[";
+	for(size_t i = 0; i < g.last_moves.size(); ++i)
+		o << (i ? "," : "") << json::quote(g.last_moves[i]);
+	o << "]}";
+	append_keep(dir / "slow_games.jsonl", {o.str()}, 20);
+}
+
+// Training's play settings shared by its sessions: a time limit per game, the search threads.
+double game_seconds() {
+	const char* e = std::getenv("YGOE_GAME_SECONDS");  // (tests)
+	return e ? std::atof(e) : 600.0;
+}
+
 template <class F>
 void play_match(const CardDB& db, Siding& siding, const std::vector<Deck>& decks, size_t a, size_t b, std::mt19937_64& rng,
                 F&& play_one) {
@@ -301,7 +321,10 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	const auto t0 = Clock::now();
 	const double session = std::max(1.0, cfg.minutes) * 60.0;
 	auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - t0).count(); };
+	std::string* phase_now = nullptr;  // (pc.tick's copy of the last report, set below)
 	auto report = [&](const std::string& phase) {
+		if(phase_now)
+			*phase_now = phase;
 		if(cfg.progress)
 			cfg.progress(phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
 	};
@@ -331,6 +354,19 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	pc.explore = 0.25;
 	pc.explore_moves = 2;
 	pc.stop = cfg.cancel;
+	pc.max_seconds = game_seconds();
+	pc.threads = training_threads();
+	// the time shown keeps moving during a long game (the last report again, every 5 seconds)
+	std::string last_phase = "Starting";
+	phase_now = &last_phase;
+	auto last_tick = Clock::now();
+	pc.tick = [&] {
+		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 5)
+			return;
+		last_tick = Clock::now();
+		if(cfg.progress)
+			cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+	};
 
 	// the rounds so far (one report per line), and the games played in them
 	const fs::path rounds_path = dir / "rounds.jsonl";
@@ -363,6 +399,7 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 				                    : rec.play(od, dd, opp_bot, deck_bot, rng(), pc, gid, 2);
 				if(g.stopped)
 					return false;
+				note_slow_game(dir, gid, g);
 				++games;
 				finished += g.finished ? 1 : 0;
 				zd = deck_first ? g.z0 : 1.0 - g.z0;
@@ -527,6 +564,17 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 	pc.explore = 0.25;
 	pc.explore_moves = 2;
 	pc.stop = cfg.cancel;
+	pc.max_seconds = game_seconds();
+	pc.threads = training_threads();
+	std::string last_phase = "Playing the format's games";
+	auto last_tick = Clock::now();
+	pc.tick = [&] {
+		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 5)
+			return;
+		last_tick = Clock::now();
+		if(cfg.progress)
+			cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+	};
 	Siding siding(db);
 	std::mt19937_64 rng(cfg.seed ^ static_cast<uint64_t>(std::time(nullptr)));
 	Recorder rec(db, scripts, dir / "positions.jsonl", dir / "policy_examples.jsonl");
@@ -545,13 +593,14 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 			Game g = a_first ? rec.play(da, dbk, ba, bb, rng(), pc, gid, 3) : rec.play(dbk, da, bb, ba, rng(), pc, gid, 3);
 			if(g.stopped)
 				return false;
+			note_slow_game(dir, gid, g);
 			++games;
 			++total;
 			write_text(status, "{\"games\":" + std::to_string(total) + ",\"updated\":" + std::to_string(std::time(nullptr)) + "}");
 			za = a_first ? g.z0 : 1.0 - g.z0;
+			last_phase = "Playing the format's games (" + std::to_string(games) + " this session, " + std::to_string(total) + " in all)";
 			if(cfg.progress)
-				cfg.progress("Playing the format's games (" + std::to_string(games) + " this session, " + std::to_string(total) + " in all)",
-				             static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+				cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
 			return !stopped() && elapsed() < session;
 		});
 	}

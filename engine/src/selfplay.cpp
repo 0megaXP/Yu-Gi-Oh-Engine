@@ -1,6 +1,10 @@
 #include "selfplay.h"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
+
+#include <algorithm>
 
 #include "carddb.h"
 #include "duel.h"
@@ -46,6 +50,8 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 	if(expose)
 		*expose = &live;
 	live.set_iterations(pc.iterations);
+	if(pc.threads > 0)
+		live.set_threads(pc.threads);
 	live.set_value_net(0, b0.net);
 	live.set_value_net(1, b1.net);
 	live.set_policy(0, b0.policy);
@@ -62,17 +68,35 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 		live.set_search_hook(hook);
 	const int last_turn = std::max(pc.max_turns - pc.turn_offset, 4);
 	int guard = 0;
+	const auto t0 = std::chrono::steady_clock::now();
+	std::vector<std::string> recent;  // the last moves, kept for a game that runs out of time
 	while(!live.duel().ended() && static_cast<int>(live.duel().turn()) <= last_turn && guard++ < 4000) {
 		if(pc.stop && pc.stop->load()) {
 			g.stopped = true;
 			break;
 		}
+		if(pc.max_seconds > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() > pc.max_seconds) {
+			g.timed_out = true;
+			break;
+		}
+		if(pc.tick)
+			pc.tick();
 		const Decision& d = live.duel().decision();
 		if(d.type == DecisionType::Idle && on_position)
 			on_position(live);
-		if(live.bot_move(BotLevel::Normal).empty())
+		const uint8_t who = d.player;
+		const char* type = decision_name(d.type);
+		const uint32_t turn = live.duel().turn();
+		const std::string label = live.bot_move(BotLevel::Normal);
+		if(label.empty())
 			break;
+		++g.moves;
+		recent.push_back("turn " + std::to_string(turn) + " P" + std::to_string(who) + " " + type + ": " + label);
+		if(recent.size() > 80)
+			recent.erase(recent.begin());
 	}
+	if(g.timed_out || guard >= 4000)
+		g.last_moves = std::move(recent);
 	const Board b = live.duel().board();
 	g.lp[0] = b.lp[0];
 	g.lp[1] = b.lp[1];
@@ -96,6 +120,11 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 	if(expose)
 		*expose = nullptr;
 	return g;
+}
+
+int training_threads() {
+	const int n = static_cast<int>(std::thread::hardware_concurrency());
+	return std::clamp(n - 1, 1, 8);
 }
 
 }  // namespace ygoe

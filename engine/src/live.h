@@ -98,6 +98,8 @@ public:
 	}
 	// The search budget of a bot decision (0: the level's own). Self-play uses less to play more games.
 	void set_iterations(int n) { iterations_ = n; }
+	// Search threads (0: the default, every core up to 8).
+	void set_threads(int n) { threads_ = n; }
 	const class Evaluator& evaluator() const { return *eval_; }
 	// What is known about a player's deck from past games (replays): the cards where it is
 	// usually stopped, and how many plays it makes in a turn. The other bot uses it to time its
@@ -159,6 +161,7 @@ private:
 	std::shared_ptr<const class ValueNet> nets_[2];
 	bool net_set_[2] = {false, false};
 	int iterations_ = 0;
+	int threads_ = 0;
 	std::unique_ptr<Searcher> searcher_;
 	std::vector<std::vector<uint8_t>> history_;
 	bool setup_sent_ = false;

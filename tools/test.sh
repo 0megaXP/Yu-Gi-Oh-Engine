@@ -28,8 +28,11 @@ build/ygoe-cli triggers 27184601 | grep -q "destroyed from the Monster Zone"
 echo "== learning in the engine: self-play positions, then the C++ trainer (nettrain.h)"
 build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --games 3 --iterations 20 --turns 4 --seed 2 --out "$OUT/learn-pos.jsonl" > /dev/null
-build/ygoe-cli train-net "$OUT/learn-pos.jsonl" --out "$OUT/learn-net.json" --epochs 5 | grep -q '"net_logloss"'
-build/ygoe-cli netcheck "$OUT/learn-net.json" "$OUT/learn-pos.jsonl" | head -1 | grep -qE '^-?[0-9]'
+build/ygoe-cli train-net "$OUT/learn-pos.jsonl" --out "$OUT/learn-net.json" --epochs 5 > "$OUT/learn-train.txt"
+grep -q '"net_logloss"' "$OUT/learn-train.txt"
+# (to a file first: `| head -1` closes the pipe early, which fails the script under pipefail)
+build/ygoe-cli netcheck "$OUT/learn-net.json" "$OUT/learn-pos.jsonl" > "$OUT/netcheck.txt"
+head -1 "$OUT/netcheck.txt" | grep -qE '^-?[0-9]'
 echo "== the app's training modes: the format's games and deeper combo lines, saved as they finish"
 python3 - "$OUT" <<'PY'
 import json, sys
@@ -51,6 +54,11 @@ build/ygoe-cli json analyze "$OUT/contrib.json" | grep -q '"games":[1-9]'
 build/ygoe-cli json analyze "$OUT/deepen.json" | grep -q '"batches":[1-9]'
 ls "$OUT/deepen/newpieces/"*.json > /dev/null
 build/ygoe-cli pool-merge "$OUT/none.json" "$OUT/deepen/newpieces/"*.json --out "$OUT/pool.json" | grep -q "shared pool"
+echo "== training: a game past its time limit is cut, and its last moves are kept"
+YGOE_GAME_SECONDS=5 build/ygoe-cli learn examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --dir "$OUT/slow" --minutes 0.5 --iterations 40 --turns 12 > /dev/null 2>&1
+grep -q '"timed_out":true' "$OUT/slow/slow_games.jsonl"
+grep -q '"last_moves":\["turn' "$OUT/slow/slow_games.jsonl"
 echo "== simulator replays: a saved duel is rebuilt with the same log, and targets are shown"
 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"

@@ -648,6 +648,7 @@ int LiveDuel::choose(BotLevel level) {
 	}
 	// Plan the rest of this turn from the exact current state.
 	SearchConfig cfg;
+	cfg.threads = threads_;
 	cfg.iterations = level == BotLevel::Strong ? 2500 : 800;
 	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
 	// Its own turn, a Main or Battle Phase play: the search's best line is then planned through to

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <string>
 #include <memory>
 #include <tuple>
 #include <vector>
@@ -39,6 +40,14 @@ struct PlayConfig {
 	double ne_explore = 0;            // non-engine choices turned around (self-play)
 	LiveDuel::NonEngineHook ne_hook;
 	const std::atomic<bool>* stop = nullptr;  // set: the game ends at the next move (cut)
+	// A game still going after this many seconds is cut (scored as one cut at the turn limit,
+	// Game::timed_out): one game the bots keep repeating something in can't hold a training up.
+	// 0: no limit.
+	double max_seconds = 0;
+	// Called between moves (training: the time shown keeps moving during a long game).
+	std::function<void()> tick;
+	// Search threads for the bots (0: the default, every core up to 8).
+	int threads = 0;
 };
 
 struct Game {
@@ -48,7 +57,14 @@ struct Game {
 	int lp[2] = {8000, 8000};
 	int turns = 0;
 	bool stopped = false;  // ended by PlayConfig::stop
+	bool timed_out = false;  // cut by PlayConfig::max_seconds
+	int moves = 0;
+	std::vector<std::string> last_moves;  // timed out: the game's last moves (who, what)
 };
+
+// The search threads training uses: every core but one (Windows stays responsive, the computer
+// runs cooler), at least 1, at most 8.
+int training_threads();
 
 // Plays one game; `on_position` is called at each Main Phase decision of either player. A game
 // cut at the turn limit (or stopped) is scored by the evaluator's win chance there.

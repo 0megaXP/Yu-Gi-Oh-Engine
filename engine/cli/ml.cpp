@@ -282,6 +282,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 	const auto& decks = dk.decks;
 	const int games = std::stoi(get("games", "4"));
 	PlayConfig pc;
+	pc.max_seconds = 900;  // a game the bots keep repeating something in is cut, not waited for
 	pc.iterations = std::stoi(get("iterations", "300"));
 	pc.max_turns = std::stoi(get("turns", "14"));
 	pc.explore = std::stod(get("explore", "0"));
@@ -539,6 +540,7 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 	auto old_t = timing_from(get("vs-ne-timing", ""), db);
 	const int games = std::stoi(get("games", "8"));
 	PlayConfig pc;
+	pc.max_seconds = 900;  // a game the bots keep repeating something in is cut, not waited for
 	pc.iterations = std::stoi(get("iterations", "300"));
 	pc.max_turns = std::stoi(get("turns", "14"));
 	const uint64_t seed = std::stoull(get("seed", "1"));
