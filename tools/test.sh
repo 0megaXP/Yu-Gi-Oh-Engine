@@ -25,6 +25,11 @@ echo "== bridges (reach.h): Elfnote joins its Power Patron cards"
 build/ygoe-cli bridges examples/decks/elfnote_koller_wien_2026-11.ydk --reach data/reach.tsv | grep -q '"bridges":\[{'
 echo "== triggers (trigger.h): Artmage Diactorus floats when destroyed"
 build/ygoe-cli triggers 27184601 | grep -q "destroyed from the Monster Zone"
+echo "== learning in the engine: self-play positions, then the C++ trainer (nettrain.h)"
+build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --games 3 --iterations 20 --turns 4 --seed 2 --out "$OUT/learn-pos.jsonl" > /dev/null
+build/ygoe-cli train-net "$OUT/learn-pos.jsonl" --out "$OUT/learn-net.json" --epochs 5 | grep -q '"net_logloss"'
+build/ygoe-cli netcheck "$OUT/learn-net.json" "$OUT/learn-pos.jsonl" | head -1 | grep -qE '^-?[0-9]'
 echo "== simulator replays: a saved duel is rebuilt with the same log, and targets are shown"
 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"

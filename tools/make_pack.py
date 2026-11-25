@@ -5,6 +5,7 @@ usage: make_pack.py <CardScripts dir> <data dir> <out dir>
 
 out/scripts.pack   all official, pre-release and core Lua scripts in one indexed file
 out/cards.tsv, effects.tsv, strings.tsv, passcode_map.tsv
+out/format_decks.json  the format's decks (decks/*.ydk), for a deck's own learning
 out/VERSION        content hash; the app re-installs the pack when it changes
 
 scripts.pack layout (little endian):
@@ -53,6 +54,32 @@ for name in ("cards.tsv", "effects.tsv", "strings.tsv", "passcode_map.tsv", "val
         continue  # what was learned (tools/ml) is optional
     shutil.copyfile(src, os.path.join(out, name))
     digest.update(open(src, "rb").read())
+
+# The format's decks the nightly runs play (decks/*.ydk next to the data folder): the opponents a
+# deck learns against on the person's computer (engine/src/learn.h).
+decks_dir = os.path.join(os.path.dirname(os.path.abspath(data)), "decks")
+if os.path.isdir(decks_dir):
+    import json
+    fmt = []
+    for name in sorted(os.listdir(decks_dir)):
+        if not name.endswith(".ydk"):
+            continue
+        part, parts = "main", {"main": [], "extra": [], "side": []}
+        for line in open(os.path.join(decks_dir, name), encoding="utf-8", errors="replace"):
+            l = line.strip()
+            if l.lower() == "#main":
+                part = "main"
+            elif l.lower() == "#extra":
+                part = "extra"
+            elif l.lower() == "!side":
+                part = "side"
+            elif l.isdigit():
+                parts[part].append(int(l))
+        if parts["main"]:
+            fmt.append({"name": name[:-4], **parts})
+    text = json.dumps({"version": 1, "decks": fmt}, separators=(",", ":"))
+    open(os.path.join(out, "format_decks.json"), "w").write(text)
+    digest.update(text.encode())
 
 version = digest.hexdigest()[:16]
 open(os.path.join(out, "VERSION"), "w").write(version + "\n")

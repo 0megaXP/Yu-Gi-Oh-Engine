@@ -100,6 +100,8 @@ AnalysisResult analyze(const CardDB& db, ScriptCache& scripts, const Scenario& s
 	res.me = sc.me;
 	res.mode = sc.knowledge == Knowledge::Real ? "real" : "practice";
 	Evaluator eval(db, sc.decks[0], sc.decks[1]);
+	if(cfg.value_net_set)
+		eval.set_value_net(cfg.value_net);
 	res.my_profile = eval.profile(sc.me);
 	res.opp_profile = eval.profile(1 - sc.me);
 	Searcher searcher(db, scripts, eval, declare_pool(sc));

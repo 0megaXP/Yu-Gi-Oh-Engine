@@ -1,6 +1,9 @@
 #include <locale>
 #include <cctype>
 #include "api.h"
+#include <fstream>
+#include "valuenet.h"
+#include "learn.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -60,6 +63,50 @@ std::shared_ptr<const Policy> read_policy(const Value& v, const CardDB& db) {
 		p->add(*base, Policy::kSelfPlayScale);
 	}
 	return p;
+}
+
+// A deck's own learning (learn.h), from its folder: its value network (null when none) and its
+// policy with the app's (`app`, as read_policy) instead of the format's.
+struct Learned {
+	std::shared_ptr<const ValueNet> net;
+	bool has_net = false;
+	std::shared_ptr<const Policy> policy;
+	bool has_policy = false;
+};
+
+std::string file_text(const std::string& path) {
+	std::ifstream f(path, std::ios::binary);
+	if(!f)
+		return "";
+	std::stringstream ss;
+	ss << f.rdbuf();
+	return ss.str();
+}
+
+Learned read_learned(const Value& dir, const Value& app, const CardDB& db) {
+	Learned l;
+	if(dir.str().empty())
+		return l;
+	auto net = std::make_shared<ValueNet>();
+	if(net->load_file(dir.str() + "/value_net.json")) {
+		l.net = net;
+		l.has_net = true;
+	}
+	Policy q(db);
+	if(q.from_json(file_text(dir.str() + "/policy.json")) && q.trained()) {
+		std::shared_ptr<Policy> p;
+		if(app.is_object()) {
+			auto a = std::make_shared<Policy>(db);
+			if(a->from_value(app) && a->trained())
+				p = a;
+		}
+		if(!p)
+			p = std::make_shared<Policy>(db);
+		p->add(q, Policy::kSelfPlayScale);
+		l.policy = p;
+		l.has_policy = true;
+	}
+	return l;
 }
 
 std::string num(double v, int prec = 3) {
@@ -191,7 +238,7 @@ std::string Engine::missing_json(const std::vector<const Deck*>& decks) {
 	return o + "]";
 }
 
-Engine::Engine(const std::string& data_dir, const std::string& scripts_dir) {
+Engine::Engine(const std::string& data_dir, const std::string& scripts_dir) : data_dir_(data_dir) {
 	ok_ = db_.load(data_dir, &error_);
 	scripts_ = std::make_unique<ScriptCache>(scripts_dir);
 	reach_ = std::make_unique<ReachTable>();
@@ -229,6 +276,8 @@ std::string Engine::analyze(const std::string& request) {
 	Value req = Value::parse(request, &err);
 	if(!req.is_object())
 		return error_json(err.empty() ? "request must be a JSON object" : err);
+	if(req["task"].str() == "learn")
+		return learn(req);
 
 	Scenario sc;
 	for(int p = 0; p < 2; ++p)
@@ -277,6 +326,16 @@ std::string Engine::analyze(const std::string& request) {
 		cfg.search.guide = std::make_shared<PieceGuide>(parse_library(db_, req["library"]), &db_);
 	cfg.search.imitate = read_imitate(req["imitate"], db_);
 	cfg.search.policy = read_policy(req["policy"], db_);
+	// "learned": the analysed deck's folder (learn.h): its own network and policy
+	Learned l = read_learned(req["learned"], req["policy"], db_);
+	{
+		if(l.has_net) {
+			cfg.value_net = l.net;
+			cfg.value_net_set = true;
+		}
+		if(l.has_policy)
+			cfg.search.policy = l.policy;
+	}
 	cfg.determinizations = static_cast<int>(c["samples"].integer(12));
 	cfg.lines = static_cast<int>(c["lines"].integer(3));
 	cfg.verify = c["verify"].boolean(true);
@@ -288,8 +347,53 @@ std::string Engine::analyze(const std::string& request) {
 	set_progress("idle", 0, 0);
 	std::string out = res.to_json();
 	out.pop_back();  // reopen the object to add the flag
-	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") +
-	       ",\"missing_cards\":" + missing_json({&sc.decks[0], &sc.decks[1]}) + "}";
+	out += std::string(",\"cancelled\":") + (cancel_ ? "true" : "false") + ",\"learned\":{\"net\":" + (l.has_net ? "true" : "false") +
+	       ",\"policy\":" + (l.has_policy ? "true" : "false") + "},\"missing_cards\":" + missing_json({&sc.decks[0], &sc.decks[1]}) + "}";
+	return out;
+}
+
+std::string Engine::learn(const Value& req) {
+	LearnConfig cfg;
+	std::string err;
+	if(!read_deck(req["deck"], cfg.deck, err, db_))
+		return error_json(err);
+	cfg.name = req["name"].str();
+	cfg.dir = req["dir"].str();
+	if(cfg.dir.empty())
+		return error_json("learn: no folder");
+	if(req["opponents"].is_array() && req["opponents"].size() > 0) {
+		for(const auto& o : req["opponents"].items()) {
+			LearnOpponent lo;
+			lo.name = o["name"].str();
+			if(!read_deck(o, lo.deck, err, db_))
+				return error_json(err);
+			cfg.opponents.push_back(std::move(lo));
+		}
+	} else {
+		// the format's decks the nightly runs play (format_decks.json in the data folder)
+		Value fd = Value::parse(file_text(data_dir_ + "/format_decks.json"));
+		for(const auto& o : fd["decks"].items()) {
+			LearnOpponent lo;
+			lo.name = o["name"].str();
+			if(read_deck(o, lo.deck, err, db_))
+				cfg.opponents.push_back(std::move(lo));
+		}
+	}
+	if(req["status_only"].boolean(false))
+		return learn_status(cfg.dir);
+	cfg.minutes = req["minutes"].num(30);
+	cfg.iterations = static_cast<int>(req["iterations"].integer(200));
+	cfg.turns = static_cast<int>(req["turns"].integer(12));
+	cfg.seed = static_cast<uint64_t>(req["seed"].integer(1));
+	cfg.base_net = file_text(data_dir_ + "/value_net.json");
+	cfg.base_policy = file_text(data_dir_ + "/policy.json");
+	if(req["library"].is_array())
+		cfg.library = parse_library(db_, req["library"]);
+	cfg.cancel = &cancel_;
+	cfg.progress = [this](const std::string& phase, int done, int total) { set_progress(phase, done, total); };
+	set_progress("Starting", 0, 1);
+	std::string out = learn_deck(db_, *scripts_, cfg);
+	set_progress("idle", 0, 0);
 	return out;
 }
 
@@ -420,6 +524,14 @@ LiveDuel* Engine::create_live(const std::string& request, std::string& error) {
 		if(req["libraries"][p].is_array())
 			live->set_guide(p, std::make_shared<PieceGuide>(parse_library(db_, req["libraries"][p]), &db_));
 	live->set_policy(read_policy(req["policy"], db_));
+	// "learned": [folder or null, ...]: a player's deck learned on this device (learn.h)
+	for(int p = 0; p < 2; ++p) {
+		Learned l = read_learned(req["learned"][p], req["policy"], db_);
+		if(l.has_net)
+			live->set_value_net(p, l.net);
+		if(l.has_policy)
+			live->set_policy(p, l.policy);
+	}
 	// {"knowledge": [{"chokes": [passcodes], "plays": 6.5}, null]}: per player, about their deck
 	for(int p = 0; p < 2; ++p) {
 		const Value& k = req["knowledge"][p];

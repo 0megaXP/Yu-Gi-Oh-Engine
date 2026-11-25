@@ -69,6 +69,7 @@
 #include "profile.h"
 #include "reference.h"
 #include "side.h"
+#include "selfplay.h"
 #include "valuenet.h"
 
 namespace ygoe {
@@ -185,43 +186,6 @@ bool load_decks(const std::vector<std::string>& paths, const CardDB& db, const O
 	return true;
 }
 
-// A deck sided for one matchup (side.h): the plan's swaps applied. Cached per matchup.
-class Siding {
-public:
-	explicit Siding(const CardDB& db) : db_(db) {}
-	const Deck& sided(size_t mine, size_t theirs, bool first, const std::vector<Deck>& decks) {
-		const auto key = std::make_tuple(mine, theirs, first);
-		auto it = cache_.find(key);
-		if(it != cache_.end())
-			return it->second;
-		Deck d = decks[mine];
-		if(!d.side.empty()) {
-			auto plan = plan_side(db_, decks[mine], decks[theirs], profile_deck(db_, decks[theirs]), BoardShape{}, first);
-			for(const auto& s : plan.swaps) {
-				auto o = std::find(d.main.begin(), d.main.end(), s.out);
-				auto i = std::find(d.side.begin(), d.side.end(), s.in);
-				if(o == d.main.end() || i == d.side.end())
-					continue;
-				*o = s.in;
-				*i = s.out;
-			}
-		}
-		return cache_.emplace(key, std::move(d)).first->second;
-	}
-
-private:
-	const CardDB& db_;
-	std::map<std::tuple<size_t, size_t, bool>, Deck> cache_;
-};
-
-// One bot's equipment.
-struct Bot {
-	std::shared_ptr<const ValueNet> net;
-	std::shared_ptr<const Policy> policy;
-	std::shared_ptr<const PieceGuide> guide;
-	std::shared_ptr<const NeTiming> timing;  // non-engine timing (nonengine.h)
-};
-
 std::shared_ptr<const NeTiming> timing_from(const std::string& path, const CardDB& db) {
 	if(path.empty())
 		return db.nonengine_timing();
@@ -231,89 +195,6 @@ std::shared_ptr<const NeTiming> timing_from(const std::string& path, const CardD
 	if(!t->parse(read_file(path)))
 		return nullptr;
 	return t;
-}
-
-struct PlayConfig {
-	int iterations = 300;
-	int max_turns = 14;
-	double explore = 0;
-	int explore_moves = 0;
-	const Scenario* start = nullptr;  // a real game's position, player 0 the turn player
-	int turn_offset = 0;              // that position's turn number minus 1
-	double ne_explore = 0;            // non-engine choices turned around (self-play)
-	LiveDuel::NonEngineHook ne_hook;
-};
-
-struct Game {
-	int winner = -1;     // 0 / 1, -1 draw or cut
-	bool finished = false;
-	double z0 = 0.5;     // result for player 0: 1, 0, 0.5 for a draw; the win chance when cut
-	int lp[2] = {8000, 8000};
-	int turns = 0;
-};
-
-// Plays one game; `on_position` is called at each Main Phase decision of either player.
-template <class F>
-Game play(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Deck& d1, uint64_t seed, const PlayConfig& pc,
-          const Bot& b0, const Bot& b1, F&& on_position, const LiveDuel::SearchHook& hook = {}, LiveDuel** expose = nullptr) {
-	Game g;
-	std::unique_ptr<LiveDuel> lp;
-	if(pc.start)
-		lp = std::make_unique<LiveDuel>(db, scripts, *pc.start, DUEL_MODE_MR5 | DUEL_ATTACK_FIRST_TURN);
-	else
-		lp = std::make_unique<LiveDuel>(db, scripts, d0, d1, seed);
-	LiveDuel& live = *lp;
-	if(!live.ok())
-		return g;
-	if(expose)
-		*expose = &live;
-	live.set_iterations(pc.iterations);
-	live.set_value_net(0, b0.net);
-	live.set_value_net(1, b1.net);
-	live.set_policy(0, b0.policy);
-	live.set_policy(1, b1.policy);
-	live.set_guide(0, b0.guide);
-	live.set_guide(1, b1.guide);
-	live.set_nonengine_timing(0, b0.timing);
-	live.set_nonengine_timing(1, b1.timing);
-	if(pc.ne_hook)
-		live.set_nonengine_exploration(pc.ne_explore, pc.ne_hook);
-	if(pc.explore > 0)
-		live.set_exploration(pc.explore, pc.explore_moves);
-	if(hook)
-		live.set_search_hook(hook);
-	const int last_turn = std::max(pc.max_turns - pc.turn_offset, 4);
-	int guard = 0;
-	while(!live.duel().ended() && static_cast<int>(live.duel().turn()) <= last_turn && guard++ < 4000) {
-		const Decision& d = live.duel().decision();
-		if(d.type == DecisionType::Idle)
-			on_position(live);
-		if(live.bot_move(BotLevel::Normal).empty())
-			break;
-	}
-	const Board b = live.duel().board();
-	g.lp[0] = b.lp[0];
-	g.lp[1] = b.lp[1];
-	g.turns = static_cast<int>(live.duel().turn()) + pc.turn_offset;
-	if(live.duel().ended()) {
-		g.finished = true;
-		g.winner = live.duel().winner();
-		g.z0 = g.winner == 0 ? 1.0 : g.winner == 1 ? 0.0 : 0.5;
-	} else {
-		// cut: the current evaluator's (and network's) win chance for player 0 there
-		Evaluator ev(db, pc.start ? pc.start->decks[0] : d0, pc.start ? pc.start->decks[1] : d1);
-		ev.set_value_net(db.value_net());
-		Board bb = b;
-		bb.turn += static_cast<uint32_t>(pc.turn_offset);
-		g.z0 = ev.evaluate(bb, 0, static_cast<uint8_t>(1 - b.turn_player)).score;
-		if(g.z0 > 0.5)
-			g.winner = 0;
-		else if(g.z0 < 0.5)
-			g.winner = 1;
-	}
-	if(expose)
-		*expose = nullptr;
-	return g;
 }
 
 // A real game's position to start from (follow_replay writes them as "kind":"start").
@@ -535,7 +416,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 					pos.push_back({base.features(b, me, next, ev.value), ev.raw, me, b.turn});
 				}
 			};
-			Game g = play(db, scripts, d0, d1, gseed, gpc2, b0, b1, record, hook, &current);
+			Game g = play_game(db, scripts, d0, d1, gseed, gpc2, b0, b1, record, hook, &current);
 			written += write_positions(out, pos, g, gid, src);
 			if(ne_out) {
 				for(const auto& c : chances) {
@@ -674,7 +555,7 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 		const bool new_first = gi % 2 == 0;
 		const Bot nb0{fresh, fresh_pol, dk.guides[ia], fresh_t}, ob0{old, old_pol, dk.guides[ia], old_t};
 		const Bot nb1{fresh, fresh_pol, dk.guides[ib], fresh_t}, ob1{old, old_pol, dk.guides[ib], old_t};
-		Game g = play(db, scripts, decks[ia], decks[ib], seed * 104729 + static_cast<uint64_t>(pair), pc, new_first ? nb0 : ob0,
+		Game g = play_game(db, scripts, decks[ia], decks[ib], seed * 104729 + static_cast<uint64_t>(pair), pc, new_first ? nb0 : ob0,
 		              new_first ? ob1 : nb1, [](LiveDuel&) {});
 		const double r = new_first ? g.z0 : 1.0 - g.z0;
 		points += r;

@@ -81,6 +81,8 @@ data class AnalysisRequest(
     val policy: String? = null,
     /** Replay choices the engine doesn't understand yet, for your side: followed unless the search finds better. */
     val imitate: List<Imitation> = emptyList(),
+    /** The folder where [me]'s deck learned on this device ([YgoEngine.learnDeck]), or null: its own network and policy. */
+    val learned: String? = null,
 ) {
     internal fun toJson(): JSONObject {
         val sides = listOf(first, second)
@@ -89,6 +91,7 @@ data class AnalysisRequest(
             .put("imitate", JSONArray(imitate.map { it.toJson() }))
             .put("library", library?.let { JSONArray(it) } ?: JSONObject.NULL)
             .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
+            .put("learned", learned ?: JSONObject.NULL)
             .put("decks", perSide { it.deck.toJson() })
             .put("me", me)
             .put("mode", knowledge.wire)
@@ -682,3 +685,78 @@ data class FollowResult(
     val followVersion: Int = 1,
 )
 
+
+
+/**
+ * One round of a deck's learning ([YgoEngine.learnDeck]): the games it played, how the trained
+ * network and move policy did on held-out games (log-loss, lower is better: [netStart] is the
+ * network it started from), the arena's score (new against current on the same deals, 0.5 =
+ * even) and whether what was learned was kept.
+ */
+data class LearnRound(
+    val round: Int,
+    val at: Long,
+    val games: Int,
+    val deckWins: Int,
+    val positions: Int,
+    val netStart: Double,
+    val net: Double,
+    val netPassed: Boolean,
+    val policyExamples: Int,
+    val policyStart: Double,
+    val policy: Double,
+    val policyPassed: Boolean,
+    val arenaPairs: Int,
+    val arenaScore: Double,
+    val kept: Boolean,
+)
+
+/** A deck's learning so far (its folder's learn.json). */
+data class LearnStatus(
+    val games: Long,
+    val updated: Long,
+    val hasNet: Boolean,
+    val hasPolicy: Boolean,
+    val rounds: List<LearnRound>,
+) {
+    val learned: Boolean get() = hasNet || hasPolicy
+
+    companion object {
+        val EMPTY = LearnStatus(0, 0, false, false, emptyList())
+
+        /** Reads a deck's folder (no engine call: works while it is learning). */
+        fun read(dir: java.io.File): LearnStatus {
+            val f = java.io.File(dir, "learn.json")
+            if (!f.isFile) return EMPTY
+            return runCatching { parse(JSONObject(f.readText())) }.getOrDefault(EMPTY)
+        }
+
+        internal fun parse(o: JSONObject): LearnStatus {
+            val rounds = o.optJSONArray("rounds")?.let { a ->
+                (0 until a.length()).map { i ->
+                    val r = a.getJSONObject(i)
+                    val net = r.optJSONObject("net") ?: JSONObject()
+                    val pol = r.optJSONObject("policy") ?: JSONObject()
+                    val ar = r.optJSONObject("arena") ?: JSONObject()
+                    LearnRound(
+                        r.optInt("round"), r.optLong("at"), r.optInt("games"), r.optInt("deck_wins"), r.optInt("positions"),
+                        net.optDouble("start_logloss"), net.optDouble("logloss"), net.optBoolean("passed"),
+                        pol.optInt("examples"), pol.optDouble("start_logloss"), pol.optDouble("logloss"), pol.optBoolean("passed"),
+                        ar.optInt("pairs"), ar.optDouble("score", 0.5), r.optBoolean("kept"),
+                    )
+                }
+            } ?: emptyList()
+            return LearnStatus(o.optLong("games"), o.optLong("updated"), o.optBoolean("has_net"), o.optBoolean("has_policy"), rounds)
+        }
+    }
+}
+
+/** What a learning session did. */
+data class LearnReport(
+    val games: Int,
+    val rounds: Int,
+    val keptNetworks: Int,
+    val keptPolicies: Int,
+    val cancelled: Boolean,
+    val status: LearnStatus,
+)

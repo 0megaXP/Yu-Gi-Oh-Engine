@@ -1,6 +1,7 @@
 // End-to-end analysis of a position: current evaluation, best lines for the player,
 // and a check of each candidate end board against the opponent's actual turn.
 #pragma once
+#include <memory>
 #include <functional>
 #include <string>
 #include <vector>
@@ -18,6 +19,9 @@ struct AnalysisConfig {
 	bool verify = true;           // phase B: play the opponent's next turn against each end board
 	int verify_iterations = 400;  // per candidate trajectory
 	int verify_trajectories = 2;  // trajectories (different samples) per line
+	// The deck's own value network (learn.h) instead of the format's, when set (null: none).
+	std::shared_ptr<const class ValueNet> value_net;
+	bool value_net_set = false;
 	// Called from a worker thread: phase ("search" / "verify N"), iterations done, iterations planned.
 	std::function<void(const std::string&, int, int)> on_progress;
 };

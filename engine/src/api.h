@@ -14,6 +14,7 @@
 #include "duel.h"
 
 namespace ygoe {
+namespace json { class Value; }
 
 struct Progress {
 	std::string phase;   // "idle", "search", "verify 1", "simulate", ...
@@ -71,6 +72,9 @@ private:
 	std::shared_ptr<const CardPriorities> bridge_priorities(const Deck& deck);
 
 	CardDB db_;
+	std::string data_dir_;
+	// {"task":"learn", ...} given to analyze(): a deck's own learning (learn.h).
+	std::string learn(const json::Value& req);
 	std::unique_ptr<ScriptCache> scripts_;
 	std::unique_ptr<ReachTable> reach_;  // data/reach.tsv: what the card pool reaches (may be null)
 	std::mutex bridges_mu_;

@@ -149,6 +149,8 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         imitate: List<List<Imitation>> = listOf(emptyList(), emptyList()),
         /** Per player: deck-guide advice for that player's bot, or null. */
         priorities: List<CardPriorities?> = listOf(null, null),
+        /** Per player: the folder where that deck learned on this device ([learnDeck]), or null. */
+        learned: List<java.io.File?> = listOf(null, null),
     ): LiveDuel =
         withContext(Dispatchers.Default) {
             val req = JSONObject()
@@ -160,6 +162,7 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
                 .put("knowledge", org.json.JSONArray(knowledge.map { it?.toJson() ?: JSONObject.NULL }))
                 .put("imitate", org.json.JSONArray(imitate.map { l -> org.json.JSONArray(l.map { it.toJson() }) }))
                 .put("priorities", org.json.JSONArray(priorities.map { it?.takeUnless { p -> p.isEmpty }?.toJson() ?: JSONObject.NULL }))
+                .put("learned", org.json.JSONArray(learned.map { it?.path ?: JSONObject.NULL }))
             val d = YgoNative.liveCreate(live(), req.toString())
             if (d == 0L) throw EngineException(YgoNative.lastError().ifEmpty { "could not start the duel" })
             LiveDuel(d)
@@ -241,6 +244,48 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
             .put("imitate", org.json.JSONArray(imitate.map { it.toJson() }))
             .put("policy", policy?.let { JSONObject(it) } ?: JSONObject.NULL)
         return Parse.comboTree(runNative(onProgress) { YgoNative.comboTree(it, req.toString()) })
+    }
+
+    /**
+     * A deck learns on this device for about [minutes] (engine learn.h): rounds of best-of-3 bot
+     * matches against [opponents] (empty: the format's decks the nightly runs play), then a value
+     * network and move policy trained on its games, kept when they predict held-out games better
+     * and do at least as well in an arena on the same deals. Everything goes in [dir], which
+     * [newDuel] and [analyze] take as `learned`. Blocks this engine for the whole session (use an
+     * engine of its own); [cancel] or coroutine cancellation stops it, keeping what was learned.
+     * Needs an engine from Nov 2026 on (older ones answer with an error).
+     */
+    suspend fun learnDeck(
+        deck: EngineDeck,
+        dir: java.io.File,
+        minutes: Double,
+        opponents: List<EngineDeck> = emptyList(),
+        iterations: Int = 200,
+        turns: Int = 12,
+        library: String? = null,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): LearnReport {
+        val req = JSONObject()
+            .put("task", "learn")
+            .put("deck", deck.toJson())
+            .put("name", deck.name)
+            .put("dir", dir.path)
+            .put("minutes", minutes)
+            .put("iterations", iterations)
+            .put("turns", turns)
+            .put("seed", System.nanoTime())
+            .put("opponents", org.json.JSONArray(opponents.map { it.toJson() }))
+            .put("library", library?.let { org.json.JSONArray(it) } ?: JSONObject.NULL)
+        val text = runNative(onProgress) { YgoNative.analyze(it, req.toString()) }
+        // an engine from before learning reads the request as an analysis without decks
+        val o = runCatching { Parse.checked(text) }.getOrElse { e ->
+            throw if (e.message.orEmpty().startsWith("deck must be")) EngineException("this engine can't learn yet: update the engine") else e
+        }
+        if (!o.has("rounds")) throw EngineException("this engine can't learn yet: update the engine")
+        return LearnReport(
+            o.optInt("games"), o.optInt("rounds"), o.optInt("kept_networks"), o.optInt("kept_policies"),
+            o.optBoolean("cancelled"), o.optJSONObject("status")?.let { LearnStatus.parse(it) } ?: LearnStatus.read(dir),
+        )
     }
 
     /** Stops the running search early; the call returns what it found, with cancelled = true. */

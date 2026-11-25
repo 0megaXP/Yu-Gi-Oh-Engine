@@ -12,6 +12,8 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <map>
 #include <random>
 #include <sstream>
@@ -24,6 +26,7 @@
 #include "reach.h"
 #include "trigger.h"
 #include "live.h"
+#include "nettrain.h"
 #include "deck.h"
 #include "ocgapi_constants.h"
 #include "profile.h"
@@ -100,11 +103,28 @@ int usage() {
 	             "  ygoe-cli reachscan <a.ydk> [b.ydk ...] [--shard I/N] [--out reach.tsv]\n"
 	             "  ygoe-cli triggers <deck.ydk | passcode ...>   (each card's triggers, classified)\n"
 	             "  ygoe-cli duel <deck0.ydk> <deck1.ydk> [--bot0 easy|normal|strong] [--bot1 ...] [--turns N] [--seed S] [--save replay.json]\n"
+	             "  ygoe-cli learn <deck.ydk> [opponent.ydk ...] --dir DIR [--minutes 10] [--iterations 200] [--turns 12]\n"
+	             "  ygoe-cli train-net <positions.jsonl> [...] --out value_net.json [--init net.json] [--epochs 60]\n"
 	             "  ygoe-cli simreplay <replay.json> [--at N]   (a duel saved from the app's simulator)\n"
 	             "  ygoe-cli followall <inputs.jsonl> --out positions.jsonl --summary follows.jsonl [--shard i/n]\n"
 	             "                   (follows the app's uploaded games: one follow request per line)\n"
 	             "options: --data DIR  --scripts DIR\n");
 	return 2;
+}
+
+// A .ydk as the API's deck object ({"main":[...],"extra":[...],"side":[...]}); "{}" if unreadable.
+std::string ydk_json(const std::string& path) {
+	Deck d;
+	std::string err;
+	if(!load_ydk(path, d, &err))
+		return "{}";
+	auto list = [](const std::vector<uint32_t>& v) {
+		std::string s = "[";
+		for(size_t i = 0; i < v.size(); ++i)
+			s += (i ? "," : "") + std::to_string(v[i]);
+		return s + "]";
+	};
+	return "{\"main\":" + list(d.main) + ",\"extra\":" + list(d.extra) + ",\"side\":" + list(d.side) + "}";
 }
 
 std::string pct(double v) { return std::to_string(static_cast<int>(v * 100 + 0.5)) + "%"; }
@@ -636,6 +656,68 @@ int main(int argc, char** argv) {
 	}
 	if(cmd == "proxy")
 		return cmd_proxy(db, a);
+	if(cmd == "learn") {
+		// A deck's own learning, as in the app (learn.h): against the given decks, else the format's.
+		if(a.pos.size() < 2)
+			return usage();
+		std::string req = "{\"task\":\"learn\",\"deck\":" + ydk_json(a.pos[1]) + ",\"name\":" + json::quote(a.pos[1]) +
+		                  ",\"dir\":" + json::quote(a.get("dir", "learn")) + ",\"minutes\":" + a.get("minutes", "10") +
+		                  ",\"iterations\":" + a.get("iterations", "200") + ",\"turns\":" + a.get("turns", "12") + ",\"opponents\":[";
+		for(size_t i = 2; i < a.pos.size(); ++i)
+			req += (i > 2 ? "," : "") + ydk_json(a.pos[i]).insert(1, "\"name\":" + json::quote(a.pos[i]) + ",");
+		req += "]}";
+		Engine engine(a.get("data", "data"), a.get("scripts", "third_party/CardScripts"));
+		std::atomic<bool> done{false};
+		std::thread watch([&] {
+			std::string last;
+			while(!done) {
+				auto p = engine.progress();
+				if(p.phase != last && p.phase != "idle") {
+					std::printf("[%d/%ds] %s\n", p.done, p.total, p.phase.c_str());
+					std::fflush(stdout);
+					last = p.phase;
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			}
+		});
+		std::string out = engine.analyze(req);
+		done = true;
+		watch.join();
+		std::printf("%s\n", out.c_str());
+		return 0;
+	}
+	if(cmd == "train-net") {
+		// The value network trained in the engine (nettrain.h), the same way as tools/ml/train.py.
+		std::vector<NetSample> samples;
+		for(size_t i = 1; i < a.pos.size(); ++i) {
+			std::ifstream in(a.pos[i]);
+			std::string line;
+			NetSample s;
+			while(std::getline(in, line))
+				if(parse_net_sample(line, s))
+					samples.push_back(std::move(s));
+		}
+		std::string init;
+		if(a.has("init")) {
+			std::ifstream f(a.get("init", ""));
+			std::stringstream ss;
+			ss << f.rdbuf();
+			init = ss.str();
+		}
+		NetTrainConfig cfg;
+		cfg.epochs = std::stoi(a.get("epochs", "60"));
+		cfg.seed = std::stoull(a.get("seed", "1"));
+		cfg.lambda = std::stod(a.get("lambda", "0.95"));
+		auto t0 = std::chrono::steady_clock::now();
+		auto r = train_value_net(samples, init, cfg, a.get("id", ""));
+		if(!r.ok) {
+			std::fprintf(stderr, "%s\n", r.error.c_str());
+			return 1;
+		}
+		std::ofstream(a.get("out", "value_net.json")) << r.net_json;
+		std::printf("%s\n%.1fs\n", r.report_json().c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+		return 0;
+	}
 	if(cmd == "simreplay") {
 		// A duel saved from the app's simulator: rebuilt in the rules core, its log printed (up to
 		// answer --at N), then where it stands.

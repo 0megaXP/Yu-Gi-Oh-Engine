@@ -53,6 +53,9 @@ add_library(ygoe STATIC
   engine/src/follow.cpp
   engine/src/reach.cpp
   engine/src/trigger.cpp
+  engine/src/selfplay.cpp
+  engine/src/nettrain.cpp
+  engine/src/learn.cpp
   engine/src/policy.cpp
   engine/src/combo.cpp
   engine/src/pieces.cpp

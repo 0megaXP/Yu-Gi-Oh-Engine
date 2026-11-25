@@ -145,6 +145,27 @@ The app uses what was learned once its engine is updated to that commit: after a
 starts the "Publish engine" workflow (a commit made by a workflow doesn't start it by itself), and
 the app downloads the latest engine by itself.
 
+## A deck's own learning (the app, Windows)
+
+`engine/src/learn.h`: one deck learns on the person's computer, starting from what the nightly
+runs learned for the format. In rounds (up to 40 minutes each) until the session's time is up:
+best-of-3 matches against the opponents picked in the app (by default the format's decks of
+`decks/`, packed as `format_decks.json`), the deck's bot with its own network and policy, the
+opponents' with the format's; then a network trained on the deck's games (the latest 200k
+positions) by `nettrain.h`, the C++ port of `train.py` (same targets, normalisation, Adam and
+85/15 split; on the same data it reaches the same validation log-loss), and the policy on the
+deck's searches; each must beat the one it started from on held-out games by 0.002; then a
+test on the same deals, the deck played by the new and by the current bot against the same
+opponent: kept when it scores at least 0.5. The deck's folder holds `value_net.json`,
+`policy.json`, the positions, examples and `learn.json` (every round's report); duels (and
+analyses) of the deck read it through the API's `"learned"`. The API call is `analyze` with
+`{"task":"learn", ...}` (no new native function). By hand:
+
+```
+build/ygoe-cli learn decks/a.ydk [decks/b.ydk ...] --dir learn/a --minutes 60 [--iterations 200]
+build/ygoe-cli train-net positions.jsonl --out value_net.json [--init data/value_net.json]
+```
+
 ## Decks
 
 `decks/` holds the best decks of the current format, from recent top cuts: YCS Orlando
