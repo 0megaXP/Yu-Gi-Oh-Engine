@@ -279,6 +279,26 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			v += 0.03 + std::max(iv, later);
 		}
 		v += 0.02 * b.extra[p].size();
+		// Cards a cost banished face-down (Pot of Prosperity / Extravagance from the Extra Deck,
+		// Pot of Desires from the Deck) are gone for the duel: the deck's own Extra Deck monsters
+		// (Angelechy's Synchros: its combo) are a real loss, a generic one little, a second copy
+		// less. Cards that left the Extra Deck to be played are not counted: they did their job.
+		{
+			std::map<uint32_t, int> copies;
+			for(const auto& cv : b.banished[p]) {
+				if(!cv.code || !(cv.pos & POS_FACEDOWN) || cv.owner != p)
+					continue;
+				const CardInfo* c = db_.get(cv.code);
+				if(!c)
+					continue;
+				const int n = copies[cv.code]++;
+				const bool core = role(p, cv.code).engine;
+				if(c->is_extra_deck())
+					v -= core ? (n == 0 ? 0.12 : 0.07) : 0.06;  // (a generic one is in the list for a line too)
+				else
+					v -= core ? 0.015 : 0.005;  // (Pot of Desires's 10: a cost decks accept)
+			}
+		}
 		// Within reach of the other player's column removal on the field (their Angelechy Bastion's
 		// column, Castellan's adjacent ones): those cards are the ones it can take.
 		{
