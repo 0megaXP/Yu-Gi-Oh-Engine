@@ -191,6 +191,15 @@ double policy_weight(const Decision& d, const Option& o, uint8_t turn_player, in
 	}
 }
 
+// `p` has a monster that could attack: face-up in Attack Position. Without one, a Battle Phase
+// only detours to Main Phase 2 (and from there, the End Phase closes the turn early).
+bool has_attacker(const Board& b, uint8_t p) {
+	for(const auto& c : b.mzone[p & 1])
+		if(c.code && (c.pos & POS_FACEUP_ATTACK))
+			return true;
+	return false;
+}
+
 size_t weighted_pick(const std::vector<double>& w, std::mt19937_64& rng) {
 	double total = 0;
 	for(double x : w)
@@ -781,6 +790,10 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 									if(other.kind == OptKind::Activate && other.code == o.code && other.loc == LOCATION_HAND)
 										block = true;
 						}
+						// A Battle Phase with nothing to attack with: the same plays follow in Main Phase 2,
+						// or the turn ends without them (Bot 1 going to battle with no monsters, combo cards left).
+						if(o.kind == OptKind::ToBattle && !has_attacker(duel.board(), dec.player))
+							block = true;
 						if(block) {
 							tried[i] = 1;
 							++blocked;
@@ -1022,8 +1035,253 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 	return out;
 }
 
-namespace {
-}  // namespace
+bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds) {
+	if(t.steps.empty() || seconds <= 0)
+		return false;
+	const auto t0 = std::chrono::steady_clock::now();
+	auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+	static const bool dbg = std::getenv("YGOE_PLAN_DEBUG") != nullptr;
+	uint32_t root_turn = 0;
+	{
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		if(!d.replay(root.setup, root.history))
+			return false;
+		root_turn = d.turn();
+	}
+	auto weight = [&](const Duel& duel, const Decision& dd, const Option& o, int steps_this_turn) {
+		double w = playout_weight(dd, o, duel.turn_player(), steps_this_turn);
+		if(cfg.policy && dd.player == me)
+			w *= cfg.policy->factor(dd, o, PolicyContext{duel.turn_player(), steps_this_turn, duel.chain_depth()});
+		if(cfg.priorities && dd.player == me)
+			w *= cfg.priorities->factor(dd, o, dd.player == duel.turn_player());
+		w *= selection_factor(db_, dd, o);
+		if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
+			w *= 0.1;
+		if(o.kind == OptKind::ToBattle && !has_attacker(duel.board(), dd.player))
+			w *= 0.01;
+		return w;
+	};
+	auto pass_of = [](const Decision& dec) {
+		for(size_t o = 0; o < dec.options.size(); ++o)
+			if(dec.options[o].kind == OptKind::Pass || dec.options[o].kind == OptKind::No)
+				return o;
+		return SIZE_MAX;
+	};
+	// From `d` (at the end of `out`'s steps) to the end of the turn: along `rest` from `from`
+	// (a step whose label is offered now, looking a few steps ahead), else the other player passes
+	// and `me` plays by the playout prior.
+	auto finish = [&](Duel& d, Trajectory& out, const std::vector<Step>* rest, size_t from, std::mt19937_64& rng) {
+		int steps = 0, this_turn = static_cast<int>(out.steps.size());
+		size_t at = from;
+		while(!d.ended() && d.turn() < root_turn + static_cast<uint32_t>(cfg.horizon_turns) && steps++ < cfg.max_rollout_steps) {
+			const Decision dec = d.decision();
+			if(dec.options.empty())
+				break;
+			size_t pick = SIZE_MAX;
+			if(rest && dec.player == me)
+				for(size_t k = 0; k < 6 && at + k < rest->size() && pick == SIZE_MAX; ++k) {
+					const Step& s = (*rest)[at + k];
+					if(s.player != dec.player)
+						continue;
+					for(size_t o = 0; o < dec.options.size(); ++o)
+						if(dec.options[o].label == s.label) {
+							pick = o;
+							at += k + 1;
+							break;
+						}
+					if(pick == SIZE_MAX && s.type == DecisionType::Place && dec.type == DecisionType::Place) {
+						pick = 0;
+						at += k + 1;
+					}
+				}
+			if(pick == SIZE_MAX) {
+				if(dec.minor || dec.options.size() == 1) {
+					pick = 0;
+				} else if(dec.player != me) {  // (rest is never followed for them: see the matching above)
+					pick = pass_of(dec);
+					if(pick == SIZE_MAX)
+						pick = 0;
+				} else {
+					std::vector<double> w(dec.options.size());
+					for(size_t i = 0; i < w.size(); ++i)
+						w[i] = weight(d, dec, dec.options[i], this_turn);
+					pick = weighted_pick(w, rng);
+				}
+			}
+			const Option& o = dec.options[pick];
+			Step st{dec.player, dec.type, o.label, dec.minor, answering(d, dec, o)};
+			auto resp = o.response;
+			if(!d.respond(resp)) {
+				// an answer the rules refuse (rare): try the first one
+				if(pick == 0 || !d.respond(dec.options[0].response))
+					return false;
+				st.label = dec.options[0].label;
+				resp = dec.options[0].response;
+			}
+			out.responses.push_back(std::move(resp));
+			out.steps.push_back(std::move(st));
+			++this_turn;
+		}
+		uint8_t next = d.turn() >= root_turn + static_cast<uint32_t>(cfg.horizon_turns) ? d.turn_player()
+		                                                                                : static_cast<uint8_t>(1 - d.turn_player());
+		out.reward = eval_.evaluate(d.board(), me, next, d.ended(), d.winner()).score;
+		return true;
+	};
+	// a duel at the start of step `k` of `line`
+	auto at_step = [&](Duel& d, const Trajectory& line, size_t k) {
+		std::vector<std::vector<uint8_t>> h = root.history;
+		h.insert(h.end(), line.responses.begin(), line.responses.begin() + static_cast<long>(k));
+		return d.replay(root.setup, h);
+	};
+	Trajectory cur = t;
+	if(cur.responses.size() != cur.steps.size())
+		return false;
+	// The line as it goes when the other player passes: the plan can't count on them answering
+	// (a line that ends the Main Phase to bait a quick effect, then combos after it, falls apart when
+	// they don't). Every alternative below is played the same way.
+	{
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		if(!d.replay(root.setup, root.history))
+			return false;
+		std::mt19937_64 rng(0x5DEECE66Dull);
+		Trajectory base;
+		base.root = cur.root;
+		if(!finish(d, base, &cur.steps, 0, rng))
+			return false;
+		if(dbg)
+			std::fprintf(stderr, "plan: the search's line %.3f, with the opponent passing %.3f\n", cur.reward, base.reward);
+		cur = std::move(base);
+	}
+	const double start_reward = cur.reward;
+	unsigned threads = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)
+	                                   : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
+	if(const char* e = std::getenv("YGOE_THREADS"))
+		threads = static_cast<unsigned>(std::max(1, std::atoi(e)));
+	int tried = 0, better = 0;
+	for(size_t k = 0; k < cur.steps.size() && elapsed() < seconds; ++k) {
+		const Step s = cur.steps[k];
+		if(s.player != me || s.minor)
+			continue;
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		if(!at_step(d, cur, k))
+			break;
+		if(d.turn() >= root_turn + static_cast<uint32_t>(cfg.horizon_turns))
+			break;
+		const Decision dec = d.decision();
+		if(dec.player != me || dec.options.size() < 2)
+			continue;
+		// the other answers, most natural first (a few: the planner has many choices to look at)
+		std::vector<std::pair<double, size_t>> alts;
+		for(size_t o = 0; o < dec.options.size(); ++o)
+			if(dec.options[o].label != s.label)
+				alts.push_back({weight(d, dec, dec.options[o], static_cast<int>(k)), o});
+		std::stable_sort(alts.begin(), alts.end(), [](auto& a, auto& b) { return a.first > b.first; });
+		if(alts.size() > 6)
+			alts.resize(6);
+		// each answer twice: along the line's later steps, and played freely
+		struct Job {
+			size_t option;
+			bool follow;
+		};
+		std::vector<Job> jobs;
+		for(auto& [w, o] : alts) {
+			jobs.push_back({o, true});
+			jobs.push_back({o, false});
+		}
+		std::vector<Trajectory> results(jobs.size());
+		std::vector<char> ok(jobs.size(), 0);
+		std::atomic<size_t> next{0};
+		auto work = [&](unsigned tid) {
+			std::mt19937_64 rng(0x9E3779B97F4A7C15ull ^ (k * 131 + tid));
+			Duel w(db_, scripts_);
+			w.set_declare_pool(pool_);
+			while(true) {
+				const size_t j = next.fetch_add(1);
+				if(j >= jobs.size() || elapsed() > seconds)
+					break;
+				if(!at_step(w, cur, k))
+					continue;
+				Trajectory out;
+				out.root = cur.root;
+				out.steps.assign(cur.steps.begin(), cur.steps.begin() + static_cast<long>(k));
+				out.responses.assign(cur.responses.begin(), cur.responses.begin() + static_cast<long>(k));
+				const Decision wd = w.decision();
+				if(jobs[j].option >= wd.options.size())
+					continue;
+				const Option& o = wd.options[jobs[j].option];
+				out.steps.push_back({wd.player, wd.type, o.label, wd.minor, answering(w, wd, o)});
+				out.responses.push_back(o.response);
+				if(!w.respond(o.response))
+					continue;
+				ok[j] = finish(w, out, jobs[j].follow ? &cur.steps : nullptr, k + 1, rng);
+				results[j] = std::move(out);
+			}
+		};
+		run_workers(std::min<unsigned>(threads, static_cast<unsigned>(jobs.size())), work);
+		tried += static_cast<int>(jobs.size());
+		size_t best = SIZE_MAX;
+		for(size_t j = 0; j < jobs.size(); ++j)
+			if(ok[j] && (best == SIZE_MAX || results[j].reward > results[best].reward))
+				best = j;
+		if(best != SIZE_MAX && results[best].reward > cur.reward + 0.004) {
+			if(dbg)
+				std::fprintf(stderr, "plan: step %zu '%s' -> '%s' (%s): %.3f -> %.3f\n", k, s.label.substr(0, 60).c_str(),
+				             results[best].steps[k].label.substr(0, 60).c_str(), jobs[best].follow ? "same line after" : "new line after",
+				             cur.reward, results[best].reward);
+			cur = std::move(results[best]);
+			++better;
+		}
+	}
+	if(dbg)
+		std::fprintf(stderr, "plan: %d answers tried in %.1fs, %d better; %.3f -> %.3f\n", tried, elapsed(), better, start_reward, cur.reward);
+	const bool changed = better > 0 || cur.responses != t.responses;
+	t = std::move(cur);
+	return changed;
+}
+
+bool Searcher::drop_idle_plays(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns) {
+	// From the last play back: a play whose removal leaves the end of the turn as good goes. (The
+	// last ones first: taking out a late play can't break an earlier one.)
+	bool changed = false;
+	int tries = 0;
+	std::vector<size_t> starts;
+	for(size_t i = 0; i < t.steps.size(); ++i) {
+		const Step& s = t.steps[i];
+		if(s.type == DecisionType::Idle && s.player != player)
+			break;  // the other player's turn
+		if(s.player == player && s.type == DecisionType::Idle && s.label.rfind("Go to ", 0) != 0)
+			starts.push_back(i);
+	}
+	for(size_t n = starts.size(); n-- > 0 && tries < 30;) {
+		const size_t i = starts[n];
+		if(i >= t.steps.size() || t.steps[i].player != player || t.steps[i].type != DecisionType::Idle)
+			continue;
+		size_t j = i + 1;  // the play with its choices and the chain windows it opened
+		bool quiet = true;
+		while(j < t.steps.size() && t.steps[j].type != DecisionType::Idle) {
+			const Step& x = t.steps[j];
+			if(x.player != player && !x.minor && !is_pass_label(x.label) && x.type != DecisionType::Place)
+				quiet = false;  // the other player answered it: not comparable without it
+			++j;
+		}
+		if(!quiet)
+			continue;
+		++tries;
+		Trajectory cand = t;
+		cand.steps.erase(cand.steps.begin() + static_cast<long>(i), cand.steps.begin() + static_cast<long>(j));
+		// same end, or better, without it (a small tolerance: the evaluator's noise is not a purpose)
+		if(replay_labels(root, cand, player, horizon_turns, t.reward + 0.002, true) && cand.reward >= t.reward - 0.001) {
+			if(std::getenv("YGOE_PLAN_DEBUG"))
+				std::fprintf(stderr, "plan: dropped '%s' (%.3f -> %.3f)\n", t.steps[i].label.substr(0, 70).c_str(), t.reward, cand.reward);
+			t = std::move(cand);
+			changed = true;
+		}
+	}
+	return changed;
+}
 
 std::string first_action(const Trajectory& t, uint8_t player) {
 	for(const auto& s : t.steps) {

@@ -321,10 +321,16 @@ bool Duel::start(const DuelSetup& setup, std::string* error) {
 	chain_depth_ = 0;
 	given_.clear();
 	zone_choices_ = false;
-	for(const auto& ps : setup.players) {
+	for(int pl = 0; pl < 2; ++pl) {
+		const auto& ps = setup.players[pl];
+		pendulum_deck_[pl] = center_deck_[pl] = false;
 		for(const auto* v : {&ps.main, &ps.extra, &ps.hand})
-			for(uint32_t c : *v)
+			for(uint32_t c : *v) {
 				zone_choices_ = zone_choices_ || db_.cares_about_columns(c);
+				const CardInfo* ci = db_.get(db_.script_id(c));
+				pendulum_deck_[pl] = pendulum_deck_[pl] || (ci && (ci->type & TYPE_PENDULUM) && (ci->type & TYPE_MONSTER));
+				center_deck_[pl] = center_deck_[pl] || db_.wants_center(db_.script_id(c));
+			}
 		for(const auto& pc : ps.placed)
 			zone_choices_ = zone_choices_ || db_.cares_about_columns(pc.code);
 	}
@@ -1198,6 +1204,33 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 			if(count == 1)
 				for(size_t z = 1; z < zones.size(); ++z)
 					add(OptKind::Choose, {zones[z][0], zones[z][1], zones[z][2]}, zone_label(zones[z]));
+			// The default (first) zone for the card being placed (the rules core names it in the hint
+			// just before): a card that wants the center Main Monster Zone (Elfnote Regina) goes there,
+			// and other monsters leave it free while the deck has such cards; a deck with Pendulum
+			// monsters keeps its Pendulum Zones (columns 1 and 5) free of other Spells/Traps.
+			const uint32_t placing = d.hint > 1000 && db_.get(static_cast<uint32_t>(d.hint)) ? static_cast<uint32_t>(d.hint) : 0;
+			const CardInfo* pci = placing ? db_.get(db_.script_id(placing)) : nullptr;
+			const bool to_center = placing && db_.wants_center(db_.script_id(placing));
+			const bool pend_card = pci && (pci->type & TYPE_PENDULUM);
+			auto zone_rank = [&](const Option& o) {
+				if(o.response.size() != 3 || o.response[0] != d.player || !placing)
+					return 0;
+				const uint8_t loc = o.response[1], seq = o.response[2];
+				if(loc == LOCATION_MZONE && seq < 5) {
+					if(to_center)
+						return seq == 2 ? 0 : 1;
+					return center_deck_[d.player & 1] && seq == 2 ? 1 : 0;
+				}
+				if(loc == LOCATION_SZONE && seq < 5 && pendulum_deck_[d.player & 1] && !pend_card)
+					return seq == 0 || seq == 4 ? 1 : 0;
+				return 0;
+			};
+			if(count == 1)
+				std::stable_sort(d.options.begin(), d.options.end(),
+				                 [&](const Option& a, const Option& b2) { return zone_rank(a) < zone_rank(b2); });
+			const bool center_free = to_center && !d.options.empty() && d.options.front().response.size() == 3 &&
+			                         d.options.front().response[1] == LOCATION_MZONE && d.options.front().response[2] == 2 &&
+			                         d.options.front().response[0] == d.player;
 			// Where a card in the duel cares about columns, the zone is a real decision. Only zones
 			// that differ in what shares their column are offered (the first free zone first): one
 			// per mix of "a card of yours / of the opponent in this column / next to it".
@@ -1260,7 +1293,9 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 							++mine_other;
 					return mine_other > 0 ? 1 : 0;
 				};
-				std::stable_sort(kept.begin(), kept.end(), [&](const Option& a, const Option& b2) { return apart(a) < apart(b2); });
+				std::stable_sort(kept.begin(), kept.end(), [&](const Option& a, const Option& b2) {
+					return std::make_pair(zone_rank(a), apart(a)) < std::make_pair(zone_rank(b2), apart(b2));
+				});
 				// A real choice only while a column card is in play (on the field, or in the deciding
 				// player's hand); otherwise the safe default is taken without branching the search.
 				bool live = false;
@@ -1276,6 +1311,9 @@ void Duel::build_decision(uint8_t msg, const uint8_t* begin, const uint8_t* end)
 				if(offered <= 1 || !live)
 					d.minor = true;
 			}
+			// The center for a card that wants it: not a choice.
+			if(center_free && !every_zone_)
+				d.minor = true;
 		}
 		break;
 	}

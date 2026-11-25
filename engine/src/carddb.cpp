@@ -150,6 +150,21 @@ bool CardDB::load(const std::string& dir, std::string* error) {
 		if(l.find("column") != std::string::npos || l.find("center main monster zone") != std::string::npos ||
 		   l.find("adjacent monster zone") != std::string::npos)
 			columns_.insert(id);
+		// "this card ... center Main Monster Zone" in one sentence (not "the monster in your center
+		// Main Monster Zone", which wants any monster there)
+		size_t from = 0;
+		while(true) {
+			size_t at = l.find("center main monster zone", from);
+			if(at == std::string::npos)
+				break;
+			size_t start = l.rfind('.', at);
+			start = start == std::string::npos ? 0 : start;
+			const std::string sentence = l.substr(start, at - start);
+			if(sentence.find("this card") != std::string::npos && sentence.find("the monster in your center") == std::string::npos &&
+			   sentence.find("special summon this card (from your hand) to your center") == std::string::npos)
+				center_.insert(id);
+			from = at + 1;
+		}
 	}
 	// A learned value network shipped with the data, if any.
 	{

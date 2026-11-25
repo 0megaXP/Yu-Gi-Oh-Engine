@@ -107,6 +107,44 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const Scenario& sc, u
 	begin(sc_.decks[0], sc_.decks[1]);
 }
 
+LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const DuelSetup& setup,
+                   const std::vector<std::vector<uint8_t>>& answers)
+    : db_(db), scripts_(scripts), rng_(setup.seed[0] * 7919 + 17) {
+	for(int p = 0; p < 2; ++p) {
+		sc_.decks[p].main = setup.players[p].main;
+		sc_.decks[p].main.insert(sc_.decks[p].main.end(), setup.players[p].hand.begin(), setup.players[p].hand.end());
+		sc_.decks[p].extra = setup.players[p].extra;
+		sc_.hand_known[p] = false;
+	}
+	sc_.seed = setup.seed[0];
+	setup_ = setup;
+	replaying_ = true;
+	begin(sc_.decks[0], sc_.decks[1]);
+	replaying_ = false;
+	if(!ok_)
+		return;
+	for(size_t i = 0; i < answers.size(); ++i) {
+		const Decision& d = duel_->decision();
+		size_t at = d.options.size();
+		for(size_t k = 0; k < d.options.size() && at == d.options.size(); ++k)
+			if(d.options[k].response == answers[i])
+				at = k;
+		bool done = at < d.options.size() ? respond_internal(at) : false;
+		if(!done && duel_->respond(answers[i])) {  // an answer not among the options (a free-form one)
+			history_.push_back(answers[i]);
+			track_knowledge();
+			plan_.clear(), plan_pos_ = 0;
+			done = true;
+		}
+		if(!done) {
+			ok_ = false;
+			error_ = "answer " + std::to_string(i) + " is not legal any more";
+			return;
+		}
+	}
+	steps_turn_ = duel_->turn();
+}
+
 void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	duel_ = std::make_unique<Duel>(db_, scripts_);
 	duel_->enable_log(true);
@@ -128,7 +166,8 @@ void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 			if(c.code)
 				++last_hand_[p][c.code];
 	ok_ = true;
-	auto_resolve();
+	if(!replaying_)
+		auto_resolve();
 }
 
 bool LiveDuel::respond_internal(size_t index) {
@@ -138,6 +177,7 @@ bool LiveDuel::respond_internal(size_t index) {
 	Option opt = d.options[index];
 	const uint8_t who = d.player;
 	const DecisionType type = d.type;
+	const bool minor = d.minor;
 	if(!duel_->respond(opt.response))
 		return false;
 	if(who < 2 && opt.code && opt.kind != OptKind::Pass &&
@@ -152,11 +192,29 @@ bool LiveDuel::respond_internal(size_t index) {
 		++steps_this_turn_;
 	}
 	last_move_ = opt.label;
-	// Keep the bot's plan while play follows it.
-	if(plan_pos_ < plan_.size() && plan_[plan_pos_].label == opt.label)
+	// The plan put aside (the other bot's): its owner's opponent doing anything but passing ends it.
+	if(other_player_ >= 0 && who != other_player_ && !minor && opt.kind != OptKind::Pass)
+		other_plan_.clear(), other_pos_ = 0, other_player_ = -1;
+	// Keep the bot's plan while play follows it. The other player passing a window the plan didn't
+	// imagine changes nothing; anything else that differs ends the plan (what is left of it stays a
+	// candidate for the next search, this turn).
+	if(plan_pos_ < plan_.size() && plan_[plan_pos_].label == opt.label) {
 		++plan_pos_;
-	else
+	} else if(plan_pos_ < plan_.size() && (minor || type == DecisionType::Place) && plan_[plan_pos_].type == type &&
+	          plan_[plan_pos_].player == who) {
+		++plan_pos_;  // a zone / position / order taken by default: another free zone than the plan's, same plan
+	} else if(plan_pos_ < plan_.size() && (minor || (who != plan_player_ && opt.kind == OptKind::Pass))) {
+	} else {
+		if(plan_pos_ < plan_.size() && std::getenv("YGOE_PLAN_DEBUG"))
+			std::fprintf(stderr, "plan left at step %zu: P%d '%s', the plan had P%d '%s'\n", plan_pos_, who, opt.label.substr(0, 60).c_str(),
+			             plan_[plan_pos_].player, plan_[plan_pos_].label.substr(0, 60).c_str());
+		if(plan_pos_ + 1 < plan_.size()) {
+			stale_plan_.assign(plan_.begin() + static_cast<long>(plan_pos_) + 1, plan_.end());
+			stale_turn_ = duel_->turn();
+			stale_player_ = plan_player_;
+		}
 		plan_.clear(), plan_pos_ = 0;
+	}
 	auto lines = duel_->take_log();
 	log_.insert(log_.end(), lines.begin(), lines.end());
 	auto players = duel_->take_log_players();
@@ -383,6 +441,48 @@ void LiveDuel::track_knowledge() {
 	}
 }
 
+int LiveDuel::battle_instead(const Decision& d) const {
+	// Ending Main Phase 1 with a monster that can attack a field it gets through (nothing there, or
+	// something weaker): the Battle Phase option, -1 otherwise.
+	if(d.type != DecisionType::Idle || d.player != duel_->turn_player() || duel_->phase() != PHASE_MAIN1)
+		return -1;
+	int battle = -1;
+	for(size_t i = 0; i < d.options.size(); ++i)
+		if(d.options[i].kind == OptKind::ToBattle)
+			battle = static_cast<int>(i);
+	if(battle < 0)
+		return -1;
+	const Board b = duel_->board();
+	int strongest = 0, weakest = INT32_MAX;
+	bool open = true;
+	for(const auto& c : b.mzone[d.player])
+		if(c.code && (c.pos & POS_FACEUP_ATTACK))
+			strongest = std::max(strongest, c.atk);
+	for(const auto& c : b.mzone[1 - d.player])
+		if(c.code) {
+			open = false;
+			weakest = std::min(weakest, (c.pos & POS_FACEDOWN) ? INT32_MAX : (c.pos & POS_ATTACK) ? c.atk : c.def);
+		}
+	return strongest > 0 && (open || strongest > weakest) ? battle : -1;
+}
+
+bool LiveDuel::bring_forward(const std::string& label, size_t at) {
+	// The plan keeps going with that play (and its choices) moved to `at`, the Set or Normal
+	// Summon after it: no new search, the plan stays the plan.
+	for(size_t k = at + 1; k < plan_.size(); ++k) {
+		if(plan_[k].type != DecisionType::Idle || plan_[k].label != label)
+			continue;
+		size_t j = k + 1;
+		while(j < plan_.size() && plan_[j].type != DecisionType::Idle)
+			++j;
+		std::vector<Step> block(plan_.begin() + static_cast<long>(k), plan_.begin() + static_cast<long>(j));
+		plan_.erase(plan_.begin() + static_cast<long>(k), plan_.begin() + static_cast<long>(j));
+		plan_.insert(plan_.begin() + static_cast<long>(at), block.begin(), block.end());
+		return true;
+	}
+	return false;
+}
+
 namespace {
 bool holds_back(const std::string& l) { return l.rfind("Set ", 0) == 0 || l.rfind("Normal Summon ", 0) == 0; }
 }  // namespace
@@ -415,14 +515,50 @@ int LiveDuel::choose(BotLevel level) {
 		return -1;
 	if(d.options.size() == 1)
 		return 0;
+	// Each bot keeps its own plan (bot against bot): the deciding player's is the one in use.
+	if(plan_player_ != d.player && other_player_ == d.player) {
+		std::swap(plan_, other_plan_);
+		std::swap(plan_pos_, other_pos_);
+		std::swap(plan_player_, other_player_);
+	} else if(plan_player_ != d.player && plan_player_ >= 0) {
+		other_plan_ = std::move(plan_);
+		other_pos_ = plan_pos_;
+		other_player_ = plan_player_;
+		plan_.clear(), plan_pos_ = 0, plan_player_ = -1;
+	}
+	// The other player's passes the plan imagined but that didn't come (no window opened for them):
+	// skipped, the plan goes on.
+	// (Its own too: a chain window after its own play that the rules core didn't ask about here.)
+	// And the other player's plays the plan's line had them make but they didn't (the search's line
+	// is one imagined game): the plan goes on without them.
+	while(plan_pos_ < plan_.size() && plan_player_ == d.player &&
+	      ((plan_[plan_pos_].player != d.player) ||
+	       (plan_[plan_pos_].type != d.type && (plan_[plan_pos_].label == "Don't respond" || plan_[plan_pos_].minor))))
+		++plan_pos_;
+	// A zone the plan's line chose that isn't offered now (other zones are free): the default one.
+	if(plan_pos_ < plan_.size() && plan_player_ == d.player && d.type == DecisionType::Place &&
+	   plan_[plan_pos_].type == DecisionType::Place && plan_[plan_pos_].player == d.player) {
+		bool offered = false;
+		for(const auto& o : d.options)
+			offered = offered || o.label == plan_[plan_pos_].label;
+		if(!offered)
+			return 0;
+	}
 	// Follow the plan while it still matches (but not into a hand trap Normal Summoned that
 	// nothing in the rest of the plan uses: decide again).
 	// A chain window isn't followed into using a card either: the plan is one imagined line, and its
 	// answers there are that line's random play (it once had a Mulcharmy Fuwalos chained in its
 	// owner's own Standby Phase); using a card is decided with the checks below.
-	const bool plan_uses_card = (d.type == DecisionType::Chain || d.type == DecisionType::EffectYesNo) &&
-	                            plan_pos_ < plan_.size() && plan_[plan_pos_].label != "Don't respond" &&
-	                            plan_[plan_pos_].label.rfind("Don't use", 0) != 0;
+	bool plan_uses_card = (d.type == DecisionType::Chain || d.type == DecisionType::EffectYesNo) &&
+	                      plan_pos_ < plan_.size() && plan_[plan_pos_].label != "Don't respond" &&
+	                      plan_[plan_pos_].label.rfind("Don't use", 0) != 0;
+	// (Its own engine cards during its own combo, not answering the opponent, are the plan itself:
+	// followed. Searching again there replaced the planned turn with a fresh, shorter-sighted one.)
+	if(plan_uses_card && d.player == duel_->turn_player() && duel_->chain_last_player() != 1 - d.player)
+		for(const auto& o : d.options)
+			if(o.label == plan_[plan_pos_].label && o.code && eval_->role(d.player, o.code).engine &&
+			   !eval_->role(d.player, o.code).hand_trap)
+				plan_uses_card = false;
 	if(level != BotLevel::Easy && plan_pos_ < plan_.size() && plan_[plan_pos_].player == d.player &&
 	   plan_player_ == d.player && !plan_uses_card && !unused_summon(d, plan_[plan_pos_].label, plan_, plan_pos_ + 1)) {
 		for(size_t i = 0; i < d.options.size(); ++i)
@@ -432,13 +568,29 @@ int LiveDuel::choose(BotLevel level) {
 				if(d.type == DecisionType::Idle) {
 					int later = later_play(d, plan_pos_);
 					if(later >= 0) {
-						plan_.clear();
-						plan_pos_ = 0;
+						if(!bring_forward(d.options[static_cast<size_t>(later)].label, plan_pos_))
+							plan_.clear(), plan_pos_ = 0;
 						return later;
+					}
+				}
+				if(d.options[i].label == "Go to End Phase") {
+					const int b = battle_instead(d);
+					if(b >= 0) {
+						plan_.clear(), plan_pos_ = 0;
+						return b;
 					}
 				}
 				return static_cast<int>(i);
 			}
+	}
+	if(std::getenv("YGOE_PLAN_DEBUG") && level != BotLevel::Easy) {
+		if(plan_pos_ < plan_.size())
+			std::fprintf(stderr, "plan not followed at step %zu/%zu (P%d %s): the plan has P%d '%s'%s\n", plan_pos_, plan_.size(), d.player,
+			             decision_name(d.type), plan_[plan_pos_].player, plan_[plan_pos_].label.substr(0, 60).c_str(),
+			             plan_uses_card ? " (a card use: decided again)" : "");
+		else
+			std::fprintf(stderr, "no plan for P%d (%s), %zu steps held%s\n", d.player, decision_name(d.type), plan_.size(),
+			             plan_player_ == d.player ? "" : " by the other bot");
 	}
 	if(level == BotLevel::Easy) {
 		std::vector<double> w(d.options.size());
@@ -447,10 +599,48 @@ int LiveDuel::choose(BotLevel level) {
 		std::discrete_distribution<size_t> pick(w.begin(), w.end());
 		return static_cast<int>(pick(rng_));
 	}
+	// The Battle Phase on an open field: every monster that can attack directly does, the strongest
+	// first. (The search weighs attacks by random playouts and can rate ending the Battle Phase as
+	// well as the damage; with nothing to block there is no reason to hold an attack back.)
+	if(d.type == DecisionType::Battle && d.player == duel_->turn_player()) {
+		const Board b = duel_->board();
+		bool open = true;
+		for(const auto& c : b.mzone[1 - d.player])
+			open = open && !c.code;
+		if(open) {
+			int best = -1, best_atk = -1;
+			for(size_t i = 0; i < d.options.size(); ++i) {
+				const Option& o = d.options[i];
+				if(o.kind != OptKind::Attack)
+					continue;
+				int atk = 0;
+				for(const auto& c : b.mzone[d.player])
+					if(c.code == o.code && (c.seq == o.seq || atk == 0))
+						atk = c.atk;
+				if(atk > best_atk)
+					best = static_cast<int>(i), best_atk = atk;
+			}
+			if(best >= 0 && best_atk > 0) {
+				plan_.clear(), plan_pos_ = 0;
+				return best;
+			}
+		}
+	}
 	// Plan the rest of this turn from the exact current state.
 	SearchConfig cfg;
 	cfg.iterations = level == BotLevel::Strong ? 2500 : 800;
 	cfg.seconds = level == BotLevel::Strong ? 25 : 10;
+	// Its own turn, a Main or Battle Phase play: the search's best line is then planned through to
+	// the end of the turn (improve_line), and that plan is played. The time is shared between them.
+	const bool plans_turn = d.player == duel_->turn_player() && d.type != DecisionType::Chain && d.type != DecisionType::EffectYesNo &&
+	                        d.type != DecisionType::Battle;
+	// (a smaller search budget, as self-play sets: the planner's time shrinks with it)
+	const double plan_seconds = !plans_turn ? 0
+	                            : (level == BotLevel::Strong ? 9.0 : 3.0) *
+	                                  (iterations_ > 0 ? std::min(1.0, iterations_ / (level == BotLevel::Strong ? 2500.0 : 800.0)) : 1.0);
+	cfg.seconds -= plan_seconds;
+	if(std::getenv("YGOE_NO_PLANNER"))
+		cfg.seconds += plan_seconds;
 	if(iterations_ > 0)
 		cfg.iterations = iterations_;
 	// The opponent's interruption on the chain against the bot's own turn: a window where the
@@ -657,6 +847,20 @@ int LiveDuel::choose(BotLevel level) {
 					margin = std::max(margin, 1.0);
 			}
 		}
+		// A card that clears the opponent's whole field (Medicurius: "banish ... all cards your
+		// opponent controls"), used on their turn while they control little: most of what it can hit
+		// is still to come this turn. Held unless the gain is clear (it stops a choke point, it wins).
+		if(use && use_code && d.player != duel_->turn_player()) {
+			std::string ut = db_.text(db_.script_id(use_code));
+			for(auto& ch : ut)
+				ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			const bool wipe = ut.find("all cards your opponent controls") != std::string::npos ||
+			                  ut.find("all monsters your opponent controls") != std::string::npos ||
+			                  ut.find("all cards on the field") != std::string::npos ||
+			                  ut.find("all other cards on the field") != std::string::npos;
+			if(wipe && duel_->board().count_field(static_cast<uint8_t>(1 - d.player)) < 3)
+				margin = std::max(margin, 0.08);
+		}
 		bool used = !pass || (use && use->mean > pass->mean + margin);
 		if(ne_card && ne_explore_ > 0 && std::uniform_real_distribution<double>(0, 1)(rng_) < ne_explore_)
 			used = !used;  // self-play: both choices get seen
@@ -749,6 +953,7 @@ int LiveDuel::choose(BotLevel level) {
 			}
 		}
 	}
+	bool explored = false;
 	// Self-play exploration: early in the game, sometimes another well-explored move.
 	if(explore_p_ > 0 && !response && (d.type == DecisionType::Idle || d.type == DecisionType::Battle) &&
 	   explored_[d.player & 1]++ < explore_moves_ && std::uniform_real_distribution<double>(0, 1)(rng_) < explore_p_) {
@@ -760,6 +965,7 @@ int LiveDuel::choose(BotLevel level) {
 		if(!other.empty()) {
 			pick = other[std::uniform_int_distribution<size_t>(0, other.size() - 1)(rng_)];
 			repaired.clear();
+			explored = true;
 		}
 	}
 	const MoveStats& best = *pick;
@@ -807,6 +1013,32 @@ int LiveDuel::choose(BotLevel level) {
 		// Develop first, set last: the same end board with fewer chances for the opponent
 		// to hit set cards, and no Spell/Trap Zone blocked mid-combo.
 		Trajectory t = !repaired.empty() && repaired.front().first == &best ? repaired.front().second : repair(best);
+		// The turn planner: the whole line looked at again, choice by choice, then what does nothing
+		// for the end of the turn taken out. (Not while exploring for self-play: that move is the point.)
+		static const bool no_planner = std::getenv("YGOE_NO_PLANNER") != nullptr;
+		if(plans_turn && !explored && !no_planner && !cancel_) {
+			const RootState& r = roots[std::min(t.root, roots.size() - 1)];
+			if(!stale_plan_.empty() && stale_turn_ == duel_->turn() && stale_player_ == d.player) {
+				Trajectory old;
+				old.root = t.root;
+				old.steps = stale_plan_;
+				if(searcher_->replay_labels(r, old, d.player, cfg.horizon_turns, -1e9, true) && old.reward > t.reward) {
+					if(std::getenv("YGOE_PLAN_DEBUG"))
+						std::fprintf(stderr, "plan: the rest of the earlier plan is better (%.3f > %.3f)\n", old.reward, t.reward);
+					t = std::move(old);
+				}
+			}
+			stale_plan_.clear();
+			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
+				searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
+				searcher_->defer_summons(r, t, d.player, cfg.horizon_turns);
+			}
+			if(std::getenv("YGOE_BOT_DEBUG")) {
+				fprintf(stderr, "   plan (%.3f):\n", t.reward);
+				for(auto& l : describe(t, d.player, true))
+					fprintf(stderr, "      %s\n", l.substr(0, 140).c_str());
+			}
+		}
 		plan_ = t.steps;
 		plan_player_ = d.player;
 		if(!plan_.empty() && plan_.front().player == d.player)
@@ -828,8 +1060,8 @@ int LiveDuel::choose(BotLevel level) {
 			int later = later_play(d, 0);
 			if(later >= 0) {
 				want = d.options[static_cast<size_t>(later)].label;
-				plan_.clear();
-				plan_pos_ = 0;
+				if(!bring_forward(want, 0))
+					plan_.clear(), plan_pos_ = 0;
 			}
 		}
 	}
@@ -853,6 +1085,33 @@ int LiveDuel::choose(BotLevel level) {
 			want = other;
 			plan_.clear();
 			plan_pos_ = 0;
+		}
+	}
+	// Phases. Ending Main Phase 1 with a monster that can attack: to the Battle Phase first (see
+	// battle_instead). Going to battle with nothing that can attack only skips the rest of Main
+	// Phase 1: the best other play instead.
+	if(d.type == DecisionType::Idle && want == "Go to End Phase") {
+		const int b = battle_instead(d);
+		if(b >= 0) {
+			want = d.options[static_cast<size_t>(b)].label;
+			plan_.clear(), plan_pos_ = 0;
+		}
+	} else if(d.type == DecisionType::Idle && d.player == duel_->turn_player() && duel_->phase() == PHASE_MAIN1 &&
+	          want == "Go to Battle Phase") {
+		bool attacker = false;
+		for(const auto& c : duel_->board().mzone[d.player])
+			attacker = attacker || (c.code && (c.pos & POS_FACEUP_ATTACK));
+		const int most = out.moves.front().visits;
+		const MoveStats* other = nullptr;
+		for(const auto& m : out.moves) {
+			if(attacker || m.visits < std::max(4, most / 10) || m.label.rfind("Go to ", 0) == 0)
+				continue;
+			if(!other || m.mean > other->mean)
+				other = &m;
+		}
+		if(other) {
+			want = other->label;
+			plan_.clear(), plan_pos_ = 0;
 		}
 	}
 	int index = 0;

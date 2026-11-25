@@ -12,6 +12,13 @@ The rules are not re-implemented. Every card effect, chain and timing rule comes
 - Reports the top lines: the steps, the end board, and the interruptions it holds. Each interruption is valued against the specific opponent deck.
 - Then plays the opponent's next turn against each candidate board (phase B) and re-ranks the boards by how well they hold up. It shows the opponent's strongest reply it found and which of your cards answered it.
 
+**How the bots play a turn** (the app's simulator)
+- At a play of their own turn, the search above finds the best line it can, and the **turn planner** then goes through that whole line to the end of the turn. At each of the bot's choices in it (which card to activate, what to discard, Synchro Summon or not, which zone) it tries the other answers, plays the rest of the turn out, and keeps any line that ends better. Then each Main Phase play is taken out in turn: one the end of the turn doesn't need (an effect used just because it can be, a pointless Link Summon, a Normal Spell set for nothing) goes.
+- The bot then plays that plan without searching again. It plans again only when something it didn't expect happens (a draw, the opponent's response), and what is left of the old plan is a candidate there.
+- A Battle Phase with no monster that can attack is never a choice. On an open field every monster that can attack directly does, and the bot goes to battle before ending the turn when an attack gets through.
+- Zones: a card that wants the center Main Monster Zone (Elfnote Regina) goes there, other monsters leave it free, and a deck with Pendulum monsters keeps other cards out of its Pendulum Zones.
+- `ygoe-cli simreplay <duel.json> --at N --bot strong` asks the bot what it would do at answer N of a saved simulator duel (`YGOE_BOT_DEBUG=1`, `YGOE_PLAN_DEBUG=1` for its search and plan; `YGOE_NO_PLANNER=1` to compare without the planner).
+
 **Two knowledge modes**
 - `practice`: the engine sees both hands. Use `hand1: proxy` to have it deal a random proxy hand from the opponent's list.
 - `real`: the engine knows only your own hand and the public board. It samples the opponent's hidden hand from their decklist many times and plays one shared search tree across all samples (information-set MCTS). So it cannot "cheat" by seeing their cards.

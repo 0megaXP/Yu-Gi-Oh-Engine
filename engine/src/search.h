@@ -132,6 +132,15 @@ public:
 	// nothing: the line scores as well holding the card, e.g. a hand trap on your own card or
 	// on a monster that has already done its job. Holding the card keeps it for a better time.
 	bool drop_idle_responses(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
+	// The turn planner. Improves a whole line of `me`'s turn: at each of `me`'s choices in it, every
+	// other answer is tried, the rest of the turn played (first along the line's own later steps,
+	// then also freely), and a line that ends better replaces it. The other player passes where it
+	// can (the bot plans again when they interrupt). Stops after `seconds`. True if `t` changed.
+	bool improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds);
+	// Takes out `player`'s Main Phase plays that do nothing for the end of the turn (the line scores
+	// as well without them): an effect activated just because it can be, a Link Summon that leads
+	// nowhere, a Normal Spell set for no reason. True if `t` changed.
+	bool drop_idle_plays(const RootState& root, Trajectory& t, uint8_t player, int horizon_turns);
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 

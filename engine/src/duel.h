@@ -304,6 +304,10 @@ private:
 	// Some card in the duel cares about columns: zones are a real choice (else the first free one).
 	bool zone_choices_ = false;
 	bool every_zone_ = false;
+	// per player: their deck has Pendulum monsters (keep the Pendulum Zones free) / cards that
+	// want the center Main Monster Zone (keep it free for them)
+	bool pendulum_deck_[2] = {false, false};
+	bool center_deck_[2] = {false, false};
 	// field slots (controller << 16 | location << 8 | sequence) holding a card another player put there
 	std::map<uint32_t, uint8_t> given_;
 	uint32_t chain_last_code_ = 0;

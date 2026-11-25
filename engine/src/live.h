@@ -41,6 +41,10 @@ public:
 	// turn it is. `flags` are the rules core's duel flags (0: Master Rule 5); a position from
 	// later in a game needs DUEL_ATTACK_FIRST_TURN so the turn player can attack.
 	LiveDuel(const CardDB& db, ScriptCache& scripts, const Scenario& sc, uint64_t flags);
+	// A saved simulator duel (setup_from_json) played up to its first `answers.size()` answers,
+	// to ask the bot what it would do there (tests, simreplay --bot). ok() is false if an
+	// answer isn't legal any more.
+	LiveDuel(const CardDB& db, ScriptCache& scripts, const DuelSetup& setup, const std::vector<std::vector<uint8_t>>& answers);
 	// The player a person controls (-1 = none). Their zone choices are asked, not answered automatically.
 	void set_human(int player) { human_ = player; }
 	bool ok() const { return ok_; }
@@ -123,6 +127,10 @@ private:
 	int choose(BotLevel level);
 	// The plan's next non-Set, non-Normal-Summon play available now, when plan_[at] is one of those (-1: none).
 	int later_play(const Decision& d, size_t at) const;
+	// Moves the plan's next Main Phase play `label` (after `at`) to `at`. False if not in the plan.
+	bool bring_forward(const std::string& label, size_t at);
+	// At the end of Main Phase 1: the Battle Phase option when a monster can attack through (-1: none).
+	int battle_instead(const Decision& d) const;
 	// Roots for the bot's search that hide what it can't see: in each, the other player's hand
 	// cards it doesn't know (drawn, never shown) are swapped with random cards of their Deck,
 	// and both Decks are shuffled (DuelSetup::Hidden, applied after the history's replay).
@@ -162,6 +170,10 @@ private:
 	// (often random playout moves); those only track whether play still follows it and are
 	// never played for the other side's bot.
 	int plan_player_ = -1;
+	// The other bot's plan while this one decides (two bots, one each): swapped in by choose().
+	std::vector<Step> other_plan_;
+	size_t other_pos_ = 0;
+	int other_player_ = -1;
 	std::shared_ptr<const PieceGuide> guides_[2];
 	std::shared_ptr<const class Policy> policies_[2];
 	double explore_p_ = 0;
@@ -188,6 +200,12 @@ private:
 	std::mt19937_64 rng_;
 	std::atomic<bool> cancel_{false};
 	bool ok_ = false;
+	bool replaying_ = false;
+	// What was left of the bot's plan when play left it (a draw, a response it didn't expect):
+	// tried again at the next search of that turn.
+	std::vector<Step> stale_plan_;
+	uint32_t stale_turn_ = 0;
+	uint8_t stale_player_ = 0;
 	std::string error_;
 };
 

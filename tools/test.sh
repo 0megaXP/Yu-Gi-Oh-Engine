@@ -35,6 +35,15 @@ build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk exampl
   --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"
 build/ygoe-cli simreplay "$OUT/sim.json" | grep -v "^  >\|^after\|  chain:\|  next:\|^$" | diff -q - "$OUT/sim.txt" > /dev/null
 grep -q " targets " "$OUT/sim.txt"
+echo "== zones: Elfnote Regina goes to the center; a Pendulum deck keeps its Pendulum Zones free"
+# (examples/sim_elfnote_mirror.json: an app bot-vs-bot duel where both went wrong)
+build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 27 --options | grep -A1 "next: P1 place, minor" | grep -q "Monster Zone, column 3"
+build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 192 --options | grep -A1 "next: P1 place" | tail -1 | grep -qv "column 1\|column 5"
+echo "== battle: on an open field the bot attacks instead of ending the Battle Phase"
+build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 304 --bot normal --iterations 60 | grep -q "battle: Attack with"
+echo "== turn planner: no Battle Phase with no monsters while combo cards are left"
+build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 197 --bot normal --iterations 150 > "$OUT/plan197.txt"
+grep "idle:" "$OUT/plan197.txt" | grep -vq "Go to Battle Phase"
 echo "== once per turn: the rules core's count of what is left reaches the board"
 YGOE_BOT_DEBUG=1 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --turns 1 --seed 3 > /dev/null 2> "$OUT/opt.txt"

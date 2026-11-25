@@ -741,6 +741,46 @@ int main(int argc, char** argv) {
 			}
 		}
 		size_t at = std::min(responses.size(), static_cast<size_t>(std::stoul(a.get("at", std::to_string(responses.size())))));
+		if(a.has("bot")) {
+			// What the bot would answer at decision `at` (and on, for --moves N), YGOE_BOT_DEBUG for its search.
+			responses.resize(at);
+			LiveDuel live(db, scripts, setup, responses);
+			if(!live.ok()) {
+				std::fprintf(stderr, "%s\n", live.error().c_str());
+				return 1;
+			}
+			const std::string lv = a.get("bot", "strong");
+			const BotLevel level = lv == "easy" ? BotLevel::Easy : lv == "normal" ? BotLevel::Normal : BotLevel::Strong;
+			if(a.has("iterations"))
+				live.set_iterations(std::stoi(a.get("iterations", "0")));
+			if(a.has("lib")) {  // combo pieces for both bots (the app's app-pieces.json)
+				std::ifstream lf(a.get("lib", ""));
+				std::stringstream ls;
+				ls << lf.rdbuf();
+				auto lv2 = json::Value::parse(ls.str());
+				auto g = std::make_shared<PieceGuide>(parse_library(db, lv2.is_array() ? lv2 : lv2["library"]), &db);
+				live.set_guide(0, g);
+				live.set_guide(1, g);
+			}
+			live.state_json();  // the log so far
+			int moves = std::stoi(a.get("moves", "1"));
+			for(int m = 0; m < moves && !live.duel().ended(); ++m) {
+				const Decision& dec = live.duel().decision();
+				const uint8_t p = dec.player;
+				const std::string type = decision_name(dec.type);
+				std::string label = live.bot_move(level);
+				if(label.empty())
+					break;
+				std::printf("  > P%d %s: %s\n", p, type.c_str(), label.c_str());
+				auto v = json::Value::parse(live.state_json());
+				for(auto& line : v["log"].items())
+					std::printf("%s\n", line.str().c_str());
+				std::fflush(stdout);
+				if(a.has("turn-end") && live.duel().turn() != static_cast<uint32_t>(std::stoul(a.get("turn-end", "0"))))
+					break;
+			}
+			return 0;
+		}
 		Duel d(db, scripts);
 		d.enable_log(true);
 		auto flush = [&] {
@@ -759,7 +799,10 @@ int main(int argc, char** argv) {
 			for(const auto& o : dec.options)
 				if(o.response == responses[i])
 					label = o.label;
-			std::printf("  > [%zu] P%d: %s\n", i, dec.player, label.empty() ? "(answer)" : label.c_str());
+			std::string placing;  // a zone choice: the card it places (the rules core's hint)
+			if(dec.type == DecisionType::Place && dec.hint > 1000 && db.get(static_cast<uint32_t>(dec.hint)))
+				placing = " [" + db.name(static_cast<uint32_t>(dec.hint)) + "]";
+			std::printf("  > [%zu] P%d: %s%s\n", i, dec.player, label.empty() ? "(answer)" : label.c_str(), placing.c_str());
 			if(!d.respond(responses[i])) {
 				std::fprintf(stderr, "answer %zu rejected: the engine plays this duel differently now\n", i);
 				return 1;
@@ -775,8 +818,13 @@ int main(int argc, char** argv) {
 				std::printf(" -> %s%s", k.target ? "" : "(picks) ", db.name(k.code).c_str());
 			std::printf("\n");
 		}
-		if(!d.ended())
-			std::printf("  next: P%d %s (%zu options)\n", d.decision().player, decision_name(d.decision().type), d.decision().options.size());
+		if(!d.ended()) {
+			std::printf("  next: P%d %s%s (%zu options)\n", d.decision().player, decision_name(d.decision().type),
+			            d.decision().minor ? ", minor" : "", d.decision().options.size());
+			if(a.has("options"))
+				for(const auto& o : d.decision().options)
+					std::printf("    %s\n", o.label.c_str());
+		}
 		return 0;
 	}
 	if(cmd == "duel") {

@@ -66,6 +66,9 @@ public:
 	std::string text(uint32_t code) const;  // full card text
 	// Its text mentions columns: where cards are placed matters to it.
 	bool cares_about_columns(uint32_t code) const { return columns_.count(code) > 0; }
+	// Its text wants this card itself in the center Main Monster Zone ("Summoned to the center Main
+	// Monster Zone", "while this card is in the center...": Elfnote Regina, Elfnote Wien).
+	bool wants_center(uint32_t code) const { return center_.count(code) > 0; }
 	// The id of the card with this name (case does not matter), 0 if none.
 	uint32_t by_name(const std::string& name) const;
 	// The learned value network (valuenet.h) every Evaluator uses by default: data/value_net.json
@@ -98,7 +101,7 @@ private:
 	mutable std::atomic<bool> has_learned_{false};
 	std::unordered_map<uint64_t, std::string> strings_;  // key: code*16+idx
 	std::unordered_map<uint32_t, std::string> texts_;
-	std::unordered_set<uint32_t> columns_;
+	std::unordered_set<uint32_t> columns_, center_;
 	std::shared_ptr<const class ValueNet> value_net_;
 	std::shared_ptr<const class Policy> policy_;
 	std::shared_ptr<const class NeTiming> ne_timing_;
