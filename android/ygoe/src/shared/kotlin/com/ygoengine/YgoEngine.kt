@@ -288,6 +288,57 @@ class YgoEngine private constructor(private var handle: Long) : Closeable {
         )
     }
 
+    /**
+     * The nightly learning's own self-play on this device (engine learn.h, "contribute"): two of
+     * the format's decks at random, best of 3, with the format's network and policy and a deeper
+     * search ([iterations], the nightly runners use 200 and 800). Every game goes to [dir]'s
+     * positions.jsonl / policy_examples.jsonl as it ends. [pool]: the shared pool of combo pieces
+     * (combo-pool.json's "pieces", JSON array), so the bots play the lines the nightly bots do.
+     */
+    suspend fun contributeGames(
+        dir: java.io.File,
+        minutes: Double,
+        iterations: Int = 800,
+        pool: String? = null,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): SessionReport {
+        val req = JSONObject().put("task", "contribute").put("dir", dir.path).put("minutes", minutes)
+            .put("iterations", iterations).put("seed", System.nanoTime())
+            .put("pool", pool?.let { runCatching { org.json.JSONArray(it) }.getOrNull() } ?: JSONObject.NULL)
+        return session(req, onProgress)
+    }
+
+    /**
+     * Deeper combo lines for the nightly pool (engine learn.h, "deepen"): [decks]' opening hands
+     * (empty: the format's decks) searched with [iterations] each, [hands] at a time; each batch's
+     * pieces are saved in [dir]/newpieces as soon as it is done.
+     */
+    suspend fun deepenLines(
+        dir: java.io.File,
+        minutes: Double,
+        decks: List<EngineDeck> = emptyList(),
+        hands: Int = 10,
+        iterations: Int = 3000,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): SessionReport {
+        val req = JSONObject().put("task", "deepen").put("dir", dir.path).put("minutes", minutes)
+            .put("hands", hands).put("iterations", iterations).put("seed", System.nanoTime())
+            .put("decks", org.json.JSONArray(decks.map { it.toJson() }))
+        return session(req, onProgress)
+    }
+
+    private suspend fun session(req: JSONObject, onProgress: ((Progress) -> Unit)?): SessionReport {
+        val text = runNative(onProgress) { YgoNative.analyze(it, req.toString()) }
+        val o = runCatching { Parse.checked(text) }.getOrElse { e ->
+            throw if (e.message.orEmpty().startsWith("deck must be")) EngineException("this engine can't do this yet: update the engine") else e
+        }
+        if (!o.has("cancelled")) throw EngineException("this engine can't do this yet: update the engine")
+        return SessionReport(
+            games = o.optInt("games"), positions = o.optInt("positions"), hands = o.optInt("hands"),
+            pieces = o.optInt("pieces"), cancelled = o.optBoolean("cancelled"),
+        )
+    }
+
     /** Stops the running search early; the call returns what it found, with cancelled = true. */
     fun cancel() {
         if (handle != 0L) YgoNative.cancel(handle)

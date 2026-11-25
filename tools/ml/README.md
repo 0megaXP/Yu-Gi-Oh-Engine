@@ -145,6 +145,20 @@ The app uses what was learned once its engine is updated to that commit: after a
 starts the "Publish engine" workflow (a commit made by a workflow doesn't start it by itself), and
 the app downloads the latest engine by itself.
 
+## The computer's training (the app, Windows)
+
+The app's "Engine training" screen lets a computer work for this pipeline (`engine/src/learn.h`,
+reached through `analyze` with `"task"`; every game or batch is written to disk as soon as it
+ends, and the app uploads what was written every 15 minutes and when a session ends):
+- **The format's games** (`"contribute"`): this pipeline's own self-play (two of the format's
+  decks at random, best of 3, sided, the format's network and policy, each deck with the pieces of
+  `combo-pool.json` it can play), usually at 800 iterations or more. Uploaded as `local-pos-*` /
+  `local-pol-*.jsonl.gz`, trained on like the night's own games.
+- **Deeper combo lines** (`"deepen"`): opening hands searched deeply (3000 iterations), 10 at a
+  time, each batch's pieces in the shape of `library --new-out`; uploaded as
+  `local-newpieces-*.json`, which the pool job merges into `combo-pool.json` and then removes.
+- **One deck's own learning**: below.
+
 ## A deck's own learning (the app, Windows)
 
 `engine/src/learn.h`: one deck learns on the person's computer, starting from what the nightly

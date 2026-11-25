@@ -30,6 +30,27 @@ build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk ex
   --games 3 --iterations 20 --turns 4 --seed 2 --out "$OUT/learn-pos.jsonl" > /dev/null
 build/ygoe-cli train-net "$OUT/learn-pos.jsonl" --out "$OUT/learn-net.json" --epochs 5 | grep -q '"net_logloss"'
 build/ygoe-cli netcheck "$OUT/learn-net.json" "$OUT/learn-pos.jsonl" | head -1 | grep -qE '^-?[0-9]'
+echo "== the app's training modes: the format's games and deeper combo lines, saved as they finish"
+python3 - "$OUT" <<'PY'
+import json, sys
+def ydk(p):
+    parts, cur = {"main": [], "extra": [], "side": []}, "main"
+    for l in open(p):
+        l = l.strip()
+        if l in ("#main", "#extra"): cur = l[1:]
+        elif l == "!side": cur = "side"
+        elif l.isdigit(): parts[cur].append(int(l))
+    return parts
+decks = [dict(ydk(p), name=p) for p in ("examples/decks/angelechy_luna_mardelplata_2026-11.ydk", "examples/decks/elfnote_koller_wien_2026-11.ydk")]
+out = sys.argv[1]
+json.dump({"task": "contribute", "dir": out + "/contrib", "minutes": 1, "iterations": 20, "turns": 4, "decks": decks}, open(out + "/contrib.json", "w"))
+json.dump({"task": "deepen", "dir": out + "/deepen", "minutes": 1, "iterations": 60, "hands": 1, "decks": decks[:1]}, open(out + "/deepen.json", "w"))
+PY
+build/ygoe-cli json analyze "$OUT/contrib.json" | grep -q '"games":[1-9]'
+[ -s "$OUT/contrib/positions.jsonl" ]
+build/ygoe-cli json analyze "$OUT/deepen.json" | grep -q '"batches":[1-9]'
+ls "$OUT/deepen/newpieces/"*.json > /dev/null
+build/ygoe-cli pool-merge "$OUT/none.json" "$OUT/deepen/newpieces/"*.json --out "$OUT/pool.json" | grep -q "shared pool"
 echo "== simulator replays: a saved duel is rebuilt with the same log, and targets are shown"
 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"

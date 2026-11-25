@@ -159,9 +159,16 @@ jobs:
         run: |
           chmod +x build/ygoe-cli
           gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
+          # the lines the app's "Deepen combo lines" found on a computer (local-newpieces-*.json):
+          # merged once, then removed from ml-data
+          mkdir -p newpieces
+          gh release download ml-data --pattern 'local-newpieces-*.json' --dir newpieces 2>/dev/null || true
           if ls newpieces/*.json > /dev/null 2>&1; then
             build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --out combo-pool.json
             gh release upload ml-data combo-pool.json --clobber
+            for f in newpieces/local-newpieces-*.json; do
+              [ -f "$f" ] && gh release delete-asset ml-data "$(basename "$f")" -y || true
+            done
           fi
 
   selfplay:

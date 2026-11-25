@@ -20,6 +20,7 @@
 #include "nonengine.h"
 #include "pieces.h"
 #include "policy.h"
+#include "reference.h"
 #include "search.h"
 #include "selfplay.h"
 #include "valuenet.h"
@@ -135,6 +136,154 @@ std::string num(double v) {
 	return b;
 }
 
+// Pieces of `lib` the deck can play: every starting-hand card is in it.
+std::vector<LibraryPiece> playable_by(const CardDB& db, const Deck& deck, const std::vector<LibraryPiece>& lib) {
+	std::vector<uint32_t> cards;
+	for(auto c : deck.main)
+		cards.push_back(db.script_id(c));
+	for(auto c : deck.extra)
+		cards.push_back(db.script_id(c));
+	std::sort(cards.begin(), cards.end());
+	std::vector<LibraryPiece> out;
+	for(const auto& p : lib) {
+		bool ok = !p.piece.needs_hand.empty();
+		for(auto c : p.piece.needs_hand)
+			ok = ok && std::binary_search(cards.begin(), cards.end(), db.script_id(c));
+		if(ok)
+			out.push_back(p);
+	}
+	return out;
+}
+
+// Plays games and writes each one to disk the moment it ends (so a session cut off by a closed
+// app or a sleeping computer loses only the game being played): the Main Phase positions from
+// both sides (self-play's format, tools/ml/train.py and nettrain.h read them) and the searches
+// of the players in `example_sides` (bit per player) as move-policy examples.
+class Recorder {
+public:
+	Recorder(const CardDB& db, ScriptCache& scripts, fs::path positions, fs::path examples)
+	    : db_(db), scripts_(scripts), features_(db), pos_path_(std::move(positions)), ex_path_(std::move(examples)) {}
+
+	Game play(const Deck& d0, const Deck& d1, const Bot& b0, const Bot& b1, uint64_t seed, const PlayConfig& pc,
+	          const std::string& gid, int example_sides) {
+		Evaluator base(db_, d0, d1);
+		base.set_value_net(nullptr);  // the network learns a correction to the plain evaluator
+		struct P {
+			std::vector<float> f;
+			double raw;
+			uint8_t me;
+		};
+		std::vector<P> pos;
+		std::vector<std::string> ex;
+		uint32_t last_turn = 0;
+		int this_turn = 0;
+		LiveDuel* current = nullptr;
+		auto record = [&](LiveDuel& live) {
+			Board b = live.duel().board();
+			if(b.turn != last_turn) {
+				last_turn = b.turn;
+				this_turn = 0;
+			}
+			if(++this_turn > 6)
+				return;  // a few per turn is enough (they are much alike)
+			const uint8_t next = static_cast<uint8_t>(1 - b.turn_player);
+			for(uint8_t me = 0; me < 2; ++me) {
+				auto ev = base.evaluate(b, me, next);
+				pos.push_back({base.features(b, me, next, ev.value), ev.raw, me});
+			}
+		};
+		LiveDuel::SearchHook hook = [&](const Decision& d, const SearchOutput& so) {
+			if(!(example_sides & (1 << d.player)) || d.minor || d.options.size() < 2 || ex.size() >= 40 || !current)
+				return;
+			int total = 0;
+			for(const auto& m : so.moves)
+				total += m.visits;
+			if(total < 40 || so.moves.front().visits > total * 0.97)
+				return;  // too few, or the search had no doubt: little to learn
+			std::vector<float> target(d.options.size(), 0.0f);
+			for(const auto& m : so.moves)
+				for(size_t i = 0; i < d.options.size(); ++i)
+					if(d.options[i].label == m.label) {
+						target[i] += static_cast<float>(m.visits) / static_cast<float>(total);
+						break;
+					}
+			const PolicyContext c{current->duel().turn_player(), current->steps_this_turn(), current->duel().chain_depth()};
+			std::ostringstream o;
+			o.imbue(std::locale::classic());
+			o << "{\"g\":" << json::quote(gid) << ",\"o\":[";
+			for(size_t i = 0; i < d.options.size(); ++i) {
+				std::vector<uint32_t> f;
+				features_.features(d, d.options[i], c, f);
+				o << (i ? "," : "") << "[";
+				for(size_t k = 0; k < f.size(); ++k)
+					o << (k ? "," : "") << f[k];
+				o << "]";
+			}
+			o << "],\"p\":[";
+			for(size_t i = 0; i < d.options.size(); ++i)
+				o << (i ? "," : "") << playout_weight(d, d.options[i], c.turn_player, c.steps_this_turn);
+			o << "],\"t\":[";
+			for(size_t i = 0; i < target.size(); ++i)
+				o << (i ? "," : "") << target[i];
+			o << "]}";
+			ex.push_back(o.str());
+		};
+		Game g = play_game(db_, scripts_, d0, d1, seed, pc, b0, b1, record, hook, &current);
+		if(g.stopped)
+			return g;  // cut short by Stop: its result would teach the wrong thing
+		{
+			std::ofstream out(pos_path_, std::ios::app | std::ios::binary);
+			out.imbue(std::locale::classic());
+			int idx[2] = {0, 0};
+			for(const auto& p : pos) {
+				out << "{\"z\":" << (p.me == 0 ? g.z0 : 1.0 - g.z0) << ",\"fin\":" << (g.finished ? 1 : 0) << ",\"raw\":" << p.raw
+				    << ",\"me\":" << int(p.me) << ",\"i\":" << idx[p.me]++ << ",\"game\":" << json::quote(gid) << ",\"f\":[";
+				for(size_t i = 0; i < p.f.size(); ++i)
+					out << (i ? "," : "") << p.f[i];
+				out << "]}\n";
+			}
+		}
+		if(!ex.empty()) {
+			std::ofstream out(ex_path_, std::ios::app | std::ios::binary);
+			for(const auto& l : ex)
+				out << l << "\n";
+		}
+		positions += static_cast<int>(pos.size());
+		examples += static_cast<int>(ex.size());
+		return g;
+	}
+
+	int positions = 0, examples = 0;  // written by this recorder
+
+private:
+	const CardDB& db_;
+	ScriptCache& scripts_;
+	Policy features_;
+	fs::path pos_path_, ex_path_;
+};
+
+// A best-of-3 match: game 1 by a coin flip, then the loser chooses to go first or second, games
+// 2 and 3 with both decks sided for the matchup. `on_game` after each game (false: stop).
+template <class F>
+void play_match(const CardDB& db, Siding& siding, const std::vector<Deck>& decks, size_t a, size_t b, std::mt19937_64& rng,
+                F&& play_one) {
+	int wins[2] = {0, 0};
+	bool a_first = rng() % 2 == 0;
+	for(int game = 1; game <= 3 && wins[0] < 2 && wins[1] < 2; ++game) {
+		const Deck& da = game == 1 ? decks[a] : siding.sided(a, b, a_first, decks);
+		const Deck& dbk = game == 1 ? decks[b] : siding.sided(b, a, !a_first, decks);
+		double za = 0.5;  // a's result
+		if(!play_one(da, dbk, a_first, game, za))
+			return;
+		const bool a_won = za > 0.5;
+		if(za != 0.5)
+			++wins[a_won ? 0 : 1];
+		const bool a_lost = !a_won;
+		const bool loser_first = choose_first(db, a_lost ? decks[a] : decks[b], a_lost ? decks[b] : decks[a]);
+		a_first = a_lost ? loser_first : !loser_first;
+	}
+}
+
 }  // namespace
 
 std::string learn_status(const std::string& dir) {
@@ -174,9 +323,7 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	for(const auto& o : cfg.opponents)
 		decks.push_back(o.deck);
 	Siding siding(db);
-	Policy features_of(db);
 	std::mt19937_64 rng(cfg.seed ^ static_cast<uint64_t>(std::time(nullptr)));
-	std::uniform_real_distribution<double> unit(0, 1);
 
 	PlayConfig pc;
 	pc.iterations = cfg.iterations;
@@ -202,127 +349,33 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 		const double round_until = elapsed() + round_left;
 		const Bot deck_bot{net_of(net_json), bot_policy(db, pol_json), guide, db.nonengine_timing()};
 
-		// 1. self-play matches
-		std::vector<std::string> pos_lines, ex_lines;
+		// 1. self-play matches, each game on disk as soon as it ends
+		Recorder rec(db, scripts, pos_path, ex_path);
 		int games = 0, wins = 0, finished = 0;
-		std::string game_id;
-		int game_examples = 0;
-		uint8_t deck_side = 0;
-		LiveDuel* current = nullptr;
-		LiveDuel::SearchHook hook = [&](const Decision& d, const SearchOutput& so) {
-			if(d.player != deck_side || d.minor || d.options.size() < 2 || game_examples >= 40 || !current)
-				return;
-			int total = 0;
-			for(const auto& m : so.moves)
-				total += m.visits;
-			if(total < 40 || so.moves.front().visits > total * 0.97)
-				return;
-			std::vector<float> target(d.options.size(), 0.0f);
-			for(const auto& m : so.moves)
-				for(size_t i = 0; i < d.options.size(); ++i)
-					if(d.options[i].label == m.label) {
-						target[i] += static_cast<float>(m.visits) / static_cast<float>(total);
-						break;
-					}
-			const PolicyContext c{current->duel().turn_player(), current->steps_this_turn(), current->duel().chain_depth()};
-			std::ostringstream o;
-			o << "{\"g\":" << json::quote(game_id) << ",\"o\":[";
-			for(size_t i = 0; i < d.options.size(); ++i) {
-				std::vector<uint32_t> f;
-				features_of.features(d, d.options[i], c, f);
-				o << (i ? "," : "") << "[";
-				for(size_t k = 0; k < f.size(); ++k)
-					o << (k ? "," : "") << f[k];
-				o << "]";
-			}
-			o << "],\"p\":[";
-			for(size_t i = 0; i < d.options.size(); ++i)
-				o << (i ? "," : "") << playout_weight(d, d.options[i], c.turn_player, c.steps_this_turn);
-			o << "],\"t\":[";
-			for(size_t i = 0; i < target.size(); ++i)
-				o << (i ? "," : "") << target[i];
-			o << "]}";
-			ex_lines.push_back(o.str());
-			++game_examples;
-		};
-		auto one = [&](const Deck& d0, const Deck& d1, const Bot& b0, const Bot& b1, uint64_t seed, const std::string& gid) {
-			Evaluator base(db, d0, d1);
-			base.set_value_net(nullptr);  // the network learns a correction to the plain evaluator
-			struct P {
-				std::vector<float> f;
-				double raw;
-				uint8_t me;
-			};
-			std::vector<P> pos;
-			uint32_t last_turn = 0;
-			int this_turn = 0;
-			game_id = gid;
-			game_examples = 0;
-			auto record = [&](LiveDuel& live) {
-				Board b = live.duel().board();
-				if(b.turn != last_turn) {
-					last_turn = b.turn;
-					this_turn = 0;
-				}
-				if(++this_turn > 6)
-					return;
-				const uint8_t next = static_cast<uint8_t>(1 - b.turn_player);
-				for(uint8_t me = 0; me < 2; ++me) {
-					auto ev = base.evaluate(b, me, next);
-					pos.push_back({base.features(b, me, next, ev.value), ev.raw, me});
-				}
-			};
-			Game g = play_game(db, scripts, d0, d1, seed, pc, b0, b1, record, hook, &current);
-			if(g.stopped)
-				return g;
-			int idx[2] = {0, 0};
-			for(const auto& p : pos) {
-				std::ostringstream o;
-				o.imbue(std::locale::classic());
-				o << "{\"z\":" << (p.me == 0 ? g.z0 : 1.0 - g.z0) << ",\"fin\":" << (g.finished ? 1 : 0) << ",\"raw\":" << p.raw
-				  << ",\"me\":" << int(p.me) << ",\"i\":" << idx[p.me]++ << ",\"game\":" << json::quote(gid) << ",\"f\":[";
-				for(size_t i = 0; i < p.f.size(); ++i)
-					o << (i ? "," : "") << p.f[i];
-				o << "]}";
-				pos_lines.push_back(o.str());
-			}
-			return g;
-		};
 		while(!stopped() && elapsed() < play_until) {
 			const size_t opp = 1 + rng() % cfg.opponents.size();
 			const std::string match = std::to_string(std::time(nullptr)) + "-" + std::to_string(rng() % 100000);
-			int mw[2] = {0, 0};  // match wins: deck, opponent
-			bool deck_first = rng() % 2 == 0;
-			for(int game = 1; game <= 3 && mw[0] < 2 && mw[1] < 2 && !stopped(); ++game) {
-				const Deck& dd = game == 1 ? decks[0] : siding.sided(0, opp, deck_first, decks);
-				const Deck& od = game == 1 ? decks[opp] : siding.sided(opp, 0, !deck_first, decks);
-				deck_side = deck_first ? 0 : 1;
-				const uint64_t seed = rng();
-				Game g = deck_first ? one(dd, od, deck_bot, opp_bot, seed, match + "-g" + std::to_string(game))
-				                    : one(od, dd, opp_bot, deck_bot, seed, match + "-g" + std::to_string(game));
+			play_match(db, siding, decks, 0, opp, rng, [&](const Deck& dd, const Deck& od, bool deck_first, int game, double& zd) {
+				if(stopped())
+					return false;
+				const std::string gid = match + "-g" + std::to_string(game);
+				Game g = deck_first ? rec.play(dd, od, deck_bot, opp_bot, rng(), pc, gid, 1)
+				                    : rec.play(od, dd, opp_bot, deck_bot, rng(), pc, gid, 2);
 				if(g.stopped)
-					break;
+					return false;
 				++games;
 				finished += g.finished ? 1 : 0;
-				const double zd = deck_first ? g.z0 : 1.0 - g.z0;
-				const bool deck_won = zd > 0.5;
-				if(zd != 0.5)
-					++mw[deck_won ? 0 : 1];
-				wins += deck_won ? 1 : 0;
-				// the loser chooses to go first or second
-				const bool deck_lost = !deck_won;
-				const bool loser_first = choose_first(db, deck_lost ? decks[0] : decks[opp], deck_lost ? decks[opp] : decks[0]);
-				deck_first = deck_lost ? loser_first : !loser_first;
+				zd = deck_first ? g.z0 : 1.0 - g.z0;
+				wins += zd > 0.5 ? 1 : 0;
 				report("Round " + std::to_string(round_no) + ": playing (" + std::to_string(games) + " games, deck won " +
 				       std::to_string(wins) + ")");
-			}
+				return !stopped() && elapsed() < play_until;
+			});
 		}
 		session_games += games;
 		total_games += games;
-		if(!pos_lines.empty())
-			append_keep(pos_path, pos_lines, 200000);
-		if(!ex_lines.empty())
-			append_keep(ex_path, ex_lines, 60000);
+		append_keep(pos_path, {}, 200000);  // the latest positions only
+		append_keep(ex_path, {}, 60000);
 		if(stopped() && games == 0)
 			break;
 
@@ -413,7 +466,7 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 		std::ostringstream r;
 		r.imbue(std::locale::classic());
 		r << "{\"round\":" << round_no << ",\"at\":" << std::time(nullptr) << ",\"games\":" << games << ",\"deck_wins\":" << wins
-		  << ",\"finished\":" << finished << ",\"positions\":" << pos_lines.size() << ",\"policy_examples\":" << ex_lines.size()
+		  << ",\"finished\":" << finished << ",\"positions\":" << rec.positions << ",\"policy_examples\":" << rec.examples
 		  << ",\"net\":{\"trained\":" << (nr.ok ? "true" : "false") << ",\"base_logloss\":" << num(nr.base_logloss)
 		  << ",\"start_logloss\":" << num(nr.init_logloss) << ",\"logloss\":" << num(nr.net_logloss)
 		  << ",\"passed\":" << (net_passed ? "true" : "false") << "},\"policy\":{\"examples\":" << tr.size() + va.size()
@@ -439,6 +492,124 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	    << ",\"kept_networks\":" << kept_nets << ",\"kept_policies\":" << kept_policies << ",\"cancelled\":" << (stopped() ? "true" : "false")
 	    << ",\"last_round\":" << last_round << ",\"status\":" << learn_status(cfg.dir) << "}";
 	return out.str();
+}
+
+namespace {
+
+// A counter file ({"key": n, ...}) in a session's folder, read and written whole.
+long counter(const fs::path& p, const char* key) { return json::Value::parse(read_text(p))[key].integer(0); }
+
+}  // namespace
+
+std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const ContributeConfig& cfg) {
+	const fs::path dir(cfg.dir);
+	std::error_code ec;
+	fs::create_directories(dir, ec);
+	if(cfg.decks.size() < 2)
+		return "{\"error\":\"the format's decks are missing (update the engine)\"}";
+	auto stopped = [&] { return cfg.cancel && cfg.cancel->load(); };
+	const auto t0 = Clock::now();
+	const double session = std::max(1.0, cfg.minutes) * 60.0;
+	auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - t0).count(); };
+
+	std::vector<Deck> decks;
+	std::vector<std::shared_ptr<const PieceGuide>> guides;
+	for(const auto& d : cfg.decks) {
+		decks.push_back(d.deck);
+		auto lib = playable_by(db, d.deck, cfg.pool);
+		sort_library(lib, 400);
+		guides.push_back(lib.empty() ? nullptr : std::make_shared<PieceGuide>(std::move(lib), &db));
+	}
+	auto policy = bot_policy(db, cfg.base_policy);
+	PlayConfig pc;
+	pc.iterations = cfg.iterations;
+	pc.max_turns = cfg.turns;
+	pc.explore = 0.25;
+	pc.explore_moves = 2;
+	pc.stop = cfg.cancel;
+	Siding siding(db);
+	std::mt19937_64 rng(cfg.seed ^ static_cast<uint64_t>(std::time(nullptr)));
+	Recorder rec(db, scripts, dir / "positions.jsonl", dir / "policy_examples.jsonl");
+	const fs::path status = dir / "status.json";
+	long total = counter(status, "games");
+	int games = 0;
+	while(!stopped() && elapsed() < session) {
+		// the nightly run's pairings: two of the format's decks at random (a mirror now and then)
+		const size_t a = rng() % decks.size(), b = rng() % decks.size();
+		const std::string match = "pc-" + std::to_string(std::time(nullptr)) + "-" + std::to_string(rng() % 100000);
+		play_match(db, siding, decks, a, b, rng, [&](const Deck& da, const Deck& dbk, bool a_first, int game, double& za) {
+			if(stopped())
+				return false;
+			const Bot ba{db.value_net(), policy, guides[a], db.nonengine_timing()}, bb{db.value_net(), policy, guides[b], db.nonengine_timing()};
+			const std::string gid = match + "-g" + std::to_string(game);
+			Game g = a_first ? rec.play(da, dbk, ba, bb, rng(), pc, gid, 3) : rec.play(dbk, da, bb, ba, rng(), pc, gid, 3);
+			if(g.stopped)
+				return false;
+			++games;
+			++total;
+			write_text(status, "{\"games\":" + std::to_string(total) + ",\"updated\":" + std::to_string(std::time(nullptr)) + "}");
+			za = a_first ? g.z0 : 1.0 - g.z0;
+			if(cfg.progress)
+				cfg.progress("Playing the format's games (" + std::to_string(games) + " this session, " + std::to_string(total) + " in all)",
+				             static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+			return !stopped() && elapsed() < session;
+		});
+	}
+	// the folder keeps the latest games (the app uploads them as they come)
+	append_keep(dir / "positions.jsonl", {}, 200000);
+	append_keep(dir / "policy_examples.jsonl", {}, 60000);
+	if(cfg.progress)
+		cfg.progress("idle", 0, 0);
+	return "{\"games\":" + std::to_string(games) + ",\"total_games\":" + std::to_string(total) + ",\"positions\":" +
+	       std::to_string(rec.positions) + ",\"policy_examples\":" + std::to_string(rec.examples) + ",\"cancelled\":" +
+	       (stopped() ? "true" : "false") + "}";
+}
+
+std::string deepen_lines(const CardDB& db, ScriptCache& scripts, const DeepenConfig& cfg) {
+	const fs::path dir(cfg.dir);
+	std::error_code ec;
+	fs::create_directories(dir / "newpieces", ec);
+	if(cfg.decks.empty())
+		return "{\"error\":\"no decks to search\"}";
+	auto stopped = [&] { return cfg.cancel && cfg.cancel->load(); };
+	const auto t0 = Clock::now();
+	const double session = std::max(1.0, cfg.minutes) * 60.0;
+	auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - t0).count(); };
+	const fs::path status = dir / "status.json";
+	long total_hands = counter(status, "hands"), total_pieces = counter(status, "pieces");
+	std::mt19937_64 rng(cfg.seed ^ static_cast<uint64_t>(std::time(nullptr)));
+	int batches = 0, hands = 0, pieces = 0;
+	size_t next = rng() % cfg.decks.size();
+	while(!stopped() && elapsed() < session) {
+		// one batch: a few opening hands of one deck, searched deeply, saved when done
+		const auto& d = cfg.decks[next];
+		next = (next + 1) % cfg.decks.size();
+		auto res = build_reference(db, scripts, d.deck, cfg.hands_per_batch, cfg.iterations, rng(), cfg.cancel, [&](int done, int total) {
+			if(cfg.progress)
+				cfg.progress("Searching " + d.name + ": hand " + std::to_string(done + 1) + " of " + std::to_string(total) + " (" +
+				             std::to_string(hands) + " hands this session)",
+				             static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+		});
+		if(stopped())
+			break;  // a batch cut short: its lines may be the worse half of the hands
+		const int lines = static_cast<int>(res.samples.size());
+		if(!res.library.empty()) {
+			const std::string name = std::to_string(std::time(nullptr)) + "-" + std::to_string(rng() % 100000) + ".json";
+			write_text(dir / "newpieces" / name,
+			           "{\"lines\":" + std::to_string(lines) + ",\"pieces\":" + library_json(db, res.library, lines) + "}");
+		}
+		++batches;
+		hands += cfg.hands_per_batch;
+		pieces += static_cast<int>(res.library.size());
+		total_hands += cfg.hands_per_batch;
+		total_pieces += static_cast<long>(res.library.size());
+		write_text(status, "{\"hands\":" + std::to_string(total_hands) + ",\"pieces\":" + std::to_string(total_pieces) +
+		                       ",\"updated\":" + std::to_string(std::time(nullptr)) + "}");
+	}
+	if(cfg.progress)
+		cfg.progress("idle", 0, 0);
+	return "{\"batches\":" + std::to_string(batches) + ",\"hands\":" + std::to_string(hands) + ",\"pieces\":" + std::to_string(pieces) +
+	       ",\"total_hands\":" + std::to_string(total_hands) + ",\"cancelled\":" + (stopped() ? "true" : "false") + "}";
 }
 
 }  // namespace ygoe

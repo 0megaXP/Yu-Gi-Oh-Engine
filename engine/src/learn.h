@@ -50,6 +50,40 @@ struct LearnConfig {
 	std::function<void(const std::string& phase, int done, int total)> progress;
 };
 
+// Playing the format's games for the nightly learning (the app's "Play the format's games"): the
+// nightly run's own self-play on the person's computer, usually with a deeper search. Two of the
+// format's decks at random, best of 3, the format's network and policy, each deck with the pieces
+// of the shared pool it can play. Each game goes to dir/positions.jsonl and
+// policy_examples.jsonl as it ends (both players' searches), for the app to upload.
+struct ContributeConfig {
+	std::vector<LearnOpponent> decks;
+	std::string dir;
+	double minutes = 60;
+	int iterations = 800;
+	int turns = 12;
+	uint64_t seed = 1;
+	std::string base_policy;            // the format's policy (JSON)
+	std::vector<LibraryPiece> pool;     // the shared pool of combo pieces (combo-pool.json)
+	const std::atomic<bool>* cancel = nullptr;
+	std::function<void(const std::string& phase, int done, int total)> progress;
+};
+std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const ContributeConfig& cfg);
+
+// Deepening the combo lines (the app's "Deepen combo lines"): the decks' opening hands searched
+// deeply in batches (reference.h), each batch's new pieces saved as soon as it is done, as
+// dir/newpieces/*.json in the shape the nightly pool merge reads (ygoe-cli library --new-out).
+struct DeepenConfig {
+	std::vector<LearnOpponent> decks;
+	std::string dir;
+	double minutes = 60;
+	int hands_per_batch = 10;
+	int iterations = 3000;
+	uint64_t seed = 1;
+	const std::atomic<bool>* cancel = nullptr;
+	std::function<void(const std::string& phase, int done, int total)> progress;
+};
+std::string deepen_lines(const CardDB& db, ScriptCache& scripts, const DeepenConfig& cfg);
+
 // Runs the session; returns its report (JSON): the rounds, games, what was kept.
 std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig& cfg);
 

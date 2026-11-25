@@ -760,3 +760,13 @@ data class LearnReport(
     val cancelled: Boolean,
     val status: LearnStatus,
 )
+
+/** What a [YgoEngine.contributeGames] or [YgoEngine.deepenLines] session did. */
+data class SessionReport(
+    val games: Int,
+    val positions: Int,
+    /** Opening hands searched and combo pieces found (deepenLines). */
+    val hands: Int,
+    val pieces: Int,
+    val cancelled: Boolean,
+)

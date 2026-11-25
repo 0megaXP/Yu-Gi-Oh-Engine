@@ -276,7 +276,7 @@ std::string Engine::analyze(const std::string& request) {
 	Value req = Value::parse(request, &err);
 	if(!req.is_object())
 		return error_json(err.empty() ? "request must be a JSON object" : err);
-	if(req["task"].str() == "learn")
+	if(req["task"].str() == "learn" || req["task"].str() == "contribute" || req["task"].str() == "deepen")
 		return learn(req);
 
 	Scenario sc;
@@ -353,8 +353,70 @@ std::string Engine::analyze(const std::string& request) {
 }
 
 std::string Engine::learn(const Value& req) {
-	LearnConfig cfg;
 	std::string err;
+	// the decks: those given, else the format's (format_decks.json in the data folder)
+	auto decks_of = [&](const Value& given, std::vector<LearnOpponent>& out) -> bool {
+		if(given.is_array() && given.size() > 0) {
+			for(const auto& o : given.items()) {
+				LearnOpponent lo;
+				lo.name = o["name"].str();
+				if(!read_deck(o, lo.deck, err, db_))
+					return false;
+				out.push_back(std::move(lo));
+			}
+			return true;
+		}
+		Value fd = Value::parse(file_text(data_dir_ + "/format_decks.json"));
+		for(const auto& o : fd["decks"].items()) {
+			LearnOpponent lo;
+			lo.name = o["name"].str();
+			if(read_deck(o, lo.deck, err, db_))
+				out.push_back(std::move(lo));
+		}
+		err.clear();
+		return true;
+	};
+	auto progress = [this](const std::string& phase, int done, int total) { set_progress(phase, done, total); };
+	const std::string task = req["task"].str();
+	if(task == "contribute" || task == "deepen") {
+		std::vector<LearnOpponent> decks;
+		if(!decks_of(req["decks"], decks))
+			return error_json(err);
+		const std::string dir = req["dir"].str();
+		if(dir.empty())
+			return error_json(task + ": no folder");
+		set_progress("Starting", 0, 1);
+		std::string out;
+		if(task == "contribute") {
+			ContributeConfig c;
+			c.decks = std::move(decks);
+			c.dir = dir;
+			c.minutes = req["minutes"].num(60);
+			c.iterations = static_cast<int>(req["iterations"].integer(800));
+			c.turns = static_cast<int>(req["turns"].integer(12));
+			c.seed = static_cast<uint64_t>(req["seed"].integer(1));
+			c.base_policy = file_text(data_dir_ + "/policy.json");
+			if(req["pool"].is_array())
+				c.pool = parse_library(db_, req["pool"]);
+			c.cancel = &cancel_;
+			c.progress = progress;
+			out = contribute_selfplay(db_, *scripts_, c);
+		} else {
+			DeepenConfig c;
+			c.decks = std::move(decks);
+			c.dir = dir;
+			c.minutes = req["minutes"].num(60);
+			c.iterations = static_cast<int>(req["iterations"].integer(3000));
+			c.hands_per_batch = static_cast<int>(req["hands"].integer(10));
+			c.seed = static_cast<uint64_t>(req["seed"].integer(1));
+			c.cancel = &cancel_;
+			c.progress = progress;
+			out = deepen_lines(db_, *scripts_, c);
+		}
+		set_progress("idle", 0, 0);
+		return out;
+	}
+	LearnConfig cfg;
 	if(!read_deck(req["deck"], cfg.deck, err, db_))
 		return error_json(err);
 	cfg.name = req["name"].str();
