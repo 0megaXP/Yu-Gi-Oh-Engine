@@ -1,8 +1,8 @@
 name: Learn
 
 # Four times a day (every 6 hours): bots play each other with the current value network and move policy (self-play),
-# a new network and policy are trained on those games plus the last nights' and the app's real
-# games, and they replace data/value_net.json and data/policy.json only if they predict better
+# a new network and policy are trained on those games plus the last nights', the app's real
+# games and the games its deck learning played on the person's computer, and they replace data/value_net.json and data/policy.json only if they predict better
 # and the bots using them beat the current ones in bot duels (the arena). See tools/ml/README.md.
 # Only these scheduled runs (and a manual start): pushes don't start one. Each run builds the
 # engine as it is when it starts. The "learn" concurrency group keeps one run going at a time.
@@ -290,6 +290,10 @@ jobs:
           mkdir -p history policy-history
           gh release download ml-data --pattern 'night-*.jsonl.gz' --dir history 2>/dev/null || true
           gh release download ml-data --pattern 'policy-night-*.jsonl.gz' --dir policy-history 2>/dev/null || true
+          # games the app's deck learning played on a computer (learn.h; local-pos-* positions,
+          # local-pol-* policy examples): learned from like tonight's self-play
+          gh release download ml-data --pattern 'local-pos-*.jsonl.gz' --dir history 2>/dev/null || true
+          gh release download ml-data --pattern 'local-pol-*.jsonl.gz' --dir policy-history 2>/dev/null || true
           mkdir -p ne-history
           gh release download ml-data --pattern 'ne-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
           gh release download ml-data --pattern 'games-night-*.jsonl.gz' --dir ne-history 2>/dev/null || true
@@ -402,6 +406,11 @@ jobs:
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
           echo "$assets" | grep '^policy-night-' | sort -t- -k3 -n | head -n -6 | \
             while read -r old; do gh release delete-asset ml-data "$old" -y; done
+          # the app's deck-learning uploads: the latest 40 of each kind
+          for kind in pos pol; do
+            echo "$assets" | grep "^local-$kind-" | sort -t- -k3 -n | head -n -40 | \
+              while read -r old; do gh release delete-asset ml-data "$old" -y; done
+          done
           for kind in ne games; do
             echo "$assets" | grep "^$kind-night-" | sort -t- -k3 -n | head -n -20 | \
               while read -r old; do gh release delete-asset ml-data "$old" -y; done

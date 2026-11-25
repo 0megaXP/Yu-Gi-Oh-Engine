@@ -159,7 +159,11 @@ test on the same deals, the deck played by the new and by the current bot agains
 opponent: kept when it scores at least 0.5. The deck's folder holds `value_net.json`,
 `policy.json`, the positions, examples and `learn.json` (every round's report); duels (and
 analyses) of the deck read it through the API's `"learned"`. The API call is `analyze` with
-`{"task":"learn", ...}` (no new native function). By hand:
+`{"task":"learn", ...}` (no new native function). When a session ends the app also uploads the
+games it played (with the replays' sharing setting and token): their positions and policy
+examples, numbers and feature ids only, as `local-pos-*` / `local-pol-*.jsonl.gz` in `ml-data`;
+the nightly run trains on them with its own self-play's (the latest 40 files of each kind kept),
+so the shared network and policy learn from them too. By hand:
 
 ```
 build/ygoe-cli learn decks/a.ydk [decks/b.ydk ...] --dir learn/a --minutes 60 [--iterations 200]
