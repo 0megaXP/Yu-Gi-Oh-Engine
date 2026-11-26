@@ -137,7 +137,11 @@ public:
 	// other answer is tried, the rest of the turn played (first along the line's own later steps,
 	// then also freely), and a line that ends better replaces it. The other player passes where it
 	// can (the bot plans again when they interrupt). Stops after `seconds`. True if `t` changed.
-	bool improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds);
+	// The puzzle: `arrangements` (combo pieces put in an order, PieceGuide::arrangements) are each
+	// played the same way first, for up to `arrange_seconds`; the best of them and the line is where
+	// the improving starts.
+	bool improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds,
+	                  const std::vector<std::vector<std::string>>* arrangements = nullptr, double arrange_seconds = 0);
 	// Takes out `player`'s Main Phase plays that do nothing for the end of the turn (the line scores
 	// as well without them): an effect activated just because it can be, a Link Summon that leads
 	// nowhere, a Normal Spell set for no reason. True if `t` changed.

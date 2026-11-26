@@ -79,6 +79,9 @@ struct DeepenConfig {
 	int hands_per_batch = 10;
 	int iterations = 3000;
 	uint64_t seed = 1;
+	// Real end boards (data/end_boards.jsonl: real games at the start of turn 2): 40% of the hands
+	// are played going second against one of them. Empty: all going first.
+	std::string end_boards;
 	const std::atomic<bool>* cancel = nullptr;
 	std::function<void(const std::string& phase, int done, int total)> progress;
 };

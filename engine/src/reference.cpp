@@ -1,5 +1,7 @@
 #include <locale>
 #include "reference.h"
+#include "deck.h"
+#include <fstream>
 
 #include <algorithm>
 #include <cstdio>
@@ -31,7 +33,8 @@ double board_value(const CardDB& db, const Deck& deck, const Board& b, uint8_t p
 
 ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const Deck& deck, int hands, int iterations,
                                 uint64_t seed, const std::atomic<bool>* cancel,
-                                const std::function<void(int, int)>& progress, Policy* policy) {
+                                const std::function<void(int, int)>& progress, Policy* policy,
+                                const std::vector<Scenario>* boards, double second_share) {
 	ReferenceResult res;
 	std::vector<PolicyExample> examples;
 	res.deck = deck.name;
@@ -45,17 +48,29 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 			break;
 		if(progress)
 			progress(h, hands);
-		// Goldfish: the deck goes first, the other side has no hand to interact with.
+		// Goldfish: the deck goes first, the other side has no hand to interact with. Or, for a
+		// share of the hands, going second: against a real end board (their hand as it was seen).
 		Scenario sc;
+		const bool second = boards && !boards->empty() &&
+		                    static_cast<double>((static_cast<uint64_t>(h) * 2654435761u) % 1000) / 1000.0 < second_share;
+		if(second) {
+			sc = (*boards)[(seed + static_cast<uint64_t>(h) * 40503u) % boards->size()];
+			sc.placed[0].clear();
+			sc.hand[0].clear();
+			sc.lp[0] = 8000;
+		} else {
+			sc.decks[1] = deck;
+			sc.hand_known[1] = true;
+		}
 		sc.decks[0] = deck;
-		sc.decks[1] = deck;
 		sc.hand_known[0] = false;
-		sc.hand_size[0] = 5;
-		sc.hand_known[1] = true;
+		sc.hand_size[0] = second ? 6 : 5;
 		sc.me = 0;
 		sc.seed = seed + static_cast<uint64_t>(h) * 7919;
 		Searcher searcher(db, scripts, eval, declare_pool(sc));
 		RootState root{make_setup(sc, 0), {}};
+		if(second)
+			root.setup.flags = DUEL_MODE_MR5 | DUEL_ATTACK_FIRST_TURN;
 		SearchConfig cfg;
 		cfg.iterations = iterations;
 		cfg.seconds = 120;
@@ -78,6 +93,8 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 		if(!searcher.final_board(root, t, end))
 			continue;
 		auto ev = eval.evaluate(end, 0, 1, false, -1, true);
+		if(second && best->reward >= 0.999)
+			ev.value[0] = std::max(ev.value[0], 10.0);  // a win going second: the best line there is
 		ReferenceSample s;
 		for(auto code : root.setup.players[0].hand)
 			s.hand.push_back(db.official_id(db.script_id(code)));
@@ -92,7 +109,9 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 			examples.insert(examples.end(), ex.begin(), ex.end());
 		}
 		{
-			auto split = split_line(db, scripts, declare_pool(sc), root.setup, t, hand_traps);
+			auto split = split_line(db, scripts, declare_pool(sc), root.setup, t, second ? std::vector<uint32_t>{} : hand_traps);
+			for(auto& pc : split.pieces)
+				pc.second = second;
 			add_to_library(res.library, split, s.value);
 			s.pieces = std::move(split.pieces);
 		}
@@ -156,6 +175,53 @@ std::string ReferenceResult::to_json(const CardDB& db) const {
 	o << ",\"lines\":" << samples.size() << ",\"library\":" << library_json(db, library, static_cast<int>(samples.size()))
 	  << "}";
 	return o.str();
+}
+
+}  // namespace ygoe
+
+namespace ygoe {
+
+std::vector<Scenario> load_end_boards(const std::string& starts_path, size_t max) {
+	std::vector<Scenario> out;
+	std::ifstream in(starts_path);
+	std::string line;
+	while(std::getline(in, line) && out.size() < max) {
+		if(line.find("\"kind\":\"start\"") == std::string::npos || line.find("\"turn\":2,") == std::string::npos)
+			continue;
+		auto v = json::Value::parse(line);
+		if(!v.is_object())
+			continue;
+		Scenario sc;
+		bool ok = true;
+		for(int p = 0; p < 2; ++p) {
+			const auto& d = v["decks"][static_cast<size_t>(p)];
+			for(const auto& c : d["main"].items())
+				sc.decks[p].main.push_back(static_cast<uint32_t>(c.integer()));
+			for(const auto& c : d["extra"].items())
+				sc.decks[p].extra.push_back(static_cast<uint32_t>(c.integer()));
+			for(const auto& c : v["hand"][static_cast<size_t>(p)].items())
+				sc.hand[p].push_back(static_cast<uint32_t>(c.integer()));
+			sc.hand_size[p] = static_cast<size_t>(v["hand_size"][static_cast<size_t>(p)].integer(0));
+			sc.hand_known[p] = sc.hand[p].size() == sc.hand_size[p];
+			sc.lp[p] = static_cast<uint32_t>(std::max<int64_t>(1, v["lp"][static_cast<size_t>(p)].integer(8000)));
+			for(const auto& c : v["placed"][static_cast<size_t>(p)].items()) {
+				PlacedCard pc;
+				pc.code = static_cast<uint32_t>(c["c"].integer());
+				pc.loc = static_cast<uint32_t>(c["l"].integer());
+				pc.seq = static_cast<uint32_t>(c["s"].integer());
+				pc.pos = static_cast<uint32_t>(c["p"].integer());
+				sc.placed[p].push_back(pc);
+			}
+			ok = ok && !sc.decks[p].main.empty();
+		}
+		// (the player going first, at index 1, left a board)
+		bool board = false;
+		for(const auto& pc : sc.placed[1])
+			board = board || pc.loc == LOCATION_MZONE || pc.loc == LOCATION_SZONE;
+		if(ok && board)
+			out.push_back(std::move(sc));
+	}
+	return out;
 }
 
 }  // namespace ygoe

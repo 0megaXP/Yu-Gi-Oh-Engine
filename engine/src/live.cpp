@@ -1,6 +1,8 @@
 #include <cctype>
 #include <locale>
 #include "live.h"
+#include "pieces.h"
+#include <random>
 
 #include <algorithm>
 #include <cstdio>
@@ -1085,7 +1087,15 @@ int LiveDuel::choose(BotLevel level) {
 			}
 			stale_plan_.clear();
 			const Trajectory searched = t;  // (the search's line, before planning: a candidate for the turn goal)
-			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
+			// The puzzle (Main Phase 1): the deck's combo pieces put together in different orders; the
+			// planner plays each and starts from the best if it ends better than the search's line.
+			std::vector<std::vector<std::string>> arrangements;
+			if(d.type == DecisionType::Idle && duel_->phase() == PHASE_MAIN1 && guides_[d.player]) {
+				std::mt19937_64 prng(duel_->turn() * 7919u + d.player);
+				arrangements = guides_[d.player]->arrangements(resources_of(db_, duel_->board(), d.player), prng,
+				                                               level == BotLevel::Strong ? 24 : 10);
+			}
+			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds, &arrangements, plan_seconds * 0.25) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
 				searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
 				searcher_->defer_summons(r, t, d.player, cfg.horizon_turns);
 			}
@@ -1106,9 +1116,20 @@ int LiveDuel::choose(BotLevel level) {
 				};
 				std::vector<Cand> cands;
 				cands.push_back({"the planned turn", t});
+				// The deck's plan (its pieces): a deck whose going-second lines win looks harder for
+				// the win; one whose lines only break the board and build (a grind deck) less.
+				double reach_scale = 1.0;
+				if(guides_[d.player]) {
+					const auto pl = guides_[d.player]->plan();
+					if(pl.breakers)
+						reach_scale = pl.wins ? 1.0 + pl.lethal_reach() : 0.5;
+					if(dbg && duel_->turn() >= 2)
+						std::fprintf(stderr, "deck plan: %d end-board pieces, %d going-second pieces, %d of them winning\n",
+						             pl.end_board, pl.breakers, pl.wins);
+				}
 				Trajectory lethal;
 				if(duel_->turn() >= 2 && t.reward < 0.999 &&
-				   searcher_->seek_lethal(roots, d.player, cfg, (level == BotLevel::Strong ? 4.0 : 1.5) * scale, lethal))
+				   searcher_->seek_lethal(roots, d.player, cfg, (level == BotLevel::Strong ? 4.0 : 1.5) * scale * reach_scale, lethal))
 					cands.push_back({"a winning line", lethal});
 				// (not when it just ends the turn: a line that does nothing has nothing for the
 				// opponent to answer, so it scores as if it lost nothing)

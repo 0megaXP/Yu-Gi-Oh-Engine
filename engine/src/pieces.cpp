@@ -313,6 +313,8 @@ std::string key_of(const ComboPiece& p) {
 	for(auto v : b)
 		k += std::to_string(v) + ",";
 	k += p.normal_summon ? "|NS" : "|";
+	if(p.second)
+		k += "|2nd";  // (the same cards going second are another piece: another goal)
 	return k;
 }
 
@@ -415,6 +417,8 @@ std::string piece_body(const CardDB& db, const ComboPiece& p) {
 	for(size_t i = 0; i < names.size(); ++i)
 		o << (i ? "," : "") << quote(names[i]);
 	o << "]";
+	if(p.second)
+		o << ",\"second\":true";
 	return o.str();
 }
 
@@ -496,6 +500,7 @@ std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) 
 				u.push_back(s.str());
 			p.under = under_bits(u);
 		}
+		p.second = o["second"].boolean();
 		lp.count = static_cast<int>(o["count"].integer(1));
 		lp.value = o["value"].num(0);
 		lp.best = lp.value;
@@ -517,6 +522,7 @@ PieceResources resources_of(const CardDB& db, const Board& b, uint8_t p) {
 			if(name.rfind("Droll", 0) == 0)
 				r.under |= kUnderDroll;
 		}
+	r.second = b.turn >= 2;
 	for(const auto& c : b.hand[p])
 		if(c.code)
 			r.hand.push_back(c.code);
@@ -607,6 +613,32 @@ PieceGuide::PieceGuide(std::vector<LibraryPiece> lib, const CardDB* db) : lib_(s
 		}
 }
 
+PieceGuide::Plan PieceGuide::plan() const {
+	Plan p;
+	for(const auto& lp : lib_) {
+		if(!lp.piece.second)
+			++p.end_board;
+		else {
+			++p.breakers;
+			if(lp.best >= 10)
+				++p.wins;
+		}
+	}
+	return p;
+}
+
+std::vector<std::vector<std::string>> PieceGuide::arrangements(const PieceResources& r, std::mt19937_64& rng, int count,
+                                                              int max_pieces) const {
+	std::vector<std::vector<std::string>> out;
+	std::set<std::vector<std::string>> seen;
+	for(int i = 0; i < count * 4 && static_cast<int>(out.size()) < count; ++i) {
+		auto p = sample(r, rng, max_pieces);
+		if(!p.empty() && seen.insert(p).second)
+			out.push_back(std::move(p));
+	}
+	return out;
+}
+
 std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces) const {
 	std::vector<std::string> labels;
 	std::vector<uint32_t> hand = r.hand, other = r.other;
@@ -648,6 +680,12 @@ std::vector<std::string> PieceGuide::sample(const PieceResources& r, std::mt1993
 				x *= (lp.piece.under & r.under) ? 4.0 : lp.piece.under ? 0.5 : 0.6;
 			else if(lp.piece.under)
 				x *= 0.5;
+			// Going first, the end board lines; after that, the lines found going second (break the
+			// board, go for the win) first, the end board lines still there for the grind.
+			if(r.second)
+				x *= lp.piece.second ? 3.0 : 0.6;
+			else if(lp.piece.second)
+				x *= 0.1;
 			// Use what earlier pieces gave before starting something unrelated.
 			if(n > 0 && !lp.piece.needs_earlier.empty())
 				x *= 3;

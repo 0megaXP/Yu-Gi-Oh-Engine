@@ -146,6 +146,16 @@ d=json.loads(sys.stdin.read()); sys.exit(0 if d['complete'] else f'follow (hidde
 mkdir -p "$OUT/followed" && cp "$OUT/fa.jsonl" "$OUT/fa_sum.jsonl" "$OUT/followed/"
 python3 tools/ml/replays.py merge "$OUT/none.jsonl" "$OUT/followed" "$OUT/merged.jsonl" > /dev/null
 python3 tools/ml/decklib.py decks --starts "$OUT/starts.jsonl" --out "$OUT/deck_library.json" > /dev/null
+# going-second combo lines: the deck against a real end board (a turn 2 start), its pieces marked
+build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 3 --iterations 60 \
+  --boards "$OUT/starts.jsonl" --second-share 1 --out "$OUT/lib_second.json" > "$OUT/lib_second.txt"
+grep -q "real end boards to go second against" "$OUT/lib_second.txt"
+grep -q '"second":true' "$OUT/lib_second.json"
+# the puzzle: the turn planner plays the library's pieces put in different orders before improving the line
+YGOE_PLAN_DEBUG=1 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 104 --bot normal --iterations 100 \
+  --lib "$OUT/lib_second.json" 2> "$OUT/puzzle.txt" > /dev/null
+grep -q "arrangements of combo pieces played" "$OUT/puzzle.txt"
+grep -q "deck plan: .* going-second pieces" "$OUT/puzzle.txt"
 # hidden information: every guess of the other player's cards keeps what the bot sees (guessed decks from data/)
 YGOE_HIDDEN_DEBUG=1 build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --games 1 --iterations 30 --turns 3 --net none --seed 4 --out "$OUT/hidden.jsonl" > /dev/null 2> "$OUT/hidden.txt"

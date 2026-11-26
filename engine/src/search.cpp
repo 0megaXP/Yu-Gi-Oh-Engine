@@ -1326,7 +1326,8 @@ double Searcher::win_rate(const std::vector<RootState>& roots, const Trajectory&
 	return played > 0 ? double(won) / played : 0.0;
 }
 
-bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds) {
+bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds,
+                            const std::vector<std::vector<std::string>>* arrangements, double arrange_seconds) {
 	if(t.steps.empty() || seconds <= 0)
 		return false;
 	const auto t0 = std::chrono::steady_clock::now();
@@ -1451,6 +1452,33 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 		if(dbg)
 			std::fprintf(stderr, "plan: the search's line %.3f, with the opponent passing %.3f\n", cur.reward, base.reward);
 		cur = std::move(base);
+	}
+	if(arrangements && !arrangements->empty()) {
+		const auto a0 = std::chrono::steady_clock::now();
+		std::mt19937_64 rng(0xA55E3B1Eull);
+		size_t tried = 0, best_i = SIZE_MAX;
+		for(size_t i = 0; i < arrangements->size(); ++i) {
+			if(std::chrono::duration<double>(std::chrono::steady_clock::now() - a0).count() > arrange_seconds)
+				break;
+			std::vector<Step> rest;
+			for(const auto& l : (*arrangements)[i])
+				rest.push_back(Step{me, DecisionType::Idle, l, false, false});
+			Duel d(db_, scripts_);
+			d.set_declare_pool(pool_);
+			if(!d.replay(root.setup, root.history))
+				break;
+			Trajectory a;
+			a.root = cur.root;
+			++tried;
+			if(finish(d, a, &rest, 0, rng) && a.reward > cur.reward + 1e-6) {
+				cur = std::move(a);
+				best_i = i;
+			}
+		}
+		if(dbg)
+			std::fprintf(stderr, "puzzle: %zu of %zu arrangements of combo pieces played; %s (%.3f)\n", tried,
+			             arrangements->size(), best_i == SIZE_MAX ? "none beats the search's line" : "one beats the search's line",
+			             cur.reward);
 	}
 	const double start_reward = cur.reward;
 	unsigned threads = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)

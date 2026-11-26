@@ -409,6 +409,7 @@ std::string Engine::learn(const Value& req) {
 			c.iterations = static_cast<int>(req["iterations"].integer(3000));
 			c.hands_per_batch = static_cast<int>(req["hands"].integer(10));
 			c.seed = static_cast<uint64_t>(req["seed"].integer(1));
+			c.end_boards = data_dir_ + "/end_boards.jsonl";
 			c.cancel = &cancel_;
 			c.progress = progress;
 			out = deepen_lines(db_, *scripts_, c);

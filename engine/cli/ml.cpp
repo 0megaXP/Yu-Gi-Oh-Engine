@@ -594,11 +594,25 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 	const int hands = std::stoi(get("hands", "40"));
 	const int iterations = std::stoi(get("iterations", "1500"));
 	auto t0 = std::chrono::steady_clock::now();
+	// --boards starts.jsonl: real end boards (real games at the start of turn 2) to go second against
+	std::vector<Scenario> boards;
+	if(opt.count("boards"))
+		boards = load_end_boards(opt.at("boards"));
+	if(!boards.empty())
+		std::printf("%zu real end boards to go second against (%s of the hands)\n", boards.size(), get("second-share", "0.4").c_str());
 	auto res = build_reference(db, scripts, d, hands, iterations, std::stoull(get("seed", "1")), nullptr, [&](int done, int total) {
 		const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		std::printf("hand %d/%d, %.0fs\n", done, total, secs);
 		std::fflush(stdout);
-	});
+	}, nullptr, boards.empty() ? nullptr : &boards, std::stod(get("second-share", "0.4")));
+	{
+		int second = 0, wins = 0;
+		for(const auto& lp : res.library) {
+			second += lp.piece.second ? 1 : 0;
+			wins += lp.piece.second && lp.best >= 10 ? 1 : 0;
+		}
+		std::printf("%d of the %zu pieces found going second (%d of them in a line that won)\n", second, res.library.size(), wins);
+	}
 	std::vector<LibraryPiece> lib = res.library;
 	const int run_lines = static_cast<int>(res.samples.size());
 	// --new-out: this run's own pieces, for the format's shared pool (ygoe-cli pool-merge)

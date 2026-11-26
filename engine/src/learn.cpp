@@ -615,6 +615,8 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 }
 
 std::string deepen_lines(const CardDB& db, ScriptCache& scripts, const DeepenConfig& cfg) {
+	// going second too: against the real end boards the engine pack has
+	const std::vector<Scenario> end_boards = cfg.end_boards.empty() ? std::vector<Scenario>{} : load_end_boards(cfg.end_boards);
 	const fs::path dir(cfg.dir);
 	std::error_code ec;
 	fs::create_directories(dir / "newpieces", ec);
@@ -638,7 +640,7 @@ std::string deepen_lines(const CardDB& db, ScriptCache& scripts, const DeepenCon
 				cfg.progress("Searching " + d.name + ": hand " + std::to_string(done + 1) + " of " + std::to_string(total) + " (" +
 				             std::to_string(hands) + " hands this session)",
 				             static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
-		});
+		}, nullptr, end_boards.empty() ? nullptr : &end_boards, 0.4);
 		if(stopped())
 			break;  // a batch cut short: its lines may be the worse half of the hands
 		const int lines = static_cast<int>(res.samples.size());

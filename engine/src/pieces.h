@@ -47,6 +47,9 @@ struct ComboPiece {
 	// Played while the opponent's draw / search punisher was active (kUnder* bits): a line for
 	// those turns, e.g. one that plays through Mulcharmy Fuwalos or Droll & Lock Bird.
 	uint8_t under = 0;
+	// Found going second (against a real end board, the turn the deck can attack): a line that
+	// breaks a board and goes for the win, for the turns after the first.
+	bool second = false;
 	bool starter() const { return needs_earlier.empty(); }
 };
 
@@ -90,6 +93,7 @@ struct PieceResources {
 	std::vector<uint32_t> other;
 	bool normal_summon_used = false;
 	uint8_t under = 0;  // conditions active right now (kUnder* bits)
+	bool second = false;  // the opponent has had a turn (their board to break): going-second lines first
 };
 PieceResources resources_of(const CardDB& db, const Board& b, uint8_t player);
 
@@ -108,8 +112,20 @@ public:
 	bool empty() const { return lib_.empty(); }
 	size_t size() const { return lib_.size(); }
 	std::vector<std::string> sample(const PieceResources& r, std::mt19937_64& rng, int max_pieces = 5) const;
+	// The puzzle's candidate arrangements: up to `count` different plans (which pieces, in which
+	// order), each one a sample above; the search plays each through the rules engine
+	// (Searcher::best_arrangement) and keeps the best.
+	std::vector<std::vector<std::string>> arrangements(const PieceResources& r, std::mt19937_64& rng, int count, int max_pieces = 6) const;
 	// The pieces that could start right now (for display / debugging).
 	std::vector<const ComboPiece*> playable(const PieceResources& r) const;
+	// What the deck can do, read from its pieces at the start of the duel: going first, pieces that
+	// build an end board; going second, pieces that break a board, and how many of those ended in a
+	// win (a deck that closes games in the Battle Phase, or one that grinds).
+	struct Plan {
+		int end_board = 0, breakers = 0, wins = 0;
+		double lethal_reach() const { return breakers ? static_cast<double>(wins) / breakers : 0; }
+	};
+	Plan plan() const;
 
 private:
 	std::vector<LibraryPiece> lib_;

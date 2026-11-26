@@ -81,7 +81,7 @@ val ygoeEnginePack = tasks.register<Exec>("ygoeEnginePack") {
     inputs.file(File(engineRoot, "data/passcode_map.tsv"))
     // the learned value network (tools/ml), when there is one
     File(engineRoot, "data/value_net.json").takeIf { it.exists() }?.let { inputs.file(it) }
-    for (learned in listOf("policy.json", "nonengine_timing.json", "nonengine_values.json", "deck_library.json"))
+    for (learned in listOf("policy.json", "nonengine_timing.json", "nonengine_values.json", "deck_library.json", "end_boards.jsonl"))
         File(engineRoot, "data/$learned").takeIf { it.exists() }?.let { inputs.file(it) }
     // the format's decks (format_decks.json: what a deck learns against on a computer)
     File(engineRoot, "decks").takeIf { it.isDirectory }?.let { inputs.dir(it) }

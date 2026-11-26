@@ -11,7 +11,7 @@ object EnginePack {
     private const val ASSET_DIR = "ygoe"
     private val FILES = listOf("scripts.pack", "cards.tsv", "effects.tsv", "strings.tsv", "passcode_map.tsv")
     /** The trained value network (tools/ml), when the pack has one. */
-    private val OPTIONAL = listOf("value_net.json", "policy.json", "nonengine_timing.json", "nonengine_values.json", "deck_library.json", "reach.tsv")
+    private val OPTIONAL = listOf("value_net.json", "policy.json", "nonengine_timing.json", "nonengine_values.json", "deck_library.json", "reach.tsv", "end_boards.jsonl")
 
     /** Installs the pack if needed and returns the folder to pass to [YgoEngine.open]. Blocking. */
     fun install(context: Context): File {
