@@ -78,6 +78,11 @@ build/ygoe-cli profile examples/decks/angelechy_luna_mardelplata_2026-11.ydk | g
 build/ygoe-cli profile examples/decks/elfnote_koller_wien_2026-11.ydk | grep "Rhapsodia.*depends" | grep -q "GY to target"
 echo "== Traps from the hand: Dominus cards count as interruptions from the hand"
 build/ygoe-cli profile examples/decks/angelechy_luna_mardelplata_2026-11.ydk | grep "Dominus Purge" | grep -q "from hand"
+# what each locks when activated from the hand: Attributes for the rest of the Duel, or the hand, GY and banishment
+build/ygoe-cli profile examples/decks/angelechy_luna_mardelplata_2026-11.ydk > "$OUT/dominus.txt"
+grep "Dominus Impulse" "$OUT/dominus.txt" | grep "from the hand locks" | grep -q "EARTH, WIND, LIGHT"
+printf '#main\n58053438\n58053438\n58053438\n#extra\n!side\n' > "$OUT/songs.ydk"
+build/ygoe-cli profile "$OUT/songs.ydk" | grep -q "from the hand locks: monsters in the hand, GY, banishment"
 echo "== a lethal Kusanagi board: Medicurius banishes it at the start of the Battle Phase"
 # (examples/sim_angelechy_vs_elfnote.json: an app duel where the Elfnote bot let it attack)
 # (the search runs on several threads, so it isn't fully repeatable: one retry)

@@ -887,6 +887,18 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 				if(dec.options.empty())
 					break;
 				std::vector<char> tried(dec.options.size(), 0);
+				// The effect of a card whose effects are negated: it does nothing and uses up the once
+				// per turn (a second copy's too). Not considered while anything else can be done.
+				if(dec.options.size() > 1) {
+					size_t blocked = 0;
+					for(size_t i = 0; i < dec.options.size(); ++i)
+						if(duel.wasted_activation(dec.options[i])) {
+							tried[i] = 1;
+							++blocked;
+						}
+					if(blocked == dec.options.size())
+						std::fill(tried.begin(), tried.end(), 0);
+				}
 				// Setting a hand trap face-down throws it away; don't consider it while
 				// anything else can be done.
 				if(dec.type == DecisionType::Idle && dec.options.size() > 1) {
@@ -916,6 +928,8 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 					if(blocked == dec.options.size())
 						std::fill(tried.begin(), tried.end(), 0);
 				}
+				if(std::all_of(tried.begin(), tried.end(), [](char c) { return c != 0; }))
+					std::fill(tried.begin(), tried.end(), 0);  // (the two rules above together left nothing)
 				bool responded = false;
 				bool counted = false;  // availability counted for this visit
 				while(!responded) {
@@ -1168,6 +1182,8 @@ double Searcher::option_weight(const Duel& duel, const Decision& dd, const Optio
 		w *= 0.1;
 	if(o.kind == OptKind::ToBattle && !has_attacker(duel.board(), dd.player))
 		w *= 0.01;
+	if(dd.options.size() > 1 && duel.wasted_activation(o))
+		w *= 0.001;  // a negated card's effect: does nothing, uses up its once per turn
 	return w;
 }
 

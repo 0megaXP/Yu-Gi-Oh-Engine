@@ -166,6 +166,26 @@ int cmd_profile(const CardDB& db, const Args& a) {
 			std::printf("    %dx %-45s %s from %s (%.2f)%s\n", n, db.name(db.script_id(code)).c_str(), bi->name(),
 			            (bi->range & LOCATION_HAND) ? "hand" : (bi->range & LOCATION_GRAVE) ? "GY" : (bi->range & LOCATION_SZONE) ? "S/T zone" : "field",
 			            best, r.engine ? " [engine]" : "");
+		if(r.from_hand && (r.hand_lock || r.hand_lock_locs)) {
+			std::string l;
+			static const std::pair<uint32_t, const char*> attrs[] = {{ATTRIBUTE_EARTH, "EARTH"}, {ATTRIBUTE_WATER, "WATER"},
+			                                                          {ATTRIBUTE_FIRE, "FIRE"},   {ATTRIBUTE_WIND, "WIND"},
+			                                                          {ATTRIBUTE_LIGHT, "LIGHT"}, {ATTRIBUTE_DARK, "DARK"}};
+			for(auto& [b, n] : attrs)
+				if(r.hand_lock & b)
+					l += std::string(l.empty() ? "" : ", ") + n;
+			if(r.hand_lock_locs) {
+				std::string w;
+				if(r.hand_lock_locs & LOCATION_HAND)
+					w += "hand";
+				if(r.hand_lock_locs & LOCATION_GRAVE)
+					w += std::string(w.empty() ? "" : ", ") + "GY";
+				if(r.hand_lock_locs & LOCATION_REMOVED)
+					w += std::string(w.empty() ? "" : ", ") + "banishment";
+				l += std::string(l.empty() ? "" : "; ") + "monsters in the " + w;
+			}
+			std::printf("    %dx %-45s from the hand locks: %s\n", n, db.name(db.script_id(code)).c_str(), l.c_str());
+		}
 		if(!r.tiers.empty() || r.rider_type || !r.gy_target.empty()) {
 			std::printf("    %dx %-45s depends on the board:", n, db.name(db.script_id(code)).c_str());
 			if(!r.tiers.empty()) {

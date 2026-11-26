@@ -77,6 +77,9 @@ struct CardRole {
 	// Attributes whose monster effects its controller can't activate for the rest of the Duel
 	// after activating it from the hand (Dominus Impulse: LIGHT, EARTH and WIND).
 	uint32_t hand_lock = 0;
+	// ...or the locations it locks ("the effects of monsters in your hand, GY, and banishment":
+	// LOCATION_HAND | LOCATION_GRAVE | LOCATION_REMOVED; 58053438, until the end of the next turn)
+	uint32_t hand_lock_locs = 0;
 	// Values that depend on the board (board_tiers in profile.cpp).
 	//  Tiers: "This card gains the following effects, based on the number of "Angelechy" Monster
 	//  Cards in your Spell & Trap Zone. ● 1+: ... ● 3+: ..." (Angelechy Endgame Problem): each

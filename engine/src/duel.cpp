@@ -531,6 +531,35 @@ uint32_t Duel::code_at(uint8_t con, uint8_t loc, uint32_t seq) const {
 	return 0;
 }
 
+bool Duel::negated_at(uint8_t con, uint8_t loc, uint32_t seq) const {
+	OCG_QueryInfo qi{};
+	qi.flags = QUERY_STATUS;
+	qi.con = con;
+	qi.loc = loc;
+	qi.seq = seq;
+	uint32_t len = 0;
+	auto* buf = static_cast<const uint8_t*>(OCG_DuelQuery(duel_, &len, &qi));
+	Reader r{buf, buf + len};
+	while(r.p + 2 <= r.end) {
+		uint16_t sz = r.get<uint16_t>();
+		if(sz < 4)
+			break;
+		uint32_t flag = r.get<uint32_t>();
+		if(flag == QUERY_STATUS && sz >= 8)
+			return (r.get<uint32_t>() & 0x1) != 0;  // STATUS_DISABLED
+		r.skip(sz - 4);
+	}
+	return false;
+}
+
+bool Duel::wasted_activation(const Option& o) const {
+	// The effect of a face-up monster or Spell/Trap whose effects are negated (Infinite
+	// Impermanence, Effect Veiler): the rules allow activating it, it resolves to nothing and uses
+	// up its once per turn (for a second copy too: the limit goes by name).
+	return o.kind == OptKind::Activate && (o.loc & (LOCATION_MZONE | LOCATION_SZONE)) && o.code &&
+	       negated_at(o.con, o.loc, o.seq);
+}
+
 void Duel::resolve_picks() {
 	auto name = [&](const Pick& k) {
 		bool hidden = (k.pos & POS_FACEDOWN) && (k.loc & (LOCATION_MZONE | LOCATION_SZONE));

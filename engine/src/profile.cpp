@@ -146,10 +146,21 @@ CardRole classify(const CardDB& db, uint32_t code, const std::vector<uint16_t>& 
 				static const std::pair<const char*, uint32_t> names[] = {
 					{"earth", ATTRIBUTE_EARTH}, {"water", ATTRIBUTE_WATER}, {"fire", ATTRIBUTE_FIRE}, {"wind", ATTRIBUTE_WIND},
 					{"light", ATTRIBUTE_LIGHT}, {"dark", ATTRIBUTE_DARK}, {"divine", ATTRIBUTE_DIVINE}};
-				if(sent.find("cannot activate") != std::string::npos)
+				if(sent.find("cannot activate") != std::string::npos) {
 					for(auto& [n, bit] : names)
 						if(sent.find(n) != std::string::npos)
 							role.hand_lock |= bit;
+					const size_t in = sent.find("monsters in your");
+					if(in != std::string::npos) {
+						const std::string w = sent.substr(in);
+						if(w.find("hand") != std::string::npos)
+							role.hand_lock_locs |= LOCATION_HAND;
+						if(w.find("gy") != std::string::npos || w.find("graveyard") != std::string::npos)
+							role.hand_lock_locs |= LOCATION_GRAVE;
+						if(w.find("banish") != std::string::npos)
+							role.hand_lock_locs |= LOCATION_REMOVED;
+					}
+				}
 			}
 		}
 	}

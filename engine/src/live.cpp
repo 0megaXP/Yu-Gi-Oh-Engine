@@ -3,6 +3,7 @@
 #include "live.h"
 #include "pieces.h"
 #include <random>
+#include <set>
 
 #include <algorithm>
 #include <cstdio>
@@ -740,6 +741,54 @@ int LiveDuel::choose(BotLevel level) {
 					if(((o.loc & LOCATION_HAND) || d.player != duel_->turn_player()) && !own_engine)
 						margin = 0.03;
 				}
+		}
+		// A Dominus from the hand locks monster effects (by attribute for the rest of the Duel, or in
+		// the hand/GY/banishment until the end of the next turn), the hand traps in the hand it covers
+		// too. When one of those can answer the same thing, it goes first (the Dominus stays usable
+		// after it); when none can, the Dominus needs a clearer gain for each hand trap it locks.
+		if(use && use_code && d.player != duel_->turn_player()) {
+			const Option* uo = nullptr;
+			for(const auto& o : d.options)
+				if(o.label == use->label)
+					uo = &o;
+			const CardRole& dr = eval_->role(d.player, use_code);
+			if(uo && (uo->loc & LOCATION_HAND) && dr.from_hand && (dr.hand_lock || dr.hand_lock_locs)) {
+				auto covered = [&](uint32_t code) {
+					const CardInfo* c = db_.get(db_.script_id(code));
+					return c && (c->type & TYPE_MONSTER) && eval_->role(d.player, code).hand_trap &&
+					       ((c->attribute & dr.hand_lock) || (dr.hand_lock_locs & LOCATION_HAND));
+				};
+				const MoveStats* ht = nullptr;
+				uint32_t ht_code = 0;
+				for(const auto& m : out.moves) {
+					if(&m == pass || &m == use || m.visits < 2 || m.mean < use->mean - 0.05)
+						continue;
+					for(const auto& o : d.options)
+						if(o.label == m.label && (o.loc & LOCATION_HAND) && o.code && covered(o.code) && (!ht || m.mean > ht->mean)) {
+							ht = &m;
+							ht_code = o.code;
+						}
+				}
+				if(ht) {
+					if(std::getenv("YGOE_BOT_DEBUG"))
+						std::fprintf(stderr, "   %s first: %s would lock it\n", db_.name(ht_code).c_str(), db_.name(use_code).c_str());
+					use = ht;
+					use_code = ht_code;
+					margin = 0.03;
+				} else {
+					int locked = 0;
+					std::set<uint32_t> seen;
+					for(const auto& c : duel_->board().hand[d.player])
+						if(c.code && !c.spent() && covered(c.code) && seen.insert(c.code).second)
+							++locked;
+					if(locked) {
+						margin += std::min(0.09, 0.03 * locked);
+						if(std::getenv("YGOE_BOT_DEBUG"))
+							std::fprintf(stderr, "   %s from the hand would lock %d hand trap(s): used only for a clearer gain\n",
+							             db_.name(use_code).c_str(), locked);
+					}
+				}
+			}
 		}
 		// An optional trigger ("Use X?": Endgame Problem's draw in the opponent's Standby Phase) is
 		// now or never: there is no better moment to save it for, so no margin. (Not a negate: one

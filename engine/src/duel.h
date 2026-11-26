@@ -146,6 +146,10 @@ struct DuelReaders {
 
 class Duel {
 public:
+	// The card there has its effects negated (STATUS_DISABLED).
+	bool negated_at(uint8_t con, uint8_t loc, uint32_t seq) const;
+	// An activation that does nothing: an effect of a face-up card whose effects are negated.
+	bool wasted_activation(const Option& o) const;
 	Duel(const CardDB& db, ScriptCache& scripts);
 	~Duel();
 	Duel(const Duel&) = delete;

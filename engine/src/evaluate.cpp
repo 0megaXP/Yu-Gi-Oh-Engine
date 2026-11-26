@@ -78,6 +78,17 @@ uint32_t Evaluator::locked_attributes(uint64_t hint) const {
 		for(auto& [n, bit] : names)
 			if(t.find(n) != std::string::npos)
 				mask |= bit;
+		// a lock by location ("monsters in your hand, GY, and banishment"), in the high bits
+		const size_t in = t.find("monsters in your");
+		if(in != std::string::npos) {
+			const std::string w = t.substr(in);
+			if(w.find("hand") != std::string::npos)
+				mask |= static_cast<uint32_t>(LOCATION_HAND) << 16;
+			if(w.find("gy") != std::string::npos || w.find("graveyard") != std::string::npos)
+				mask |= static_cast<uint32_t>(LOCATION_GRAVE) << 16;
+			if(w.find("banish") != std::string::npos)
+				mask |= static_cast<uint32_t>(LOCATION_REMOVED) << 16;
+		}
 	}
 	std::lock_guard<std::mutex> lock(mu_);
 	lock_cache_[hint] = mask;
@@ -123,7 +134,9 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			if(!locked)
 				return false;
 			const CardInfo* c = db_.get(cv.code);
-			return c && (c->type & TYPE_MONSTER) && (c->attribute & locked) && !(cv.type & (TYPE_SPELL | TYPE_TRAP));
+			if(!c || !(c->type & TYPE_MONSTER) || (cv.type & (TYPE_SPELL | TYPE_TRAP)))
+				return false;
+			return (c->attribute & locked & 0xffff) || (cv.loc & (locked >> 16));
 		};
 		// Board-dependent parts (CardRole::tiers / rider_type / gy_target).
 		auto lower_name = [&](uint32_t code) {
@@ -277,6 +290,9 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 							hit += by_attribute_[p][bit];
 					iv *= 1.0 - std::min(1.0, double(hit) / effect_monsters_[p]);
 				}
+				// a lock by location (the deck's hand traps and GY effects, until the end of the next turn)
+				if(hr.from_hand && hr.hand_lock_locs)
+					iv *= 0.7;
 			}
 			if(iv > 0 && role(p, cv.code).hand_trap) {
 				// A hand trap is worth most where it is: hidden in the hand, used when it counts.
