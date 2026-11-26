@@ -1457,6 +1457,8 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 	                                   : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
 	if(const char* e = std::getenv("YGOE_THREADS"))
 		threads = static_cast<unsigned>(std::max(1, std::atoi(e)));
+	if(dbg && arrangements && arrangements->empty())
+		std::fprintf(stderr, "puzzle: 0 of 0 arrangements of combo pieces played (none playable from this hand)\n");
 	if(arrangements && !arrangements->empty()) {
 		// on every thread; the planner's own time starts after it
 		const auto a0 = std::chrono::steady_clock::now();
