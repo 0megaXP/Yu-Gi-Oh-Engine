@@ -693,6 +693,9 @@ struct Pos {
 	// At the turn player's first Main Phase 1 decision of a turn (turn 2 on): the position as a
 	// start for self-play (see start_json), "" otherwise.
 	std::string start;
+	// The board the player going first left (turn 2, Main Phase 1), for the combo lines going
+	// second (reference.cpp load_end_boards): written even when cards nobody saw are in a deck.
+	std::string board;
 	uint8_t turn_player = 0;
 };
 
@@ -823,7 +826,7 @@ private:
 	bool apply(const Step& s);
 	void fix_decks(size_t cur);
 	void take_position(size_t cur);
-	std::string start_json(const Board& b) const;
+	std::string start_json(const Board& b, bool board_only = false) const;
 };
 
 std::vector<int> Follower::rank(const Decision& d, size_t cur) const {
@@ -1062,6 +1065,11 @@ void Follower::take_position(size_t cur) {
 			first = first && !(q.turn == b.turn && !q.start.empty());
 		if(first)
 			p.start = start_json(b);
+		bool first_board = b.turn == 2;
+		for(const auto& q : pos_)
+			first_board = first_board && q.board.empty();
+		if(first_board)
+			p.board = start_json(b, true);
 	}
 	pos_.push_back(std::move(p));
 }
@@ -1070,18 +1078,36 @@ void Follower::take_position(size_t cur) {
 // decks, hands, the cards on the field / in the GY / banished, LP, the turn player first.
 // Script ids. A card nobody saw in a hand is only counted; positions where one would be on
 // the field, in a GY or in a Deck list are not used ("" back). Xyz materials are not kept.
-std::string Follower::start_json(const Board& b) const {
+//
+// With `board_only` ("kind":"board"): the cards nobody saw are left out of the decks and hands, a
+// face-down Spell/Trap nobody saw stays as the stand-in Set card (kFillerST), a face-down monster
+// nobody saw is left out; "" if the player going first left nothing on the field.
+std::string Follower::start_json(const Board& b, bool board_only) const {
 	const uint8_t order[2] = {b.turn_player, static_cast<uint8_t>(1 - b.turn_player)};
-	for(uint8_t e : order)
-		for(auto c : decks_[e].main)
-			if(is_filler(c))
-				return "";
+	if(!board_only)
+		for(uint8_t e : order)
+			for(auto c : decks_[e].main)
+				if(is_filler(c))
+					return "";
+	if(board_only) {
+		bool any = false;
+		for(const auto* zone : {&b.mzone[order[1]], &b.szone[order[1]]})
+			for(const auto& c : *zone)
+				any = any || (c.code && !(c.type & TYPE_TOKEN));
+		if(!any)
+			return "";
+	}
 	std::ostringstream o;
-	o << "{\"kind\":\"start\",\"turn\":" << b.turn << ",\"lp\":[" << b.lp[order[0]] << "," << b.lp[order[1]] << "],\"decks\":[";
+	o << "{\"kind\":\"" << (board_only ? "board" : "start") << "\",\"turn\":" << b.turn << ",\"lp\":[" << b.lp[order[0]] << "," << b.lp[order[1]] << "],\"decks\":[";
 	auto list = [&](const std::vector<uint32_t>& v) {
 		std::string r = "[";
-		for(size_t i = 0; i < v.size(); ++i)
-			r += (i ? "," : "") + std::to_string(v[i]);
+		bool f = true;
+		for(auto c : v) {
+			if(is_filler(c))
+				continue;
+			r += (f ? "" : ",") + std::to_string(c);
+			f = false;
+		}
 		return r + "]";
 	};
 	for(int k = 0; k < 2; ++k)
@@ -1102,8 +1128,12 @@ std::string Follower::start_json(const Board& b) const {
 			for(const auto& c : *zone) {
 				if(!c.code || (c.type & TYPE_TOKEN))
 					continue;
-				if(is_filler(c.code))
-					return "";
+				if(is_filler(c.code)) {
+					if(!board_only)
+						return "";
+					if(c.loc != LOCATION_SZONE)
+						continue;
+				}
 				o << (f ? "" : ",") << "{\"c\":" << c.code << ",\"l\":" << int(c.loc) << ",\"s\":" << c.seq << ",\"p\":" << c.pos << "}";
 				f = false;
 			}
@@ -1145,6 +1175,16 @@ FollowResult Follower::run() {
 		e.p = eng(e.p);
 		if(e.k == MOVE || e.k == ATTACK)
 			e.tp = eng(e.tp);
+	}
+	// YGOE_FOLLOW_TURNS=N: only the first N turns (collecting end boards: N = 2)
+	if(const char* ft = std::getenv("YGOE_FOLLOW_TURNS")) {
+		const int n = std::atoi(ft);
+		int seen = 0;
+		for(size_t j = 0; j < rec_.size(); ++j)
+			if(rec_[j].k == TURN && ++seen > n) {
+				rec_.resize(j);
+				break;
+			}
 	}
 	for(const auto& e : rec_) {
 		if(!soft(e))
@@ -1539,6 +1579,12 @@ FollowResult Follower::run() {
 				const uint8_t tp = p.turn_player;
 				o.str("");
 				o << p.start << ",\"z\":" << (w == tp ? 1 : 0) << ",\"game\":" << json::quote(in_.game) << ",\"src\":\"replay\"}\n";
+				res.jsonl += o.str();
+			}
+		for(const auto& p : pos_)
+			if(!p.board.empty()) {
+				o.str("");
+				o << p.board << ",\"game\":" << json::quote(in_.game) << ",\"src\":\"replay\"}\n";
 				res.jsonl += o.str();
 			}
 	}

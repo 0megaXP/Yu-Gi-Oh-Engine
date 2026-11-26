@@ -90,8 +90,9 @@ echo "== turn planner: no Battle Phase with no monsters while combo cards are le
 build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 197 --bot normal --iterations 150 > "$OUT/plan197.txt"
 grep "idle:" "$OUT/plan197.txt" | grep -vq "Go to Battle Phase"
 echo "== once per turn: the rules core's count of what is left reaches the board"
-YGOE_BOT_DEBUG=1 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
-  --turns 1 --seed 3 > /dev/null 2> "$OUT/opt.txt"
+# (a fixed point of a saved duel: Angelechy Seneschal has used one of its effects this turn)
+YGOE_BOT_DEBUG=1 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 120 --bot normal --iterations 30 \
+  > /dev/null 2> "$OUT/opt.txt"
 python3 -c "
 import re,sys
 used=[m for m in re.findall(r'once per turn: (\d+)/(\d+) left', open(sys.argv[1], errors='replace').read()) if int(m[0]) < int(m[1])]
@@ -151,11 +152,26 @@ build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --h
   --boards "$OUT/starts.jsonl" --second-share 1 --out "$OUT/lib_second.json" > "$OUT/lib_second.txt"
 grep -q "real end boards to go second against" "$OUT/lib_second.txt"
 grep -q '"second":true' "$OUT/lib_second.json"
+# a followed game's end board ("kind":"board": the cards nobody saw left out) is one to go second against
+build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 40 \
+  --boards examples/end_board.jsonl --second-share 1 --out "$OUT/lib_board.json" > "$OUT/lib_board.txt"
+grep -q "^1 real end boards to go second against" "$OUT/lib_board.txt"
+python3 tools/ml/end_boards.py --out "$OUT/end_boards.jsonl" examples/end_board.jsonl "$OUT/starts.jsonl" | grep -q "real end boards"
 # the puzzle: the turn planner plays the library's pieces put in different orders before improving the line
 YGOE_PLAN_DEBUG=1 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 104 --bot normal --iterations 100 \
   --lib "$OUT/lib_second.json" 2> "$OUT/puzzle.txt" > /dev/null
 grep -q "arrangements of combo pieces played" "$OUT/puzzle.txt"
 grep -q "deck plan: .* going-second pieces" "$OUT/puzzle.txt"
+# a grind deck (going-second lines that break the board, none that won): the same library with no wins
+python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+for p in d:
+    p['value']=min(p.get('value',0),0.8); p.pop('best',None)
+json.dump(d,open(sys.argv[2],'w'))" "$OUT/lib_second.json" "$OUT/lib_grind.json"
+YGOE_PLAN_DEBUG=1 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 104 --bot normal --iterations 60 \
+  --lib "$OUT/lib_grind.json" 2> "$OUT/grind.txt" > /dev/null
+grep -q "(a grind deck)" "$OUT/grind.txt"
 # hidden information: every guess of the other player's cards keeps what the bot sees (guessed decks from data/)
 YGOE_HIDDEN_DEBUG=1 build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --games 1 --iterations 30 --turns 3 --net none --seed 4 --out "$OUT/hidden.jsonl" > /dev/null 2> "$OUT/hidden.txt"

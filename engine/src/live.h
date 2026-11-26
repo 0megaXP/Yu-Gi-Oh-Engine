@@ -59,7 +59,8 @@ public:
 	std::string bot_move(BotLevel level);
 	void cancel() { cancel_ = true; }
 	// Combo pieces for a player's bot (from that deck's reference boards), see pieces.h.
-	void set_guide(int player, std::shared_ptr<const PieceGuide> g) { guides_[player & 1] = std::move(g); }
+	// The deck's plan read from them (PieceGuide::plan): a grind deck values the cards it keeps.
+	void set_guide(int player, std::shared_ptr<const PieceGuide> g);
 	// Learned move policy (policy.h) for both bots' searches.
 	void set_policy(std::shared_ptr<const class Policy> p) { policies_[0] = policies_[1] = std::move(p); }
 	// One player's bot only (two bots with different policies, to compare them).

@@ -43,6 +43,8 @@ public:
 	// Replaces what a side is assumed to rely on (e.g. generic_profile() for deck-neutral scores).
 	void set_profile(uint8_t p, const DeckProfile& prof) { profile_[p] = prof; }
 	const CardRole& role(uint8_t owner, uint32_t code) const;
+	// A grind deck (LiveDuel::set_guide): from turn 2 on, each card it has (hand and field) is worth `w` more.
+	void set_grind(uint8_t p, double w) { grind_[p & 1] = w; }
 
 private:
 	const CardDB& db_;
@@ -57,6 +59,7 @@ private:
 	mutable std::mutex mu_;
 	mutable std::unordered_map<uint32_t, CardRole> roles_[2];
 	double column_threat_[2] = {0, 0};
+	double grind_[2] = {0, 0};
 	// The deck puts its own cards in its Spell & Trap Zone ("place ... in your Spell & Trap Zone as
 	// a face-up Continuous Spell": Angelechy Synchros): a zone used by a Set card is missed.
 	bool fills_st_zones_[2] = {false, false};

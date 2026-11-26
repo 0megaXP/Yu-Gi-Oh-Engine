@@ -186,7 +186,9 @@ std::vector<Scenario> load_end_boards(const std::string& starts_path, size_t max
 	std::ifstream in(starts_path);
 	std::string line;
 	while(std::getline(in, line) && out.size() < max) {
-		if(line.find("\"kind\":\"start\"") == std::string::npos || line.find("\"turn\":2,") == std::string::npos)
+		// a start (both decks known) or a board (followed games: the cards nobody saw left out)
+		if((line.find("\"kind\":\"start\"") == std::string::npos && line.find("\"kind\":\"board\"") == std::string::npos) ||
+		   line.find("\"turn\":2,") == std::string::npos)
 			continue;
 		auto v = json::Value::parse(line);
 		if(!v.is_object())
@@ -212,8 +214,17 @@ std::vector<Scenario> load_end_boards(const std::string& starts_path, size_t max
 				pc.pos = static_cast<uint32_t>(c["p"].integer());
 				sc.placed[p].push_back(pc);
 			}
-			ok = ok && !sc.decks[p].main.empty();
 		}
+		// The player going second's deck is the library's own (build_reference). The other's: the
+		// cards seen, to 40 with a stand-in Set card (Trap Hole) for the ones nobody saw, so a
+		// search or draw on their side still finds a Deck.
+		{
+			auto& m = sc.decks[1].main;
+			while(m.size() < 40)
+				m.push_back(4206964);
+		}
+		if(sc.decks[0].main.empty())
+			sc.decks[0].main = sc.decks[1].main;
 		// (the player going first, at index 1, left a board)
 		bool board = false;
 		for(const auto& pc : sc.placed[1])

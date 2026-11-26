@@ -82,22 +82,10 @@ jobs:
           ls -la app
           # the decks the bots guess the opponent's from: the top cuts and the real games' decks
           python3 tools/ml/decklib.py format --lists meta/lists.json --starts app/starts.jsonl --out data/deck_library.json
-          # real end boards (turn 2 starts where the player going first left a board): what the
-          # libraries here and the app's Deepen combo lines go second against
-          python3 - <<'PY'
-          import json
-          out = []
-          for l in open("app/starts.jsonl") if __import__("os").path.exists("app/starts.jsonl") else []:
-              if '"kind":"start"' not in l or '"turn":2,' not in l:
-                  continue
-              d = json.loads(l)
-              if any(p["l"] in (4, 8) for p in d["placed"][1]):
-                  out.append(l.strip())
-          out = out[-400:]
-          if out:
-              open("data/end_boards.jsonl", "w").write("\n".join(out) + "\n")
-          print(len(out), "real end boards")
-          PY
+          # real end boards (the start of turn 2 where the player going first left a board): what
+          # the libraries here and the app's Deepen combo lines go second against. The ones kept
+          # (data/end_boards.jsonl: last night's followed games) and the app's starts.
+          python3 tools/ml/end_boards.py --out data/end_boards.jsonl data/end_boards.jsonl app/starts.jsonl
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -137,10 +125,10 @@ jobs:
           # the format's shared pool of pieces (combo-pool.json in ml-data: what every deck's
           # earlier runs found): the deck gets all it can play, whichever deck found them, with
           # this run's 40 hands; this run's go to the pool job. 40% of the hands are played going
-          # second, against real end boards (app/starts.jsonl: real games at the start of turn 2)
+          # second, against real end boards (data/end_boards.jsonl: real games at the start of turn 2)
           gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
           boards=""
-          [ -s app/starts.jsonl ] && boards="--boards app/starts.jsonl --second-share 0.4"
+          [ -s data/end_boards.jsonl ] && boards="--boards data/end_boards.jsonl --second-share 0.4"
           build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces $boards \
             --pool combo-pool.json --new-out "newpieces/$name.json" --out "libs/$name.json" | grep -v "^hand " | tail -n 3
           echo "name=$name" >> "$GITHUB_ENV"
@@ -338,6 +326,11 @@ jobs:
           # real games' positions (replays, each game once; they count 3 times in train.py): the
           # games followed here replace the positions the app made of them on the phone
           python3 tools/ml/replays.py merge app/replays.jsonl followed history/replays.jsonl app/follow_report.json
+          # the end boards of the games followed tonight (one per game, "kind":"board"), with the
+          # ones kept: the keep job commits them, the next run's libraries go second against them
+          mkdir -p candidate
+          cp data/end_boards.jsonl candidate/end_boards.jsonl 2>/dev/null || true
+          python3 tools/ml/end_boards.py --out candidate/end_boards.jsonl candidate/end_boards.jsonl app/starts.jsonl followed
           [ -s history/replays.jsonl ] || rm -f history/replays.jsonl
           ls -la history policy-history || true
       - name: Train the value network
@@ -558,8 +551,10 @@ jobs:
             if [ -n "$(git status --porcelain -- decks/)" ]; then changed="$changed${changed:+, }the format's decks"; fi
           fi
           # the real end boards (turn 2 starts with a board): kept every run, like the deck library
-          if [ -f built/data/end_boards.jsonl ]; then
-            cp built/data/end_boards.jsonl data/end_boards.jsonl
+          eb=candidate/end_boards.jsonl
+          [ -s "$eb" ] || eb=built/data/end_boards.jsonl
+          if [ -f "$eb" ]; then
+            cp "$eb" data/end_boards.jsonl
             git add data/end_boards.jsonl
             if [ -n "$(git status --porcelain -- data/end_boards.jsonl)" ]; then changed="$changed${changed:+, }end boards"; fi
           fi

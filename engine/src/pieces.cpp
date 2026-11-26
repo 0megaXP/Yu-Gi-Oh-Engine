@@ -458,8 +458,10 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 		std::snprintf(share, sizeof share, "%.3f", lines ? double(lib[i].count) / lines : 0.0);
 		char val[32];
 		std::snprintf(val, sizeof val, "%.3f", lib[i].value);
+		char best[32];
+		std::snprintf(best, sizeof best, "%.3f", std::max(lib[i].best, lib[i].value));
 		o += (i ? ",{" : "{") + piece_body(db, lib[i].piece) + ",\"count\":" + std::to_string(lib[i].count) +
-		     ",\"share\":" + share + ",\"value\":" + val + "}";
+		     ",\"share\":" + share + ",\"value\":" + val + ",\"best\":" + best + "}";
 	}
 	return o + "]";
 }
@@ -503,7 +505,7 @@ std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) 
 		p.second = o["second"].boolean();
 		lp.count = static_cast<int>(o["count"].integer(1));
 		lp.value = o["value"].num(0);
-		lp.best = lp.value;
+		lp.best = std::max(lp.value, o["best"].num(lp.value));  // (older files: the average)
 		if(!p.steps.empty())
 			out.push_back(std::move(lp));
 	}

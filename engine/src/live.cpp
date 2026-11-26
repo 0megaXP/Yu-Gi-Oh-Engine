@@ -147,6 +147,22 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const DuelSetup& setu
 	steps_turn_ = duel_->turn();
 }
 
+void LiveDuel::set_guide(int player, std::shared_ptr<const PieceGuide> g) {
+	const uint8_t p = static_cast<uint8_t>(player & 1);
+	// A deck whose going-second lines break the board but never won: it wins over several turns,
+	// by having more cards left, so from turn 2 on each card it has (in hand or on the field) is worth
+	// a little more: lines that spend cards for nothing lose against ones that keep them.
+	double grind = 0;
+	if(g) {
+		const auto pl = g->plan();
+		if(pl.breakers >= 3 && pl.wins == 0)
+			grind = 0.1;
+	}
+	if(eval_)
+		eval_->set_grind(p, grind);
+	guides_[p] = std::move(g);
+}
+
 void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	duel_ = std::make_unique<Duel>(db_, scripts_);
 	duel_->enable_log(true);
@@ -159,6 +175,9 @@ void LiveDuel::begin(const Deck& d0, const Deck& d1) {
 	activations_ = duel_->take_activations();
 	picks_ = duel_->take_picks();
 	eval_ = std::make_unique<Evaluator>(db_, d0, d1);
+	for(int p = 0; p < 2; ++p)
+		if(guides_[p])
+			set_guide(p, guides_[p]);
 	for(int pl = 0; pl < 2; ++pl) {
 		dodges_[pl] = false;
 		const Deck& dk = pl == 0 ? d0 : d1;
@@ -1124,8 +1143,8 @@ int LiveDuel::choose(BotLevel level) {
 					if(pl.breakers)
 						reach_scale = pl.wins ? 1.0 + pl.lethal_reach() : 0.5;
 					if(dbg && duel_->turn() >= 2)
-						std::fprintf(stderr, "deck plan: %d end-board pieces, %d going-second pieces, %d of them winning\n",
-						             pl.end_board, pl.breakers, pl.wins);
+						std::fprintf(stderr, "deck plan: %d end-board pieces, %d going-second pieces, %d of them winning%s\n",
+						             pl.end_board, pl.breakers, pl.wins, pl.breakers >= 3 && !pl.wins ? " (a grind deck)" : "");
 				}
 				Trajectory lethal;
 				if(duel_->turn() >= 2 && t.reward < 0.999 &&

@@ -411,6 +411,15 @@ Evaluation Evaluator::evaluate(const Board& b, uint8_t me, uint8_t next, bool en
 			v -= 50;
 		else
 			v += 2.5 * std::min(b.lp[p], 8000) / 8000.0 - (b.lp[p] <= 2000 ? 0.6 : 0.0);
+		// A grind deck: its card advantage (cards in hand and on its field; a card played from the
+		// hand to the field still counts, one spent for nothing doesn't).
+		if(b.turn >= 2 && grind_[p] > 0) {
+			int cards = static_cast<int>(b.hand[p].size());
+			for(const auto* z : {&b.mzone[p], &b.szone[p]})
+				for(const auto& c : *z)
+					cards += c.code && !(c.type & TYPE_TOKEN) ? 1 : 0;
+			v += grind_[p] * cards;
+		}
 		ev.value[p] = v;
 	}
 	// A free turn: cards in the hand of the player about to take their turn are worth more when
