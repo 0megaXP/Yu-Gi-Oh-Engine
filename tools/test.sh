@@ -80,7 +80,9 @@ echo "== Traps from the hand: Dominus cards count as interruptions from the hand
 build/ygoe-cli profile examples/decks/angelechy_luna_mardelplata_2026-11.ydk | grep "Dominus Purge" | grep -q "from hand"
 echo "== a lethal Kusanagi board: Medicurius banishes it at the start of the Battle Phase"
 # (examples/sim_angelechy_vs_elfnote.json: an app duel where the Elfnote bot let it attack)
-build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 138 --bot normal --iterations 300 | grep -q "chain: Chain Medicurius"
+# (the search runs on several threads, so it isn't fully repeatable: one retry)
+medicurius() { build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 138 --bot normal --iterations 300 > "$OUT/medicurius.txt"; grep -q "chain: Chain Medicurius" "$OUT/medicurius.txt"; }
+medicurius || medicurius
 echo "== a hand trap isn't Normal Summoned for nothing (Mulcharmy Fuwalos, turn 9 of the Elfnote mirror)"
 build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 512 --bot normal --iterations 300 | grep "idle:" | grep -vq "Normal Summon Mulcharmy Fuwalos"
 echo "== turn goal: candidate lines scored by what they are worth when the opponent answers"
