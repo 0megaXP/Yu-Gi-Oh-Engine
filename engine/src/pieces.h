@@ -124,6 +124,8 @@ public:
 	struct Plan {
 		int end_board = 0, breakers = 0, wins = 0;
 		double lethal_reach() const { return breakers ? static_cast<double>(wins) / breakers : 0; }
+		// A grind deck: going second, fewer than a quarter of its lines (of at least 3) won.
+		bool grind() const { return breakers >= 3 && lethal_reach() < 0.25; }
 	};
 	Plan plan() const;
 

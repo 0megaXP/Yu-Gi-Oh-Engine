@@ -83,7 +83,9 @@ what they stop and their measured value.
    archetype starts from its older lists' lines), merged with the run's (the same piece seen
    again counts its lines together and keeps the example from the best line), its 400 most
    played kept. The **pool** job then adds every deck's new pieces to the pool
-   (`ygoe-cli pool-merge`, the 5000 most played kept).
+   (`ygoe-cli pool-merge --decks format`, up to 8000 kept: each of the format's decks gets an
+   even share, filled with the pieces it can play, most played first, a third of it kept for its
+   going-second lines; pieces no format deck can play, an archetype that left the format, go first).
 3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 3.5 hours: game 1 with a
    coin flip for who goes first, then the loser chooses to go first or second (by the measured
    win rates of its deck in that matchup going first and second, see Values; a fifth of the
@@ -127,7 +129,10 @@ what they stop and their measured value.
    for up to 4 runs. Kept when its average pair score over all its pairs is at least 0.51 and
    more than 1.5 standard errors above 0.5; dropped when 1.5 standard errors below 0.5 or after 4
    runs. A part kept doesn't restart the others' pairs (it changes the bots they are measured
-   against far less than one run's noise). The
+   against far less than one run's noise). A new value network is also tested at half strength
+   (its correction halved, `"scale"` in the file), as a part of its own: one that predicts who
+   wins better can still make the search's choices between moves noisier. If both are kept, the
+   one with the better pairs is; once one is kept, the other stops. The
    commit message carries the reports.
 
 Real games come from the app: it follows each finished YGO Omega replay in the real rules core

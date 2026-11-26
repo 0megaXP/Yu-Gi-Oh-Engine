@@ -117,6 +117,9 @@ build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --h
   --pool "$OUT/pool.json" --new-out "$OUT/new.json" --out "$OUT/libs/angelechy_luna_mardelplata_2026-11.json" > "$OUT/lib.txt"
 # the shared pool: a run's pieces go in, and the next run's library starts from them
 build/ygoe-cli pool-merge "$OUT/pool.json" "$OUT/new.json" --out "$OUT/pool.json" | grep -q "shared pool: [1-9]"
+# a share of the pool for each format deck: with a cap of 2, the pieces kept are ones the decks can play
+build/ygoe-cli pool-merge "$OUT/pool.json" --decks examples/decks --max 2 --out "$OUT/pool_small.json" > "$OUT/pool_small.txt"
+grep -q "shared pool: 2 pieces" "$OUT/pool_small.txt"
 build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 --seed 2 \
   --pool "$OUT/pool.json" --out "$OUT/lib2.json" | grep -q "and [1-9][0-9]* the shared pool has"
 YGOE_FOLLOW_JSONL=1 build/ygoe-cli followtest examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \

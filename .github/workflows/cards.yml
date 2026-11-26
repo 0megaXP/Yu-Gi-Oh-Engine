@@ -12,7 +12,7 @@ jobs:
   look-up:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Look the ids up
         run: |
           git clone -q --depth 1 https://github.com/ProjectIgnis/BabelCDB babel

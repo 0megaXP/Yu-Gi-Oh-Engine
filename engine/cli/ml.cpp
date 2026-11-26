@@ -35,7 +35,7 @@
 //     every deck's earlier runs found; --new-out writes this run's for it), the most played
 //     kept, plus the pieces of --pieces (the app's, from replays and videos) the deck can play.
 //
-//   ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 5000]
+//   ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 8000] [--decks <dir>]
 //     The shared pool with the run's new pieces added (the same piece counts its lines together).
 //
 //   ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json] [--epochs 4] [--report r.json]
@@ -640,7 +640,7 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 	return 0;
 }
 
-// ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 5000]: the format's shared
+// ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 8000] [--decks <dir>]: the format's shared
 // pool of combo pieces, with the pieces the decks found in this run (library --new-out) added.
 int run_pool_merge(const std::vector<std::string>& files, const CardDB& db, const Opts& opt) {
 	std::vector<LibraryPiece> pool;
@@ -657,7 +657,83 @@ int run_pool_merge(const std::vector<std::string>& files, const CardDB& db, cons
 			added += more.size();
 		merge_library(pool, more);
 	}
-	sort_library(pool, static_cast<size_t>(std::stoi(opt_get(opt, "max", "5000"))));
+	const size_t cap = static_cast<size_t>(std::stoi(opt_get(opt, "max", "8000")));
+	sort_library(pool, SIZE_MAX);
+	// --decks <dir>: the format's decks (.ydk). Each gets an even share of the cap, filled with
+	// the pieces it can play in the order above (found more often, then worth more), a third of
+	// its share kept for its going-second lines; a piece one deck keeps counts for every deck
+	// that can play it. Then the rest in that order, and last the pieces no format deck can play
+	// (an archetype that left the format). Without --decks, just the first `cap`.
+	if(opt.count("decks") && pool.size() > cap) {
+		std::vector<Deck> decks;
+		for(const auto& e : std::filesystem::directory_iterator(opt.at("decks")))
+			if(e.path().extension() == ".ydk") {
+				Deck d;
+				if(load_ydk(e.path().string(), d))
+					decks.push_back(std::move(d));
+			}
+		if(!decks.empty()) {
+			std::vector<std::vector<uint32_t>> cards(decks.size());
+			for(size_t i = 0; i < decks.size(); ++i) {
+				for(auto* l : {&decks[i].main, &decks[i].extra})
+					for(auto c : *l)
+						cards[i].push_back(db.script_id(c));
+				std::sort(cards[i].begin(), cards[i].end());
+			}
+			auto plays = [&](size_t i, const LibraryPiece& p) {
+				if(p.piece.needs_hand.empty())
+					return false;
+				for(auto c : p.piece.needs_hand)
+					if(!std::binary_search(cards[i].begin(), cards[i].end(), db.script_id(c)))
+						return false;
+				return true;
+			};
+			std::vector<char> keep(pool.size(), 0), any(pool.size(), 0);
+			std::vector<std::vector<size_t>> of(decks.size());
+			for(size_t j = 0; j < pool.size(); ++j)
+				for(size_t i = 0; i < decks.size(); ++i)
+					if(plays(i, pool[j])) {
+						of[i].push_back(j);
+						any[j] = 1;
+					}
+			size_t kept = 0;
+			const size_t share = cap / decks.size(), second_share = share / 3;
+			for(size_t i = 0; i < decks.size() && kept < cap; ++i) {
+				size_t mine = 0, second = 0;
+				for(size_t j : of[i])  // its going-second lines first, up to a third
+					if(pool[j].piece.second && second < second_share && kept < cap) {
+						++second;
+						++mine;
+						if(!keep[j]) {
+							keep[j] = 1;
+							++kept;
+						}
+					}
+				for(size_t j : of[i])
+					if(mine < share && kept < cap && !(pool[j].piece.second && keep[j])) {
+						++mine;
+						if(!keep[j]) {
+							keep[j] = 1;
+							++kept;
+						}
+					}
+			}
+			for(int pass = 0; pass < 2; ++pass)
+				for(size_t j = 0; j < pool.size() && kept < cap; ++j)
+					if(!keep[j] && (pass == 1 || any[j])) {
+						keep[j] = 1;
+						++kept;
+					}
+			std::vector<LibraryPiece> out;
+			for(size_t j = 0; j < pool.size(); ++j)
+				if(keep[j])
+					out.push_back(std::move(pool[j]));
+			pool = std::move(out);
+			sort_library(pool, SIZE_MAX);
+		}
+	}
+	if(pool.size() > cap)
+		pool.resize(cap);
 	std::ofstream(opt_get(opt, "out", "pool.json")) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, pool, static_cast<int>(lines)) << "}";
 	std::printf("shared pool: %zu pieces from %ld lines (%zu pieces found this run)\n", pool.size(), lines, added);
 	return 0;

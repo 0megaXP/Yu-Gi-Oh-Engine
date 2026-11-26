@@ -149,13 +149,13 @@ LiveDuel::LiveDuel(const CardDB& db, ScriptCache& scripts, const DuelSetup& setu
 
 void LiveDuel::set_guide(int player, std::shared_ptr<const PieceGuide> g) {
 	const uint8_t p = static_cast<uint8_t>(player & 1);
-	// A deck whose going-second lines break the board but never won: it wins over several turns,
+	// A deck whose going-second lines break the board but rarely won (PieceGuide::Plan::grind): it wins over several turns,
 	// by having more cards left, so from turn 2 on each card it has (in hand or on the field) is worth
 	// a little more: lines that spend cards for nothing lose against ones that keep them.
 	double grind = 0;
 	if(g) {
 		const auto pl = g->plan();
-		if(pl.breakers >= 3 && pl.wins == 0)
+		if(pl.grind())
 			grind = 0.1;
 	}
 	if(eval_)
@@ -1136,15 +1136,15 @@ int LiveDuel::choose(BotLevel level) {
 				std::vector<Cand> cands;
 				cands.push_back({"the planned turn", t});
 				// The deck's plan (its pieces): a deck whose going-second lines win looks harder for
-				// the win; one whose lines only break the board and build (a grind deck) less.
+				// the win; one whose lines mostly only break the board and build (a grind deck) less.
 				double reach_scale = 1.0;
 				if(guides_[d.player]) {
 					const auto pl = guides_[d.player]->plan();
 					if(pl.breakers)
-						reach_scale = pl.wins ? 1.0 + pl.lethal_reach() : 0.5;
+						reach_scale = pl.grind() ? 0.5 : 1.0 + pl.lethal_reach();
 					if(dbg && duel_->turn() >= 2)
 						std::fprintf(stderr, "deck plan: %d end-board pieces, %d going-second pieces, %d of them winning%s\n",
-						             pl.end_board, pl.breakers, pl.wins, pl.breakers >= 3 && !pl.wins ? " (a grind deck)" : "");
+						             pl.end_board, pl.breakers, pl.wins, pl.grind() ? " (a grind deck)" : "");
 				}
 				Trajectory lethal;
 				if(duel_->turn() >= 2 && t.reward < 0.999 &&

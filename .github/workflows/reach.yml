@@ -35,7 +35,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Fetch rules core, scripts and card data
         run: tools/bootstrap.sh
       - name: Build the CLI

@@ -37,7 +37,8 @@ ColumnRule column_rule(const std::string& t) {
 			end = t.size();
 		const std::string clause = t.substr(start, end - start);
 		start = end + 1;
-		if(clause.find("column") == std::string::npos || r.st_column && clause.find("spell/trap effects in this column") != std::string::npos)
+		if(clause.find("column") == std::string::npos ||
+		   (r.st_column && clause.find("spell/trap effects in this column") != std::string::npos))
 			continue;
 		size_t p = 0;
 		while(p < clause.size()) {

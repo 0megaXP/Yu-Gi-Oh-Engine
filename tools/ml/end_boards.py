@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The format's real end boards: what the combo libraries and the app's Deepen go second against.
 
-usage: end_boards.py --out end_boards.jsonl [--max 400] <file.jsonl | dir> [...]
+usage: end_boards.py --out end_boards.jsonl [--max 1000] <file.jsonl | dir> [...]
 
 Takes, from every input (jsonl files, or the .jsonl files of a directory, in order), the lines of
 the start of turn 2 where the player going first left a board: "kind":"board" lines (the follower
@@ -28,7 +28,7 @@ def lines(paths):
 
 def main():
     args = sys.argv[1:]
-    out, keep = None, 400
+    out, keep = None, 1000
     paths = []
     i = 0
     while i < len(args):

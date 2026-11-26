@@ -50,7 +50,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 
 // The real end boards to go second against: the "start" lines (follow_replay) at turn 2 whose
 // player going first left something on the field. At most `max`.
-std::vector<Scenario> load_end_boards(const std::string& starts_path, size_t max = 400);
+std::vector<Scenario> load_end_boards(const std::string& starts_path, size_t max = 1000);
 
 // The same deck-neutral value for any board (player `p`, going into the opponent's turn).
 double board_value(const CardDB& db, const Deck& deck, const Board& b, uint8_t p);

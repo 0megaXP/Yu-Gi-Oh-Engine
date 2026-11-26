@@ -43,7 +43,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Fetch rules core, scripts and card data
         run: tools/bootstrap.sh
       - name: Build
@@ -86,7 +86,7 @@ jobs:
           # the libraries here and the app's Deepen combo lines go second against. The ones kept
           # (data/end_boards.jsonl: last night's followed games) and the app's starts.
           python3 tools/ml/end_boards.py --out data/end_boards.jsonl data/end_boards.jsonl app/starts.jsonl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: engine
           path: |
@@ -111,8 +111,8 @@ jobs:
       matrix:
         deck: ${{ fromJson(needs.build.outputs.decks) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
       - name: Combo pieces
@@ -132,12 +132,12 @@ jobs:
           build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces $boards \
             --pool combo-pool.json --new-out "newpieces/$name.json" --out "libs/$name.json" | grep -v "^hand " | tail -n 3
           echo "name=$name" >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: library-${{ env.name }}
           path: libs/
           retention-days: 3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: newpieces-${{ env.name }}
           path: newpieces/
@@ -152,11 +152,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           pattern: newpieces-*
@@ -171,7 +171,7 @@ jobs:
           mkdir -p newpieces
           gh release download ml-data --pattern 'local-newpieces-*.json' --dir newpieces 2>/dev/null || true
           if ls newpieces/*.json > /dev/null 2>&1; then
-            build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --out combo-pool.json
+            build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --decks format --out combo-pool.json
             gh release upload ml-data combo-pool.json --clobber
             for f in newpieces/local-newpieces-*.json; do
               [ -f "$f" ] && gh release delete-asset ml-data "$(basename "$f")" -y || true
@@ -188,11 +188,11 @@ jobs:
       matrix:
         shard: ${{ fromJson(needs.build.outputs.shards) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: library-*
           path: libs
@@ -225,7 +225,7 @@ jobs:
           wc -l out/*.jsonl | tail -1
           wc -l out/*.pjsonl | tail -1
           head -n 1 out/log-${{ matrix.shard }}-1.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: positions-${{ matrix.shard }}
           path: out/
@@ -244,8 +244,8 @@ jobs:
       matrix:
         runner: [1, 2, 3, 4, 5, 6]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
       - name: Follow the app's games
@@ -268,7 +268,7 @@ jobs:
           fi
           touch followed/none.jsonl
           wc -l followed/*.jsonl | tail -1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: followed-${{ matrix.runner }}
           path: followed/
@@ -284,16 +284,16 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: positions-*
           path: tonight
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           pattern: followed-*
@@ -391,7 +391,8 @@ jobs:
           pending = {}
           if os.path.exists("pending/state.json"):
               pending = json.load(open("pending/state.json"))
-          names = {"value_net": "value network", "policy": "move policy", "nonengine_timing": "non-engine timing"}
+          names = {"value_net": "value network", "value_net_half": "value network at half strength",
+                   "policy": "move policy", "nonengine_timing": "non-engine timing"}
           carried = {}
           for part, st in pending.items():
               if os.path.exists(f"pending/{part}.json"):
@@ -400,16 +401,24 @@ jobs:
                   print(f"{names.get(part, part)}: still testing the one from run {st.get('since')} "
                         f"({len(st.get('pairs', []))} pairs, {st.get('runs')} runs so far)")
           json.dump(carried, open("candidate/pending.json", "w"))
+          # a new value network is also tested at half strength (its correction halved: one that
+          # predicts who wins better can still make the search's choices between moves noisier)
+          half = "value_net_half" in carried
+          if net_better and "value_net" not in carried and not half:
+              n = json.load(open("candidate/value_net.json"))
+              n["scale"] = float(n.get("scale", 1.0)) * 0.5
+              json.dump(n, open("candidate/value_net_half.json", "w"), separators=(",", ":"))
+              half = True
           net_better = net_better or "value_net" in carried
           pol_better = pol_better or "policy" in carried
           ne_better = ne_better or "nonengine_timing" in carried
           # measured values are kept every run (they are measurements, not a bot change)
           if os.path.exists("nonengine_values.json"):
               shutil.copy("nonengine_values.json", "candidate/nonengine_values.json")
-          json.dump({"value_net": net_better, "policy": pol_better, "nonengine_timing": ne_better},
+          json.dump({"value_net": net_better, "value_net_half": half, "policy": pol_better, "nonengine_timing": ne_better},
                     open("candidate/changed.json", "w"))
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"arena={'yes' if net_better or pol_better or ne_better else 'no'}\n")
+              fh.write(f"arena={'yes' if net_better or half or pol_better or ne_better else 'no'}\n")
           EOF
       - name: Store this run's data (last 20 runs of positions, 6 of policy examples)
         if: always()
@@ -434,7 +443,7 @@ jobs:
             echo "$assets" | grep "^$kind-night-" | sort -t- -k3 -n | head -n -20 | \
               while read -r old; do gh release delete-asset ml-data "$old" -y; done
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: candidate
@@ -457,14 +466,14 @@ jobs:
       matrix:
         shard: ${{ fromJson(needs.build.outputs.arena) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: engine
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: candidate
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: library-*
           path: libs
@@ -478,7 +487,7 @@ jobs:
           part=$(python3 -c "
           import json
           c = json.load(open('candidate/changed.json'))
-          parts = [k for k in ('value_net', 'policy', 'nonengine_timing') if c.get(k)]
+          parts = [k for k in ('value_net', 'value_net_half', 'policy', 'nonengine_timing') if c.get(k)]
           print(parts[(${{ matrix.shard }} - 1) % len(parts)] if parts else '')")
           [ -z "$part" ] && exit 0
           cur() { [ -f "data/$1.json" ] && echo "data/$1.json" || echo none; }
@@ -486,6 +495,7 @@ jobs:
           new_net=$old_net; new_pol=$old_pol; new_t=$old_t
           case "$part" in
             value_net) new_net=candidate/value_net.json ;;
+            value_net_half) new_net=candidate/value_net_half.json ;;
             policy) new_pol=candidate/policy.json ;;
             nonengine_timing) new_t=candidate/nonengine_timing.json ;;
           esac
@@ -502,7 +512,7 @@ jobs:
           done
           wait
           tail -n 1 arena/arena-*.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: arena-${{ matrix.shard }}
           path: arena/
@@ -515,17 +525,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
         with:
           name: candidate
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         if: needs.train.outputs.arena == 'yes'
         with:
           pattern: arena-*
           path: arena
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: engine
           path: built
@@ -565,7 +575,19 @@ jobs:
           fi
           won=""
           if [ "${{ needs.train.outputs.arena }}" = "yes" ]; then
+            # the value network at full or half strength: the one with the better pairs, if kept
+            half=$(python3 -c "
+          import json
+          p = json.load(open('arena.json'))['parts']
+          f, h = p.get('value_net', {}), p.get('value_net_half', {})
+          print('yes' if h.get('keep') and (not f.get('keep') or h['pair_mean'] > f['pair_mean']) else 'no')")
+            if [ "$half" = yes ]; then
+              cp candidate/value_net_half.json data/value_net.json
+              score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['parts']['value_net_half']['score'], 3))")
+              won="value network at half strength ($score)"
+            fi
             for f in value_net policy nonengine_timing; do
+              [ "$f" = value_net ] && [ "$half" = yes ] && continue
               if python3 -c "import json,sys; sys.exit(0 if json.load(open('arena.json'))['parts'].get('$f', {}).get('keep') else 1)"; then
                 cp "candidate/$f.json" "data/$f.json"
                 score=$(python3 -c "import json;print(round(json.load(open('arena.json'))['parts']['$f']['score'], 3))")
@@ -575,6 +597,14 @@ jobs:
           fi
           [ -z "$won" ] && echo "nothing new clearly better: keeping the current network, policy and timing"
           # the parts neither clearly better nor worse: tested again next run (their models and pairs)
+          # (once one of the two value networks is kept, the other stops being tested)
+          if python3 -c "import json,sys; p=json.load(open('arena.json'))['parts']; sys.exit(0 if p.get('value_net',{}).get('keep') or p.get('value_net_half',{}).get('keep') else 1)"; then
+            python3 -c "
+          import json
+          s = json.load(open('pending/state.json'))
+          s.pop('value_net', None); s.pop('value_net_half', None)
+          json.dump(s, open('pending/state.json', 'w'))"
+          fi
           for f in $(python3 -c "import json;print(' '.join(json.load(open('pending/state.json'))))"); do
             cp "candidate/$f.json" "pending/$f.json"
             echo "still testing the new $f next run"
@@ -597,7 +627,7 @@ jobs:
             # the app downloads the latest engine: publish it with what was learned
             gh api -X POST "repos/${{ github.repository }}/actions/workflows/publish.yml/dispatches" -f ref=main || true
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: learn-report
