@@ -135,6 +135,11 @@ python3 -c "
 import json,sys
 s=json.loads(open(sys.argv[1]).readline()); n=sum(1 for l in open(sys.argv[2]) if '\"f\":' in l)
 sys.exit(0 if s['complete'] and n > 0 else f'followall: complete {s[\"complete\"]}, {n} positions')" "$OUT/fa_sum.jsonl" "$OUT/fa.jsonl"
+# an opponent Setting a Spell/Trap nobody saw (their Deck unknown): a Trap stand-in is Set there
+# (a monster stand-in stopped the game at the Set), and the game is followed to its end
+build/ygoe-cli json follow examples/follow_set_hidden.json | python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read()); sys.exit(0 if d['complete'] else f'follow (hidden Set): stopped, {d[\"stopped\"]}')"
 mkdir -p "$OUT/followed" && cp "$OUT/fa.jsonl" "$OUT/fa_sum.jsonl" "$OUT/followed/"
 python3 tools/ml/replays.py merge "$OUT/none.jsonl" "$OUT/followed" "$OUT/merged.jsonl" > /dev/null
 python3 tools/ml/decklib.py decks --starts "$OUT/starts.jsonl" --out "$OUT/deck_library.json" > /dev/null

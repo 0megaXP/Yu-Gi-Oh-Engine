@@ -669,6 +669,10 @@ private:
 // ---------------------------------------------------------------- following
 
 constexpr uint32_t kFiller = 46986414;  // Dark Magician: stands for an opponent's card nobody saw
+// Trap Hole: stands for one nobody saw that is Set in the Spell & Trap Zone (a monster stand-in
+// can't be: the game stopped there)
+constexpr uint32_t kFillerST = 4206964;
+bool is_filler(uint32_t c) { return c == kFiller || c == kFillerST; }
 // Flame Swordsman (a Fusion with no effect): stands for an Extra Deck card nobody saw, so costs
 // like Pot of Prosperity's (banish face-down cards from the Extra Deck) can be paid
 constexpr uint32_t kExtraFiller = 45231177;
@@ -1070,7 +1074,7 @@ std::string Follower::start_json(const Board& b) const {
 	const uint8_t order[2] = {b.turn_player, static_cast<uint8_t>(1 - b.turn_player)};
 	for(uint8_t e : order)
 		for(auto c : decks_[e].main)
-			if(c == kFiller)
+			if(is_filler(c))
 				return "";
 	std::ostringstream o;
 	o << "{\"kind\":\"start\",\"turn\":" << b.turn << ",\"lp\":[" << b.lp[order[0]] << "," << b.lp[order[1]] << "],\"decks\":[";
@@ -1086,7 +1090,7 @@ std::string Follower::start_json(const Board& b) const {
 	for(int k = 0; k < 2; ++k) {
 		std::vector<uint32_t> known;
 		for(const auto& c : b.hand[order[k]])
-			if(c.code && c.code != kFiller)
+			if(c.code && !is_filler(c.code))
 				known.push_back(c.code);
 		o << (k ? "," : "") << list(known);
 	}
@@ -1098,7 +1102,7 @@ std::string Follower::start_json(const Board& b) const {
 			for(const auto& c : *zone) {
 				if(!c.code || (c.type & TYPE_TOKEN))
 					continue;
-				if(c.code == kFiller)
+				if(is_filler(c.code))
 					return "";
 				o << (f ? "" : ",") << "{\"c\":" << c.code << ",\"l\":" << int(c.loc) << ",\"s\":" << c.seq << ",\"p\":" << c.pos << "}";
 				f = false;
@@ -1215,13 +1219,13 @@ FollowResult Follower::run() {
 			for(auto it = pool.begin(); it != pool.end() && pick == pool.end(); ++it)
 				if(fits(*it, nd))
 					pick = it;
-			if(pick == pool.end() && !pool.empty())
+			if(pick == pool.end() && !pool.empty() && !nd)
 				pick = pool.begin();
 			if(pick != pool.end()) {
 				c = *pick;
 				pool.erase(pick);
 			} else {
-				c = kFiller;
+				c = nd == 2 ? kFillerST : kFiller;
 			}
 		}
 		const size_t nopen = std::min(opening[r], top.size());
@@ -1314,6 +1318,18 @@ FollowResult Follower::run() {
 	// the deepest point reached: what is kept when the game can't be followed to its end
 	size_t best = cur;
 	std::vector<Pos> best_pos;
+	auto battle_locked = [&](size_t from) {
+		const Decision& d = duel_->decision();
+		if(d.type != DecisionType::Idle || d.player != duel_->turn_player() || duel_->phase() != PHASE_MAIN1)
+			return false;
+		for(const auto& o : d.options)
+			if(o.kind == OptKind::ToBattle)
+				return false;
+		for(size_t j = from; j < rec_.size() && rec_[j].k != TURN; ++j)
+			if(rec_[j].k == ATTACK || (rec_[j].k == PHASE && rec_[j].v == PHASE_BATTLE_START))
+				return true;
+		return false;
+	};
 	auto rest_is_end = [&](size_t from) {
 		// only the result is left (a surrender, a time-out: the core doesn't announce those)
 		for(size_t j = from; j < rec_.size(); ++j)
@@ -1408,6 +1424,14 @@ FollowResult Follower::run() {
 				for(const auto& e : live_.out)
 					std::fprintf(stderr, " [%s]", ev_str(e).c_str());
 				std::fprintf(stderr, "\n");
+			}
+			// A dead end the replay already shows: Main Phase 1 with no Battle Phase on offer (an effect
+			// used that locks it, a lock the player didn't take) while the replay attacks this turn.
+			// Backing up now instead of after many more tries (it was most of the "hidden attack" stops).
+			if(m >= 0 && battle_locked(static_cast<size_t>(m))) {
+				if(kDebug)
+					std::fprintf(stderr, "  dead end: no Battle Phase, the replay attacks this turn\n");
+				m = -1;
 			}
 			if(m < 0) {
 				live_.out.clear();

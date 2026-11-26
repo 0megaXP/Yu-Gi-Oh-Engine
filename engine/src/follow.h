@@ -46,7 +46,7 @@ struct FollowInput {
 //   2: stand-in Extra Deck cards, Deck reordering optional (Pot of Prosperity), the positions
 //      lost by version 1's start positions back
 //   3: every zone offered (none merged by column), tokens of any id the same token
-constexpr int kFollowVersion = 3;
+constexpr int kFollowVersion = 4;
 
 struct FollowResult {
 	std::string jsonl;          // training positions, one JSON object per line
