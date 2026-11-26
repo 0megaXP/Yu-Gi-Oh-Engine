@@ -1084,9 +1084,49 @@ int LiveDuel::choose(BotLevel level) {
 				}
 			}
 			stale_plan_.clear();
+			const Trajectory searched = t;  // (the search's line, before planning: a candidate for the turn goal)
 			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
 				searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
 				searcher_->defer_summons(r, t, d.player, cfg.horizon_turns);
+			}
+			// The turn goal (turn 2 on, Main Phase 1): a line that wins this turn, if one still wins
+			// when the opponent answers; else the planned turn (take their resources, leave a board).
+			// Each candidate is scored by what it is worth when the opponent answers (win_rate's
+			// value): the planned line (planned with the opponent passing), a winning line, the
+			// search's own line (it already weighed their answers).
+			// (Turn 1 too: going first, the opponent's hand traps are their answers.)
+			if(d.type == DecisionType::Idle && duel_->phase() == PHASE_MAIN1 && !cancel_) {
+				const double scale = plan_seconds / (level == BotLevel::Strong ? 9.0 : 3.0);
+				const int samples = level == BotLevel::Strong ? 3 : 2;
+				const bool dbg = std::getenv("YGOE_PLAN_DEBUG") != nullptr;
+				struct Cand {
+					const char* what;
+					Trajectory line;
+					double wins = 0, value = 0;
+				};
+				std::vector<Cand> cands;
+				cands.push_back({"the planned turn", t});
+				Trajectory lethal;
+				if(duel_->turn() >= 2 && t.reward < 0.999 &&
+				   searcher_->seek_lethal(roots, d.player, cfg, (level == BotLevel::Strong ? 4.0 : 1.5) * scale, lethal))
+					cands.push_back({"a winning line", lethal});
+				// (not when it just ends the turn: a line that does nothing has nothing for the
+				// opponent to answer, so it scores as if it lost nothing)
+				if(searched.responses != t.responses && first_action(searched, d.player).rfind("Go to End Phase", 0) != 0)
+					cands.push_back({"the search's line", searched});
+				size_t pick_c = 0;
+				for(size_t i = 0; i < cands.size(); ++i) {
+					cands[i].wins = searcher_->win_rate(roots, cands[i].line, d.player, cfg, samples, &cands[i].value);
+					if(dbg)
+						std::fprintf(stderr, "turn goal: %s wins %.0f%% when the opponent answers, worth %.3f\n", cands[i].what,
+						             100 * cands[i].wins, cands[i].value);
+					if(cands[i].value > cands[pick_c].value + 0.02)
+						pick_c = i;
+				}
+				if(pick_c != 0) {
+					t = std::move(cands[pick_c].line);
+					t.root = std::min(t.root, roots.size() - 1);
+				}
 			}
 			if(std::getenv("YGOE_BOT_DEBUG")) {
 				fprintf(stderr, "   plan (%.3f):\n", t.reward);

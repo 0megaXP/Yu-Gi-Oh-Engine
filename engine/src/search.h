@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <random>
 #include <vector>
 
 #include "deck.h"
@@ -146,10 +147,29 @@ public:
 	// Problem's draw, Opening to e4 placing its cards), so the board is scored as their Main Phase 1
 	// starts. Responses are appended to `out` if given.
 	void run_out(Duel& d, uint32_t last_turn, std::vector<std::vector<uint8_t>>* out = nullptr) const;
+	// The turn goal from turn 2 on: a line that wins this turn. Playouts from the roots that look
+	// for it (board breakers, the Battle Phase, attacks first; the opponent passes), for up to
+	// `seconds`. Found: true, the shortest winning line in `out`.
+	bool seek_lethal(const std::vector<RootState>& roots, uint8_t me, const SearchConfig& cfg, double seconds, Trajectory& out);
+	// How often `t` still wins when the opponent answers: replayed on every root (each a guess of
+	// their hidden cards), `me` following its steps, the opponent playing its interruptions as
+	// the playouts do; `samples` games per root. The share won (0..1).
+	// `value` (if given): the line's average score over those games (a win 1, a loss 0, else the
+	// board when the turn ends): what the line is worth when the opponent answers.
+	double win_rate(const std::vector<RootState>& roots, const Trajectory& t, uint8_t me, const SearchConfig& cfg, int samples,
+	                double* value = nullptr);
 	// Replays a trajectory and returns the board where it stopped.
 	bool final_board(const RootState& root, const Trajectory& t, Board& out, Duel** keep = nullptr);
 
 private:
+	// The playout prior for `o` (policy, priorities, the selection rules), as the planner uses it.
+	double option_weight(const Duel& duel, const Decision& dd, const Option& o, uint8_t me, const SearchConfig& cfg,
+	                     int steps_this_turn) const;
+	// One game from `d` to the end of the turn (or of the duel): `me` along `rest` where it can
+	// (from `at`), else by the prior (times the lethal boosts with `lethal`); the other player
+	// passes (`opp_passes`) or plays by the prior. Appends to `out`; returns false on a rules error.
+	bool play_out(Duel& d, Trajectory& out, uint8_t me, const SearchConfig& cfg, uint32_t last_turn, const std::vector<Step>* rest,
+	              size_t at, bool lethal, bool opp_passes, std::mt19937_64& rng) const;
 	const CardDB& db_;
 	ScriptCache& scripts_;
 	const Evaluator& eval_;

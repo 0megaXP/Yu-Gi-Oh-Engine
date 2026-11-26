@@ -83,6 +83,9 @@ echo "== a lethal Kusanagi board: Medicurius banishes it at the start of the Bat
 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 138 --bot normal --iterations 300 | grep -q "chain: Chain Medicurius"
 echo "== a hand trap isn't Normal Summoned for nothing (Mulcharmy Fuwalos, turn 9 of the Elfnote mirror)"
 build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 512 --bot normal --iterations 300 | grep "idle:" | grep -vq "Normal Summon Mulcharmy Fuwalos"
+echo "== turn goal: candidate lines scored by what they are worth when the opponent answers"
+YGOE_PLAN_DEBUG=1 build/ygoe-cli simreplay examples/sim_angelechy_vs_elfnote.json --at 104 --bot normal --iterations 100 2> "$OUT/goal.txt" > /dev/null
+grep -q "turn goal: the planned turn wins" "$OUT/goal.txt"
 echo "== turn planner: no Battle Phase with no monsters while combo cards are left"
 build/ygoe-cli simreplay examples/sim_elfnote_mirror.json --at 197 --bot normal --iterations 150 > "$OUT/plan197.txt"
 grep "idle:" "$OUT/plan197.txt" | grep -vq "Go to Battle Phase"

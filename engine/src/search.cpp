@@ -1,4 +1,5 @@
 #include "search.h"
+#include <atomic>
 #include "trigger.h"
 #include "policy.h"
 
@@ -1153,6 +1154,176 @@ SearchOutput Searcher::run(const std::vector<RootState>& roots, uint8_t me, cons
 	}
 	std::sort(out.my_moves.begin(), out.my_moves.end(), [](auto& a, auto& b) { return a.visits > b.visits; });
 	return out;
+}
+
+double Searcher::option_weight(const Duel& duel, const Decision& dd, const Option& o, uint8_t me, const SearchConfig& cfg,
+                               int steps_this_turn) const {
+	double w = playout_weight(dd, o, duel.turn_player(), steps_this_turn);
+	if(cfg.policy && dd.player == me)
+		w *= cfg.policy->factor(dd, o, PolicyContext{duel.turn_player(), steps_this_turn, duel.chain_depth()});
+	if(cfg.priorities && dd.player == me)
+		w *= cfg.priorities->factor(dd, o, dd.player == duel.turn_player());
+	w *= selection_factor(db_, dd, o);
+	if((o.kind == OptKind::Summon || o.kind == OptKind::MSet) && eval_.role(dd.player, o.code).hand_trap)
+		w *= 0.1;
+	if(o.kind == OptKind::ToBattle && !has_attacker(duel.board(), dd.player))
+		w *= 0.01;
+	return w;
+}
+
+bool Searcher::play_out(Duel& d, Trajectory& out, uint8_t me, const SearchConfig& cfg, uint32_t last_turn,
+                        const std::vector<Step>* rest, size_t at, bool lethal, bool opp_passes, std::mt19937_64& rng) const {
+	int steps = 0, this_turn = static_cast<int>(out.steps.size());
+	while(!d.ended() && d.turn() <= last_turn && steps++ < cfg.max_rollout_steps) {
+		const Decision dec = d.decision();
+		if(dec.options.empty())
+			break;
+		size_t pick = SIZE_MAX;
+		if(rest && dec.player == me)
+			for(size_t k = 0; k < 6 && at + k < rest->size() && pick == SIZE_MAX; ++k) {
+				const Step& s = (*rest)[at + k];
+				if(s.player != dec.player)
+					continue;
+				for(size_t o = 0; o < dec.options.size(); ++o)
+					if(dec.options[o].label == s.label) {
+						pick = o;
+						at += k + 1;
+						break;
+					}
+			}
+		if(pick == SIZE_MAX) {
+			if(dec.minor || dec.options.size() == 1) {
+				pick = 0;
+			} else if(dec.player != me && opp_passes) {
+				for(size_t o = 0; o < dec.options.size() && pick == SIZE_MAX; ++o)
+					if(dec.options[o].kind == OptKind::Pass || dec.options[o].kind == OptKind::No)
+						pick = o;
+				if(pick == SIZE_MAX)
+					pick = 0;
+			} else {
+				std::vector<double> w(dec.options.size());
+				for(size_t i = 0; i < w.size(); ++i) {
+					const Option& o = dec.options[i];
+					w[i] = option_weight(d, dec, o, me, cfg, this_turn);
+					if(lethal && dec.player == me) {
+						// looking for the win: board breakers, battle; no Sets, no early End Phase
+						bool breaker = false;
+						if(o.code && o.kind == OptKind::Activate)
+							for(const auto& in : eval_.role(me, o.code).interrupts)
+								breaker |= in.kind == Interrupt::Removal || in.kind == Interrupt::NegateEffect;
+						if(breaker && d.turn_player() == me)
+							w[i] *= 3.0;
+						if(o.kind == OptKind::ToBattle)
+							w[i] *= 5.0;
+						if(o.kind == OptKind::ToEnd)
+							w[i] *= 0.2;
+						if(o.kind == OptKind::MSet || o.kind == OptKind::SSet)
+							w[i] *= 0.3;
+					}
+				}
+				pick = weighted_pick(w, rng);
+			}
+			if(!dec.minor) {
+				const size_t bp = battle_pick(d, dec, pick);
+				if(bp < dec.options.size())
+					pick = bp;
+			}
+		}
+		const Option& o = dec.options[pick];
+		Step st{dec.player, dec.type, o.label, dec.minor, answering(d, dec, o)};
+		if(!d.respond(o.response))
+			return false;
+		out.responses.push_back(o.response);
+		out.steps.push_back(std::move(st));
+		++this_turn;
+	}
+	return true;
+}
+
+bool Searcher::seek_lethal(const std::vector<RootState>& roots, uint8_t me, const SearchConfig& cfg, double seconds, Trajectory& out) {
+	if(roots.empty() || seconds <= 0)
+		return false;
+	const auto t0 = std::chrono::steady_clock::now();
+	auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+	unsigned threads = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)
+	                                   : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
+	std::mutex mu;
+	bool found = false;
+	std::atomic<int> tries{0};
+	auto work = [&](unsigned tid) {
+		std::mt19937_64 rng(0xC0FFEEull * (tid + 1));
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		for(size_t i = tid; elapsed() < seconds; i += threads) {
+			const RootState& r = roots[i % roots.size()];
+			if(!d.replay(r.setup, r.history))
+				return;
+			const uint32_t turn = d.turn();
+			Trajectory t;
+			t.root = i % roots.size();
+			++tries;
+			if(!play_out(d, t, me, cfg, turn, nullptr, 0, true, true, rng))
+				continue;
+			if(!(d.ended() && d.winner() == me))
+				continue;
+			t.reward = 1.0;
+			std::lock_guard<std::mutex> lk(mu);
+			if(!found || t.steps.size() < out.steps.size())
+				out = std::move(t);
+			found = true;
+		}
+	};
+	run_workers(threads, work);
+	if(std::getenv("YGOE_PLAN_DEBUG"))
+		std::fprintf(stderr, "lethal: %d tries in %.1fs, %s\n", tries.load(), elapsed(), found ? "a winning line found" : "none");
+	return found;
+}
+
+double Searcher::win_rate(const std::vector<RootState>& roots, const Trajectory& t, uint8_t me, const SearchConfig& cfg, int samples,
+                          double* value) {
+	if(roots.empty() || samples <= 0)
+		return 0;
+	std::atomic<int> won{0}, played{0};
+	std::mutex mu;
+	double total = 0;
+	const size_t n = roots.size() * static_cast<size_t>(samples);
+	unsigned threads = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)
+	                                   : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
+	std::atomic<size_t> next{0};
+	auto work = [&](unsigned tid) {
+		std::mt19937_64 rng(0xBADC0DEull * (tid + 7));
+		Duel d(db_, scripts_);
+		d.set_declare_pool(pool_);
+		while(true) {
+			const size_t i = next.fetch_add(1);
+			if(i >= n)
+				break;
+			const RootState& r = roots[i % roots.size()];
+			if(!d.replay(r.setup, r.history))
+				continue;
+			Trajectory g;
+			const uint32_t turn = d.turn();
+			if(!play_out(d, g, me, cfg, turn, &t.steps, 0, true, false, rng))
+				continue;
+			++played;
+			if(d.ended() && d.winner() == me)
+				++won;
+			double v = 0;
+			if(d.ended()) {
+				v = d.winner() == me ? 1.0 : 0.0;
+			} else {
+				if(d.turn() == turn + 1)
+					run_out(d, d.turn());
+				v = eval_.evaluate(d.board(), me, d.turn_player(), false, -1).score;
+			}
+			std::lock_guard<std::mutex> lk(mu);
+			total += v;
+		}
+	};
+	run_workers(threads, work);
+	if(value)
+		*value = played > 0 ? total / played : 0.0;
+	return played > 0 ? double(won) / played : 0.0;
 }
 
 bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, const SearchConfig& cfg, double seconds) {
