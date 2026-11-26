@@ -889,7 +889,7 @@ LinesCheck check_video_lines(const CardDB& db, ScriptCache& scripts, const Deck&
 	if(progress)
 		progress(static_cast<int>(lines.size()), static_cast<int>(lines.size()));
 	res.verified = verified_lines;
-	sort_library(res.library, 60);
+	sort_library(res.library, 200);
 	if(policy && !examples.empty()) {
 		policy->train(examples);
 		res.policy = policy->to_json();

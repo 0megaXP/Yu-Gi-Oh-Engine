@@ -71,6 +71,7 @@ struct LibraryPiece {
 	int count = 0;      // lines it appeared in
 	double value = 0;   // average end-board value of those lines
 	double best = 0;    // value of the line the example comes from
+	int seen = 0;       // the last day (days since 1970, UTC) a run found it; 0: not known
 };
 
 std::string pieces_json(const CardDB& db, const std::vector<ComboPiece>& pieces);
@@ -78,6 +79,9 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 // Adds the pieces of one line (with its end value) to `lib`.
 void add_to_library(std::vector<LibraryPiece>& lib, const LineSplit& split, double value);
 void sort_library(std::vector<LibraryPiece>& lib, size_t max);
+// Removes the pieces another one beats in everything (needs no more, ends with at least as much,
+// stopped by no more cards, worth at least as much); the number removed.
+size_t drop_dominated(std::vector<LibraryPiece>& lib);
 // Adds `more` (another library: an earlier run's) to `lib`, pieces with the same needs merged
 // (lines counted together, the example from the best line kept).
 void merge_library(std::vector<LibraryPiece>& lib, const std::vector<LibraryPiece>& more);

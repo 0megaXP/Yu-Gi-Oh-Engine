@@ -122,6 +122,18 @@ build/ygoe-cli pool-merge "$OUT/pool.json" "$OUT/new.json" --out "$OUT/pool.json
 # a share of the pool for each format deck: with a cap of 2, the pieces kept are ones the decks can play
 build/ygoe-cli pool-merge "$OUT/pool.json" --decks examples/decks --max 2 --out "$OUT/pool_small.json" > "$OUT/pool_small.txt"
 grep -q "shared pool: 2 pieces" "$OUT/pool_small.txt"
+# a line another beats in everything goes (a copy that leaves a card less and is worth less);
+# the app's copy holds the best lines of each format deck
+python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1])); P=d['pieces']
+p=next(x for x in P if x['leaves'])
+q=json.loads(json.dumps(p)); q['leaves']=q['leaves'][1:]; q['value']=p['value']-1; q['best']=p.get('best',p['value'])-1
+json.dump({'lines':1,'pieces':[q]},open(sys.argv[2],'w'))" "$OUT/pool.json" "$OUT/worse.json"
+build/ygoe-cli pool-merge "$OUT/pool.json" "$OUT/worse.json" --decks examples/decks --out "$OUT/pool_q.json" \
+  --app-out "$OUT/pool_app.json" > "$OUT/pool_q.txt"
+grep -q "1 beaten in everything by another" "$OUT/pool_q.txt"
+grep -q "the app's copy: [1-9]" "$OUT/pool_q.txt"
 build/ygoe-cli library examples/decks/angelechy_luna_mardelplata_2026-11.ydk --hands 1 --iterations 60 --seed 2 \
   --pool "$OUT/pool.json" --out "$OUT/lib2.json" | grep -q "and [1-9][0-9]* the shared pool has"
 YGOE_FOLLOW_JSONL=1 build/ygoe-cli followtest examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \

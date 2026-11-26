@@ -81,11 +81,17 @@ what they stop and their measured value.
    pooled piece it can play, whichever deck found it (an Elfnote deck's Power Patron lines reach
    the Power Patron decks, a deck mixing archetypes gets the lines of each, a newer list of an
    archetype starts from its older lists' lines), merged with the run's (the same piece seen
-   again counts its lines together and keeps the example from the best line), its 400 most
+   again counts its lines together and keeps the example from the best line), its 2000 most
    played kept. The **pool** job then adds every deck's new pieces to the pool
-   (`ygoe-cli pool-merge --decks format`, up to 8000 kept: each of the format's decks gets an
-   even share, filled with the pieces it can play, most played first, a third of it kept for its
-   going-second lines; pieces no format deck can play, an archetype that left the format, go first).
+   (`ygoe-cli pool-merge --decks format`). The pool has no fixed size: a piece is the cards it
+   starts from and what it ends with (the same cards played to another result are another
+   piece, a choice the puzzle can make), and what goes is a piece another beats in everything
+   (needs no more, ends with at least as much, is stopped by no more cards, is worth at least as
+   much) and one no format deck can play that no run found for 3 weeks. 50,000 is only a
+   ceiling for a broken run (past it each format deck keeps an even share, a third of it for its
+   going-second lines). The full pool is `combo-pool-full.json.gz`; `combo-pool.json`, which the
+   app's computer reads whole, is its copy: the best 1500 pieces of each format deck. A deck's
+   library keeps its best 2000 pieces (it was 400), and a run adds up to 200 per deck (it was 60).
 3. **Self-play**: 8 runners × 4 processes play best-of-3 matches for 3.5 hours: game 1 with a
    coin flip for who goes first, then the loser chooses to go first or second (by the measured
    win rates of its deck in that matchup going first and second, see Values; a fifth of the

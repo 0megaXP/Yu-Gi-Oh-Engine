@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <sstream>
 
 #include "json.h"
@@ -315,6 +316,19 @@ std::string key_of(const ComboPiece& p) {
 	k += p.normal_summon ? "|NS" : "|";
 	if(p.second)
 		k += "|2nd";  // (the same cards going second are another piece: another goal)
+	// What it ends with: the same cards played to another result (other cards for the next
+	// pieces, another end board) are another piece, a choice the puzzle can make
+	auto ends = [](const std::vector<PieceCard>& v) {
+		std::vector<std::string> e;
+		for(const auto& c : v)
+			e.push_back(std::to_string(c.code) + "@" + c.where);
+		std::sort(e.begin(), e.end());
+		std::string r;
+		for(const auto& x : e)
+			r += x + ",";
+		return r;
+	};
+	k += "|g:" + ends(p.gives) + "|l:" + ends(p.leaves);
 	return k;
 }
 
@@ -346,13 +360,20 @@ void add_to_library(std::vector<LibraryPiece>& lib, const LineSplit& split, doub
 }
 
 void merge_library(std::vector<LibraryPiece>& lib, const std::vector<LibraryPiece>& more) {
+	std::unordered_map<std::string, size_t> index;
+	index.reserve(lib.size() + more.size());
+	for(size_t i = 0; i < lib.size(); ++i)
+		index.emplace(key_of(lib[i].piece), i);
 	for(const auto& m : more) {
 		std::string k = key_of(m.piece);
-		auto it = std::find_if(lib.begin(), lib.end(), [&](const LibraryPiece& l) { return key_of(l.piece) == k; });
-		if(it == lib.end()) {
+		auto f = index.find(k);
+		if(f == index.end()) {
+			index.emplace(std::move(k), lib.size());
 			lib.push_back(m);
 			continue;
 		}
+		auto it = lib.begin() + static_cast<std::ptrdiff_t>(f->second);
+		it->seen = std::max(it->seen, m.seen);
 		auto stops = m.piece.stopped_by;
 		if(m.best > it->best) {
 			stops = it->piece.stopped_by;
@@ -368,6 +389,102 @@ void merge_library(std::vector<LibraryPiece>& lib, const std::vector<LibraryPiec
 			it->value = (it->value * it->count + m.value * m.count) / n;
 		it->count = n;
 	}
+}
+
+size_t drop_dominated(std::vector<LibraryPiece>& lib) {
+	// a piece is dominated by another that needs no more (hand cards, cards from earlier pieces,
+	// the Normal Summon), ends with at least as much (cards for the next pieces, the end board),
+	// is stopped by no more cards and is worth at least as much: it's never the better choice
+	auto bag = [](std::vector<std::string> v) {
+		std::sort(v.begin(), v.end());
+		return v;
+	};
+	struct Sig {
+		std::vector<std::string> hand, earlier, gives, leaves, stops;
+	};
+	auto codes = [](const std::vector<uint32_t>& v) {
+		std::vector<std::string> o;
+		for(auto c : v)
+			o.push_back(std::to_string(c));
+		return o;
+	};
+	auto cards = [](const std::vector<PieceCard>& v, bool where) {
+		std::vector<std::string> o;
+		for(const auto& c : v)
+			o.push_back(std::to_string(c.code) + (where ? "@" + c.where : ""));
+		return o;
+	};
+	std::vector<Sig> s(lib.size());
+	std::unordered_map<uint32_t, std::vector<size_t>> by_card;
+	for(size_t i = 0; i < lib.size(); ++i) {
+		const auto& p = lib[i].piece;
+		s[i].hand = bag(codes(p.needs_hand));
+		s[i].earlier = bag(cards(p.needs_earlier, false));
+		s[i].gives = bag(cards(p.gives, true));
+		s[i].leaves = bag(cards(p.leaves, true));
+		std::vector<std::string> st;
+		for(auto& x : p.stopped_by)
+			st.push_back(std::to_string(x.first));
+		st = bag(st);
+		st.erase(std::unique(st.begin(), st.end()), st.end());
+		s[i].stops = st;
+		if(!p.needs_hand.empty())
+			by_card[*std::min_element(p.needs_hand.begin(), p.needs_hand.end())].push_back(i);
+	}
+	auto within = [](const std::vector<std::string>& a, const std::vector<std::string>& b) {  // a ⊆ b (bags)
+		return std::includes(b.begin(), b.end(), a.begin(), a.end());
+	};
+	std::vector<char> gone(lib.size(), 0);
+	for(size_t j = 0; j < lib.size(); ++j) {
+		const auto& b = lib[j];
+		const auto& bs = s[j];
+		// a candidate's hand is within b's, so its lowest hand card is one of b's
+		std::vector<uint32_t> hc = b.piece.needs_hand;
+		std::sort(hc.begin(), hc.end());
+		hc.erase(std::unique(hc.begin(), hc.end()), hc.end());
+		bool dom = false;
+		for(auto c : hc) {
+			auto f = by_card.find(c);
+			if(f == by_card.end())
+				continue;
+			for(size_t i : f->second) {
+				if(i == j || gone[i])
+					continue;
+				const auto& a = lib[i];
+				const auto& as = s[i];
+				if(a.piece.second != b.piece.second || (a.piece.normal_summon && !b.piece.normal_summon))
+					continue;
+				if(std::max(a.value, a.best) < std::max(b.value, b.best) || a.value < b.value)
+					continue;
+				if(!within(as.hand, bs.hand) || !within(as.earlier, bs.earlier) || !within(bs.gives, as.gives) ||
+				   !within(bs.leaves, as.leaves) || !within(as.stops, bs.stops))
+					continue;
+				// equal in everything: the later one goes
+				const bool same = as.hand == bs.hand && as.earlier == bs.earlier && as.gives == bs.gives &&
+				                  as.leaves == bs.leaves && as.stops == bs.stops && a.value == b.value &&
+				                  a.piece.normal_summon == b.piece.normal_summon;
+				if(same && i > j)
+					continue;
+				dom = true;
+				break;
+			}
+			if(dom)
+				break;
+		}
+		gone[j] = dom;
+	}
+	size_t n = 0, w = 0;
+	for(size_t j = 0; j < lib.size(); ++j) {
+		if(gone[j]) {
+			++n;
+			continue;
+		}
+		if(w != j)
+			lib[w] = std::move(lib[j]);
+		++w;
+	}
+	lib.resize(w);
+	return n;
 }
 
 void sort_library(std::vector<LibraryPiece>& lib, size_t max) {
@@ -461,7 +578,8 @@ std::string library_json(const CardDB& db, const std::vector<LibraryPiece>& lib,
 		char best[32];
 		std::snprintf(best, sizeof best, "%.3f", std::max(lib[i].best, lib[i].value));
 		o += (i ? ",{" : "{") + piece_body(db, lib[i].piece) + ",\"count\":" + std::to_string(lib[i].count) +
-		     ",\"share\":" + share + ",\"value\":" + val + ",\"best\":" + best + "}";
+		     ",\"share\":" + share + ",\"value\":" + val + ",\"best\":" + best +
+		     (lib[i].seen ? ",\"seen\":" + std::to_string(lib[i].seen) : std::string()) + "}";
 	}
 	return o + "]";
 }
@@ -506,6 +624,7 @@ std::vector<LibraryPiece> parse_library(const CardDB& db, const json::Value& v) 
 		lp.count = static_cast<int>(o["count"].integer(1));
 		lp.value = o["value"].num(0);
 		lp.best = std::max(lp.value, o["best"].num(lp.value));  // (older files: the average)
+		lp.seen = static_cast<int>(o["seen"].integer(0));
 		if(!p.steps.empty())
 			out.push_back(std::move(lp));
 	}

@@ -1330,7 +1330,7 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
                             const std::vector<std::vector<std::string>>* arrangements, double arrange_seconds) {
 	if(t.steps.empty() || seconds <= 0)
 		return false;
-	const auto t0 = std::chrono::steady_clock::now();
+	auto t0 = std::chrono::steady_clock::now();
 	auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
 	static const bool dbg = std::getenv("YGOE_PLAN_DEBUG") != nullptr;
 	uint32_t root_turn = 0;
@@ -1453,38 +1453,49 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 			std::fprintf(stderr, "plan: the search's line %.3f, with the opponent passing %.3f\n", cur.reward, base.reward);
 		cur = std::move(base);
 	}
-	if(arrangements && !arrangements->empty()) {
-		const auto a0 = std::chrono::steady_clock::now();
-		std::mt19937_64 rng(0xA55E3B1Eull);
-		size_t tried = 0, best_i = SIZE_MAX;
-		for(size_t i = 0; i < arrangements->size(); ++i) {
-			if(std::chrono::duration<double>(std::chrono::steady_clock::now() - a0).count() > arrange_seconds)
-				break;
-			std::vector<Step> rest;
-			for(const auto& l : (*arrangements)[i])
-				rest.push_back(Step{me, DecisionType::Idle, l, false, false});
-			Duel d(db_, scripts_);
-			d.set_declare_pool(pool_);
-			if(!d.replay(root.setup, root.history))
-				break;
-			Trajectory a;
-			a.root = cur.root;
-			++tried;
-			if(finish(d, a, &rest, 0, rng) && a.reward > cur.reward + 1e-6) {
-				cur = std::move(a);
-				best_i = i;
-			}
-		}
-		if(dbg)
-			std::fprintf(stderr, "puzzle: %zu of %zu arrangements of combo pieces played; %s (%.3f)\n", tried,
-			             arrangements->size(), best_i == SIZE_MAX ? "none beats the search's line" : "one beats the search's line",
-			             cur.reward);
-	}
-	const double start_reward = cur.reward;
 	unsigned threads = cfg.threads > 0 ? static_cast<unsigned>(cfg.threads)
 	                                   : std::clamp(std::thread::hardware_concurrency(), 1u, MAX_DEFAULT_THREADS);
 	if(const char* e = std::getenv("YGOE_THREADS"))
 		threads = static_cast<unsigned>(std::max(1, std::atoi(e)));
+	if(arrangements && !arrangements->empty()) {
+		// on every thread; the planner's own time starts after it
+		const auto a0 = std::chrono::steady_clock::now();
+		auto a_elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - a0).count(); };
+		std::vector<Trajectory> results(arrangements->size());
+		std::vector<char> ok(arrangements->size(), 0);
+		std::atomic<size_t> next{0}, tried{0};
+		auto work = [&](unsigned tid) {
+			std::mt19937_64 rng(0xA55E3B1Eull + tid);
+			Duel d(db_, scripts_);
+			d.set_declare_pool(pool_);
+			while(a_elapsed() < arrange_seconds) {
+				const size_t i = next.fetch_add(1);
+				if(i >= arrangements->size())
+					break;
+				std::vector<Step> rest;
+				for(const auto& l : (*arrangements)[i])
+					rest.push_back(Step{me, DecisionType::Idle, l, false, false});
+				if(!d.replay(root.setup, root.history))
+					break;
+				results[i].root = cur.root;
+				++tried;
+				ok[i] = finish(d, results[i], &rest, 0, rng);
+			}
+		};
+		run_workers(std::min<unsigned>(threads, static_cast<unsigned>(arrangements->size())), work);
+		size_t best_i = SIZE_MAX;
+		for(size_t i = 0; i < results.size(); ++i)
+			if(ok[i] && results[i].reward > cur.reward + 1e-6) {
+				cur = results[i];
+				best_i = i;
+			}
+		if(dbg)
+			std::fprintf(stderr, "puzzle: %zu of %zu arrangements of combo pieces played; %s (%.3f)\n", tried.load(),
+			             arrangements->size(), best_i == SIZE_MAX ? "none beats the search's line" : "one beats the search's line",
+			             cur.reward);
+		t0 = std::chrono::steady_clock::now();
+	}
+	const double start_reward = cur.reward;
 	int tried = 0, better = 0;
 	for(size_t k = 0; k < cur.steps.size() && elapsed() < seconds; ++k) {
 		const Step s = cur.steps[k];

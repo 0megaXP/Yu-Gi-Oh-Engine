@@ -131,7 +131,7 @@ ReferenceResult build_reference(const CardDB& db, ScriptCache& scripts, const De
 	std::sort(res.common_cards.begin(), res.common_cards.end(), [](auto& a, auto& b) { return a.second > b.second; });
 	if(res.common_cards.size() > 15)
 		res.common_cards.resize(15);
-	sort_library(res.library, 60);
+	sort_library(res.library, 200);
 	if(policy && !examples.empty()) {
 		policy->train(examples);
 		res.policy = policy->to_json();

@@ -122,11 +122,12 @@ jobs:
           pieces=""
           [ -f app/app-pieces.json ] && pieces="--pieces app/app-pieces.json"
           mkdir -p libs newpieces
-          # the format's shared pool of pieces (combo-pool.json in ml-data: what every deck's
-          # earlier runs found): the deck gets all it can play, whichever deck found them, with
-          # this run's 40 hands; this run's go to the pool job. 40% of the hands are played going
+          # the format's shared pool of pieces (combo-pool-full.json.gz in ml-data: what every
+          # deck's earlier runs found): the deck gets all it can play, whichever deck found them,
+          # with this run's 40 hands; this run's go to the pool job. 40% of the hands are played going
           # second, against real end boards (data/end_boards.jsonl: real games at the start of turn 2)
-          gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
+          gh release download ml-data --pattern 'combo-pool-full.json.gz' 2>/dev/null && gunzip -f combo-pool-full.json.gz \
+            && mv combo-pool-full.json combo-pool.json || gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
           boards=""
           [ -s data/end_boards.jsonl ] && boards="--boards data/end_boards.jsonl --second-share 0.4"
           build/ygoe-cli library "${{ matrix.deck }}" --hands 40 --iterations 1500 --seed ${{ github.run_id }} $pieces $boards \
@@ -165,13 +166,22 @@ jobs:
       - name: Add the run's pieces to the pool
         run: |
           chmod +x build/ygoe-cli
-          gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
+          # the full pool (combo-pool-full.json.gz; before it existed, combo-pool.json)
+          gh release download ml-data --pattern 'combo-pool-full.json.gz' 2>/dev/null && gunzip -f combo-pool-full.json.gz \
+            && mv combo-pool-full.json combo-pool.json || gh release download ml-data --pattern 'combo-pool.json' 2>/dev/null || true
           # the lines the app's "Deepen combo lines" found on a computer (local-newpieces-*.json):
           # merged once, then removed from ml-data
           mkdir -p newpieces
           gh release download ml-data --pattern 'local-newpieces-*.json' --dir newpieces 2>/dev/null || true
           if ls newpieces/*.json > /dev/null 2>&1; then
-            build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --decks format --out combo-pool.json
+            # no fixed size: what goes is a line another beats in everything, and one no format deck
+            # plays that no run found for 3 weeks. The app's copy (combo-pool.json, which its
+            # computer's bots and Deepen read whole): the best 1500 lines of each format deck.
+            build/ygoe-cli pool-merge combo-pool.json newpieces/*.json --decks format --out combo-pool.json \
+              --app-out app-pool.json --app-per-deck 1500
+            gzip -c combo-pool.json > combo-pool-full.json.gz
+            gh release upload ml-data combo-pool-full.json.gz --clobber
+            cp app-pool.json combo-pool.json
             gh release upload ml-data combo-pool.json --clobber
             for f in newpieces/local-newpieces-*.json; do
               [ -f "$f" ] && gh release delete-asset ml-data "$(basename "$f")" -y || true

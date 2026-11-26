@@ -1112,9 +1112,9 @@ int LiveDuel::choose(BotLevel level) {
 			if(d.type == DecisionType::Idle && duel_->phase() == PHASE_MAIN1 && guides_[d.player]) {
 				std::mt19937_64 prng(duel_->turn() * 7919u + d.player);
 				arrangements = guides_[d.player]->arrangements(resources_of(db_, duel_->board(), d.player), prng,
-				                                               level == BotLevel::Strong ? 24 : 10);
+				                                               level == BotLevel::Strong ? 48 : 20);
 			}
-			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds, &arrangements, plan_seconds * 0.25) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
+			if(searcher_->improve_line(r, t, d.player, cfg, plan_seconds, &arrangements, plan_seconds * 0.4) | searcher_->drop_idle_plays(r, t, d.player, cfg.horizon_turns)) {
 				searcher_->defer_sets(r, t, d.player, cfg.horizon_turns);
 				searcher_->defer_summons(r, t, d.player, cfg.horizon_turns);
 			}

@@ -554,7 +554,7 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 	for(const auto& d : cfg.decks) {
 		decks.push_back(d.deck);
 		auto lib = playable_by(db, d.deck, cfg.pool);
-		sort_library(lib, 400);
+		sort_library(lib, 2000);
 		guides.push_back(lib.empty() ? nullptr : std::make_shared<PieceGuide>(std::move(lib), &db));
 	}
 	auto policy = bot_policy(db, cfg.base_policy);

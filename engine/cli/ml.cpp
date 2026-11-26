@@ -35,7 +35,7 @@
 //     every deck's earlier runs found; --new-out writes this run's for it), the most played
 //     kept, plus the pieces of --pieces (the app's, from replays and videos) the deck can play.
 //
-//   ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 8000] [--decks <dir>]
+//   ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--decks <dir>] [--app-out <file>]
 //     The shared pool with the run's new pieces added (the same piece counts its lines together).
 //
 //   ygoe-cli policy-train <examples.jsonl> [...] --out policy.json [--init policy.json] [--epochs 4] [--report r.json]
@@ -628,7 +628,7 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 		pooled = earlier.size();
 		merge_library(lib, earlier);
 	}
-	sort_library(lib, static_cast<size_t>(std::stoi(get("max-pieces", "400"))));
+	sort_library(lib, static_cast<size_t>(std::stoi(get("max-pieces", "2000"))));
 	const size_t own = lib.size();
 	if(opt.count("pieces")) {
 		auto more = playable_by(db, d, parse_library(db, read_file(opt.at("pieces"))));
@@ -640,12 +640,20 @@ int run_library(const std::string& deck_path, const CardDB& db, ScriptCache& scr
 	return 0;
 }
 
-// ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--max 8000] [--decks <dir>]: the format's shared
+// ygoe-cli pool-merge <pool.json> <new.json> [...] --out pool.json [--decks <dir>] [--max 50000]
+//                   [--days 21] [--app-out app_pool.json --app-per-deck 1500]: the format's shared
 // pool of combo pieces, with the pieces the decks found in this run (library --new-out) added.
+// What goes: a piece another beats in everything (drop_dominated), and one no format deck
+// (--decks) can play that no run has found for --days days. --max is only a ceiling for a
+// broken run; past it each format deck keeps an even share of what it can play.
+// --app-out: the app's copy (its computer's bots and Deepen read it whole): the best
+// --app-per-deck pieces of each format deck.
 int run_pool_merge(const std::vector<std::string>& files, const CardDB& db, const Opts& opt) {
 	std::vector<LibraryPiece> pool;
 	long lines = 0;
 	size_t added = 0;
+	const int today = static_cast<int>(std::chrono::duration_cast<std::chrono::hours>(
+	                                      std::chrono::system_clock::now().time_since_epoch()).count() / 24);
 	for(size_t i = 0; i < files.size(); ++i) {
 		if(!std::ifstream(files[i]).good())
 			continue;  // no pool yet
@@ -653,89 +661,116 @@ int run_pool_merge(const std::vector<std::string>& files, const CardDB& db, cons
 		auto more = parse_library(db, v.is_object() ? v["pieces"] : v);
 		if(v.is_object())
 			lines += v["lines"].integer(0);
+		for(auto& m : more)
+			if(i > 0 || !m.seen)  // found in this run (and the pool's from before days were kept: today)
+				m.seen = today;
 		if(i > 0)
 			added += more.size();
 		merge_library(pool, more);
 	}
-	const size_t cap = static_cast<size_t>(std::stoi(opt_get(opt, "max", "8000")));
+	const size_t merged = pool.size();
+	const size_t dominated = drop_dominated(pool);
 	sort_library(pool, SIZE_MAX);
-	// --decks <dir>: the format's decks (.ydk). Each gets an even share of the cap, filled with
-	// the pieces it can play in the order above (found more often, then worth more), a third of
-	// its share kept for its going-second lines; a piece one deck keeps counts for every deck
-	// that can play it. Then the rest in that order, and last the pieces no format deck can play
-	// (an archetype that left the format). Without --decks, just the first `cap`.
-	if(opt.count("decks") && pool.size() > cap) {
-		std::vector<Deck> decks;
+	// the format's decks: which pieces each can play
+	std::vector<std::vector<uint32_t>> cards;
+	if(opt.count("decks"))
 		for(const auto& e : std::filesystem::directory_iterator(opt.at("decks")))
 			if(e.path().extension() == ".ydk") {
 				Deck d;
-				if(load_ydk(e.path().string(), d))
-					decks.push_back(std::move(d));
+				if(!load_ydk(e.path().string(), d))
+					continue;
+				std::vector<uint32_t> c;
+				for(auto* l : {&d.main, &d.extra})
+					for(auto x : *l)
+						c.push_back(db.script_id(x));
+				std::sort(c.begin(), c.end());
+				cards.push_back(std::move(c));
 			}
-		if(!decks.empty()) {
-			std::vector<std::vector<uint32_t>> cards(decks.size());
-			for(size_t i = 0; i < decks.size(); ++i) {
-				for(auto* l : {&decks[i].main, &decks[i].extra})
-					for(auto c : *l)
-						cards[i].push_back(db.script_id(c));
-				std::sort(cards[i].begin(), cards[i].end());
+	auto plays = [&](size_t i, const LibraryPiece& p) {
+		if(p.piece.needs_hand.empty())
+			return false;
+		for(auto c : p.piece.needs_hand)
+			if(!std::binary_search(cards[i].begin(), cards[i].end(), db.script_id(c)))
+				return false;
+		return true;
+	};
+	std::vector<std::vector<size_t>> of(cards.size());
+	std::vector<char> any(pool.size(), 0);
+	for(size_t j = 0; j < pool.size(); ++j)
+		for(size_t i = 0; i < cards.size(); ++i)
+			if(plays(i, pool[j])) {
+				of[i].push_back(j);
+				any[j] = 1;
 			}
-			auto plays = [&](size_t i, const LibraryPiece& p) {
-				if(p.piece.needs_hand.empty())
-					return false;
-				for(auto c : p.piece.needs_hand)
-					if(!std::binary_search(cards[i].begin(), cards[i].end(), db.script_id(c)))
-						return false;
-				return true;
-			};
-			std::vector<char> keep(pool.size(), 0), any(pool.size(), 0);
-			std::vector<std::vector<size_t>> of(decks.size());
+	// the best `share` of each deck's pieces (a third of them its going-second ones) marked in `keep`
+	auto take = [&](size_t share, std::vector<char>& keep) {
+		size_t kept = 0;
+		for(size_t i = 0; i < cards.size(); ++i) {
+			size_t mine = 0, second = 0;
+			for(size_t j : of[i])
+				if(pool[j].piece.second && second < share / 3) {
+					++second;
+					++mine;
+					kept += keep[j] ? 0 : 1;
+					keep[j] = 1;
+				}
+			for(size_t j : of[i])
+				if(mine < share && !(pool[j].piece.second && keep[j])) {
+					++mine;
+					kept += keep[j] ? 0 : 1;
+					keep[j] = 1;
+				}
+		}
+		return kept;
+	};
+	size_t aged = 0;
+	const int days = std::stoi(opt_get(opt, "days", "21"));
+	const size_t cap = static_cast<size_t>(std::stoi(opt_get(opt, "max", "50000")));
+	{
+		std::vector<char> keep(pool.size(), 1);
+		if(!cards.empty())
 			for(size_t j = 0; j < pool.size(); ++j)
-				for(size_t i = 0; i < decks.size(); ++i)
-					if(plays(i, pool[j])) {
-						of[i].push_back(j);
-						any[j] = 1;
-					}
-			size_t kept = 0;
-			const size_t share = cap / decks.size(), second_share = share / 3;
-			for(size_t i = 0; i < decks.size() && kept < cap; ++i) {
-				size_t mine = 0, second = 0;
-				for(size_t j : of[i])  // its going-second lines first, up to a third
-					if(pool[j].piece.second && second < second_share && kept < cap) {
-						++second;
-						++mine;
-						if(!keep[j]) {
-							keep[j] = 1;
-							++kept;
-						}
-					}
-				for(size_t j : of[i])
-					if(mine < share && kept < cap && !(pool[j].piece.second && keep[j])) {
-						++mine;
-						if(!keep[j]) {
-							keep[j] = 1;
-							++kept;
-						}
-					}
-			}
+				if(!any[j] && pool[j].seen && pool[j].seen < today - days) {
+					keep[j] = 0;
+					++aged;
+				}
+		size_t left = 0;
+		for(char k : keep)
+			left += k ? 1 : 0;
+		if(left > cap) {  // the ceiling: an even share per deck first, then the rest in order
+			std::vector<char> k2(pool.size(), 0);
+			size_t kept = cards.empty() ? 0 : take(cap / cards.size(), k2);
 			for(int pass = 0; pass < 2; ++pass)
 				for(size_t j = 0; j < pool.size() && kept < cap; ++j)
-					if(!keep[j] && (pass == 1 || any[j])) {
-						keep[j] = 1;
+					if(keep[j] && !k2[j] && (pass == 1 || any[j])) {
+						k2[j] = 1;
 						++kept;
 					}
+			keep = std::move(k2);
+		}
+		if(opt.count("app-out")) {
+			std::vector<char> app(pool.size(), 0);
+			if(!cards.empty())
+				take(static_cast<size_t>(std::stoi(opt_get(opt, "app-per-deck", "1500"))), app);
 			std::vector<LibraryPiece> out;
 			for(size_t j = 0; j < pool.size(); ++j)
-				if(keep[j])
-					out.push_back(std::move(pool[j]));
-			pool = std::move(out);
-			sort_library(pool, SIZE_MAX);
+				if(app[j] && keep[j])
+					out.push_back(pool[j]);
+			if(cards.empty())  // no decks: the first ones
+				out.assign(pool.begin(), pool.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(pool.size(), 8000)));
+			std::ofstream(opt.at("app-out")) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, out, static_cast<int>(lines)) << "}";
+			std::printf("the app's copy: %zu pieces\n", out.size());
 		}
+		std::vector<LibraryPiece> out;
+		for(size_t j = 0; j < pool.size(); ++j)
+			if(keep[j])
+				out.push_back(std::move(pool[j]));
+		pool = std::move(out);
 	}
-	if(pool.size() > cap)
-		pool.resize(cap);
 	std::ofstream(opt_get(opt, "out", "pool.json")) << "{\"lines\":" << lines << ",\"pieces\":" << library_json(db, pool, static_cast<int>(lines)) << "}";
-	std::printf("shared pool: %zu pieces from %ld lines (%zu pieces found this run)\n", pool.size(), lines, added);
+	std::printf("shared pool: %zu pieces from %ld lines (%zu pieces found this run; %zu merged, %zu beaten in everything by another, "
+	            "%zu no format deck plays for %d days)\n",
+	            pool.size(), lines, added, merged, dominated, aged, days);
 	return 0;
 }
 
