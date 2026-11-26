@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <cstdio>
 #include <ctime>
 #include <deque>
@@ -266,16 +267,31 @@ private:
 // 2 and 3 with both decks sided for the matchup. `on_game` after each game (false: stop).
 // A training game cut for time (PlayConfig::max_seconds): its last moves, kept in the folder
 // (slow_games.jsonl, the latest 20) to see what the bots kept doing.
-void note_slow_game(const fs::path& dir, const std::string& gid, const Game& g) {
-	if(!g.timed_out && g.last_moves.empty())
+// A game with a move cancelled for taking too long (PlayConfig::move_limit) too, and one stuck
+// (a move that didn't return after being cancelled: written from the watchdog). "replay": the
+// game as a replay; the app sends these lines with the training's uploads (local-slow-*).
+std::mutex slow_mu;
+void note_slow_game(const fs::path& dir, const std::string& gid, const Game& g, bool stuck = false) {
+	if(!stuck && !g.timed_out && !g.slow_move && g.last_moves.empty())
 		return;
 	std::ostringstream o;
 	o << "{\"game\":" << json::quote(gid) << ",\"at\":" << std::time(nullptr) << ",\"timed_out\":" << (g.timed_out ? "true" : "false")
+	  << ",\"slow_move\":" << (g.slow_move ? "true" : "false") << ",\"stuck\":" << (stuck ? "true" : "false")
 	  << ",\"turns\":" << g.turns << ",\"moves\":" << g.moves << ",\"last_moves\":[";
 	for(size_t i = 0; i < g.last_moves.size(); ++i)
 		o << (i ? "," : "") << json::quote(g.last_moves[i]);
-	o << "]}";
+	o << "]";
+	if(!g.replay.empty())
+		o << ",\"replay\":" << g.replay;
+	o << "}";
+	std::lock_guard<std::mutex> lk(slow_mu);
 	append_keep(dir / "slow_games.jsonl", {o.str()}, 20);
+}
+
+// A move longer than this is cancelled in training (the bot plays what it has by then).
+double move_limit() {
+	const char* e = std::getenv("YGOE_MOVE_SECONDS");  // (tests)
+	return e ? std::atof(e) : 60.0;
 }
 
 // Training's play settings shared by its sessions: a time limit per game, the search threads.
@@ -322,9 +338,12 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	const double session = std::max(1.0, cfg.minutes) * 60.0;
 	auto elapsed = [&] { return std::chrono::duration<double>(Clock::now() - t0).count(); };
 	std::string* phase_now = nullptr;  // (pc.tick's copy of the last report, set below)
+	std::mutex phase_mu;               // (pc.tick reads it from the game's watchdog thread)
 	auto report = [&](const std::string& phase) {
-		if(phase_now)
+		if(phase_now) {
+			std::lock_guard<std::mutex> lk(phase_mu);
 			*phase_now = phase;
+		}
 		if(cfg.progress)
 			cfg.progress(phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
 	};
@@ -360,12 +379,28 @@ std::string learn_deck(const CardDB& db, ScriptCache& scripts, const LearnConfig
 	std::string last_phase = "Starting";
 	phase_now = &last_phase;
 	auto last_tick = Clock::now();
-	pc.tick = [&] {
-		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 5)
+	pc.move_limit = move_limit();
+	pc.tick = [&](double move_s, bool stuck) {
+		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 1)
 			return;
 		last_tick = Clock::now();
+		std::string phase;
+		{
+			std::lock_guard<std::mutex> lk(phase_mu);
+			phase = last_phase;
+		}
+		if(stuck)
+			phase = "A training game got stuck: close the app and start the session again (its finished games are saved)";
+		else if(move_s > 20)
+			phase += " (a move has been running for " + std::to_string(static_cast<int>(move_s)) + " s)";
 		if(cfg.progress)
-			cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+			cfg.progress(phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+	};
+	pc.on_stuck = [&](const std::string& replay) {
+		Game g;
+		g.replay = replay;
+		g.last_moves = {"stuck: a move didn't return after being cancelled"};
+		note_slow_game(dir, "stuck-" + std::to_string(std::time(nullptr)), g, true);
 	};
 
 	// the rounds so far (one report per line), and the games played in them
@@ -567,13 +602,30 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 	pc.max_seconds = game_seconds();
 	pc.threads = training_threads();
 	std::string last_phase = "Playing the format's games";
+	std::mutex phase_mu;  // (pc.tick reads it from the game's watchdog thread)
 	auto last_tick = Clock::now();
-	pc.tick = [&] {
-		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 5)
+	pc.move_limit = move_limit();
+	pc.tick = [&](double move_s, bool stuck) {
+		if(std::chrono::duration<double>(Clock::now() - last_tick).count() < 1)
 			return;
 		last_tick = Clock::now();
+		std::string phase;
+		{
+			std::lock_guard<std::mutex> lk(phase_mu);
+			phase = last_phase;
+		}
+		if(stuck)
+			phase = "A training game got stuck: close the app and start the session again (its finished games are saved)";
+		else if(move_s > 20)
+			phase += " (a move has been running for " + std::to_string(static_cast<int>(move_s)) + " s)";
 		if(cfg.progress)
-			cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+			cfg.progress(phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
+	};
+	pc.on_stuck = [&](const std::string& replay) {
+		Game g;
+		g.replay = replay;
+		g.last_moves = {"stuck: a move didn't return after being cancelled"};
+		note_slow_game(dir, "stuck-" + std::to_string(std::time(nullptr)), g, true);
 	};
 	Siding siding(db);
 	std::mt19937_64 rng(cfg.seed ^ static_cast<uint64_t>(std::time(nullptr)));
@@ -598,7 +650,10 @@ std::string contribute_selfplay(const CardDB& db, ScriptCache& scripts, const Co
 			++total;
 			write_text(status, "{\"games\":" + std::to_string(total) + ",\"updated\":" + std::to_string(std::time(nullptr)) + "}");
 			za = a_first ? g.z0 : 1.0 - g.z0;
-			last_phase = "Playing the format's games (" + std::to_string(games) + " this session, " + std::to_string(total) + " in all)";
+			{
+				std::lock_guard<std::mutex> lk(phase_mu);
+				last_phase = "Playing the format's games (" + std::to_string(games) + " this session, " + std::to_string(total) + " in all)";
+			}
 			if(cfg.progress)
 				cfg.progress(last_phase, static_cast<int>(std::min(elapsed(), session)), static_cast<int>(session));
 			return !stopped() && elapsed() < session;

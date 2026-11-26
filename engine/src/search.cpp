@@ -1270,7 +1270,7 @@ bool Searcher::seek_lethal(const std::vector<RootState>& roots, uint8_t me, cons
 		std::mt19937_64 rng(0xC0FFEEull * (tid + 1));
 		Duel d(db_, scripts_);
 		d.set_declare_pool(pool_);
-		for(size_t i = tid; elapsed() < seconds; i += threads) {
+		for(size_t i = tid; elapsed() < seconds && !(cfg.cancel && cfg.cancel->load()); i += threads) {
 			const RootState& r = roots[i % roots.size()];
 			if(!d.replay(r.setup, r.history))
 				return;
@@ -1312,7 +1312,7 @@ double Searcher::win_rate(const std::vector<RootState>& roots, const Trajectory&
 		d.set_declare_pool(pool_);
 		while(true) {
 			const size_t i = next.fetch_add(1);
-			if(i >= n)
+			if(i >= n || (cfg.cancel && cfg.cancel->load()))
 				break;
 			const RootState& r = roots[i % roots.size()];
 			if(!d.replay(r.setup, r.history))
@@ -1486,7 +1486,7 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 			std::mt19937_64 rng(0xA55E3B1Eull + tid);
 			Duel d(db_, scripts_);
 			d.set_declare_pool(pool_);
-			while(a_elapsed() < arrange_seconds) {
+			while(a_elapsed() < arrange_seconds && !(cfg.cancel && cfg.cancel->load())) {
 				const size_t i = next.fetch_add(1);
 				if(i >= arrangements->size())
 					break;
@@ -1515,7 +1515,7 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 	}
 	const double start_reward = cur.reward;
 	int tried = 0, better = 0;
-	for(size_t k = 0; k < cur.steps.size() && elapsed() < seconds; ++k) {
+	for(size_t k = 0; k < cur.steps.size() && elapsed() < seconds && !(cfg.cancel && cfg.cancel->load()); ++k) {
 		const Step s = cur.steps[k];
 		if(s.player != me || s.minor)
 			continue;
@@ -1555,7 +1555,7 @@ bool Searcher::improve_line(const RootState& root, Trajectory& t, uint8_t me, co
 			w.set_declare_pool(pool_);
 			while(true) {
 				const size_t j = next.fetch_add(1);
-				if(j >= jobs.size() || elapsed() > seconds)
+				if(j >= jobs.size() || elapsed() > seconds || (cfg.cancel && cfg.cancel->load()))
 					break;
 				if(!at_step(w, cur, k))
 					continue;

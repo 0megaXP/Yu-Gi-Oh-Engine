@@ -1,6 +1,7 @@
 #include "selfplay.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -70,6 +71,50 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 	int guard = 0;
 	const auto t0 = std::chrono::steady_clock::now();
 	std::vector<std::string> recent;  // the last moves, kept for a game that runs out of time
+	// The watchdog: the Stop button, the game's time limit and a move running past move_limit
+	// cancel the bot's thinking (the checks between moves can't, while a move is being played),
+	// and the clock is reported from here, so it keeps moving.
+	using Clk = std::chrono::steady_clock;
+	auto ms = [] { return std::chrono::duration_cast<std::chrono::milliseconds>(Clk::now().time_since_epoch()).count(); };
+	std::atomic<long long> move_t0{ms()};
+	std::atomic<bool> game_over{false}, cancelled{false}, slow{false};
+	auto replay_json = [&] {
+		std::string r = "{\"setup\":" + live.setup_json() + ",\"responses\":[";
+		const auto& h = live.history();
+		for(size_t i = 0; i < h.size(); ++i)
+			r += (i ? ",\"" : "\"") + hex(h[i]) + "\"";
+		return r + "]}";
+	};
+	std::thread dog;
+	if(pc.tick || pc.move_limit > 0 || pc.stop || pc.max_seconds > 0)
+		dog = std::thread([&] {
+			long long cancelled_at = 0;
+			bool told = false;
+			while(!game_over.load()) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(250));
+				const double move_s = (ms() - move_t0.load()) / 1000.0;
+				const bool stop = (pc.stop && pc.stop->load()) ||
+				                  (pc.max_seconds > 0 && std::chrono::duration<double>(Clk::now() - t0).count() > pc.max_seconds);
+				const bool too_long = pc.move_limit > 0 && move_s > pc.move_limit;
+				if(stop || too_long) {
+					if(!cancelled.exchange(true))
+						cancelled_at = ms();
+					if(too_long)
+						slow = true;
+					live.cancel();  // (again every check: a move just starting clears it)
+				}
+				// cancelled and still not back after another move_limit (60 s by default): stuck
+				const double wait = pc.move_limit > 0 ? pc.move_limit : 60;
+				const bool stuck = cancelled.load() && (ms() - cancelled_at) / 1000.0 > wait;
+				if(stuck && !told && pc.on_stuck) {
+					told = true;
+					// (the bot's thread is inside the move: the duel's answers don't change meanwhile)
+					pc.on_stuck(replay_json());
+				}
+				if(pc.tick)
+					pc.tick(move_s, stuck);
+			}
+		});
 	while(!live.duel().ended() && static_cast<int>(live.duel().turn()) <= last_turn && guard++ < 4000) {
 		if(pc.stop && pc.stop->load()) {
 			g.stopped = true;
@@ -79,14 +124,14 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 			g.timed_out = true;
 			break;
 		}
-		if(pc.tick)
-			pc.tick();
 		const Decision& d = live.duel().decision();
 		if(d.type == DecisionType::Idle && on_position)
 			on_position(live);
 		const uint8_t who = d.player;
 		const char* type = decision_name(d.type);
 		const uint32_t turn = live.duel().turn();
+		move_t0 = ms();
+		cancelled = false;
 		const std::string label = live.bot_move(BotLevel::Normal);
 		if(label.empty())
 			break;
@@ -95,8 +140,14 @@ Game play_game(const CardDB& db, ScriptCache& scripts, const Deck& d0, const Dec
 		if(recent.size() > 80)
 			recent.erase(recent.begin());
 	}
-	if(g.timed_out || guard >= 4000)
+	game_over = true;
+	if(dog.joinable())
+		dog.join();
+	g.slow_move = slow.load();
+	if(g.timed_out || g.slow_move || guard >= 4000) {
 		g.last_moves = std::move(recent);
+		g.replay = replay_json();
+	}
 	const Board b = live.duel().board();
 	g.lp[0] = b.lp[0];
 	g.lp[1] = b.lp[1];

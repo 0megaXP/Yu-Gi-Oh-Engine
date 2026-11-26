@@ -170,6 +170,16 @@ ends, and the app uploads what was written every 15 minutes and when a session e
   `local-newpieces-*.json`, which the pool job merges into `combo-pool.json` and then removes.
 - **One deck's own learning**: below.
 
+A watchdog thread follows each training game: the Stop button, the game's time limit (10
+minutes) and a move running past 60 seconds cancel the bot's thinking (the search, the turn
+planner, the puzzle and the turn goal all stop on it, and the bot plays the best it has). It also
+reports the clock every second, with "a move has been running for N s" when one is slow, so the
+time shown never stops. A game with a cancelled move or cut at its time limit is written to
+`slow_games.jsonl` with the game as a replay (`ygoe-cli simreplay` reads it); a move that still
+doesn't return after being cancelled (stuck in the rules core) is written there by the watchdog
+("stuck": true), and the app shows that the session needs restarting. The app uploads these as
+`local-slow-*.jsonl.gz`, which the nightly run leaves alone: they are there to be replayed.
+
 ## A deck's own learning (the app, Windows)
 
 `engine/src/learn.h`: one deck learns on the person's computer, starting from what the nightly

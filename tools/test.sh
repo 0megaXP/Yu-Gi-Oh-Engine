@@ -59,6 +59,18 @@ YGOE_GAME_SECONDS=5 build/ygoe-cli learn examples/decks/angelechy_luna_mardelpla
   --dir "$OUT/slow" --minutes 0.5 --iterations 40 --turns 12 > /dev/null 2>&1
 grep -q '"timed_out":true' "$OUT/slow/slow_games.jsonl"
 grep -q '"last_moves":\["turn' "$OUT/slow/slow_games.jsonl"
+echo "== training: a move past its limit is cancelled by the watchdog; the game is kept as a replay"
+YGOE_MOVE_SECONDS=0.3 build/ygoe-cli learn examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --dir "$OUT/slowmove" --minutes 0.4 --iterations 400 --turns 4 > /dev/null 2>&1
+grep -q '"slow_move":true' "$OUT/slowmove/slow_games.jsonl"
+python3 -c "
+import json,sys
+for l in open(sys.argv[1]):
+    d=json.loads(l)
+    if d.get('replay'):
+        json.dump(d['replay'],open(sys.argv[2],'w')); sys.exit(0)
+sys.exit('no replay in slow_games.jsonl')" "$OUT/slowmove/slow_games.jsonl" "$OUT/slow_replay.json"
+build/ygoe-cli simreplay "$OUT/slow_replay.json" > /dev/null
 echo "== simulator replays: a saved duel is rebuilt with the same log, and targets are shown"
 build/ygoe-cli duel examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --bot0 easy --bot1 easy --turns 4 --seed 11 --save "$OUT/sim.json" | grep -v "^  >\|bot decisions\|^$" > "$OUT/sim.txt"

@@ -44,8 +44,17 @@ struct PlayConfig {
 	// Game::timed_out): one game the bots keep repeating something in can't hold a training up.
 	// 0: no limit.
 	double max_seconds = 0;
-	// Called between moves (training: the time shown keeps moving during a long game).
-	std::function<void()> tick;
+	// Called every half second while the game is played, from a watchdog thread of its own (so
+	// the time shown keeps moving even while one move takes long), with how long the move being
+	// played has taken so far and whether one of this game's moves didn't return after being
+	// cancelled (the game is stuck).
+	std::function<void(double move_seconds, bool stuck)> tick;
+	// A move running longer than this many seconds is cancelled (the bot plays the best it has
+	// found by then); the game's moves are kept (Game::slow_move). 0: no limit.
+	double move_limit = 0;
+	// Called once, from the watchdog, when a cancelled move still hasn't returned (the game is
+	// stuck and won't end): the game so far as a replay (`ygoe-cli simreplay` reads it).
+	std::function<void(const std::string& replay)> on_stuck;
 	// Search threads for the bots (0: the default, every core up to 8).
 	int threads = 0;
 };
@@ -58,8 +67,10 @@ struct Game {
 	int turns = 0;
 	bool stopped = false;  // ended by PlayConfig::stop
 	bool timed_out = false;  // cut by PlayConfig::max_seconds
+	bool slow_move = false;  // a move was cancelled by PlayConfig::move_limit
 	int moves = 0;
-	std::vector<std::string> last_moves;  // timed out: the game's last moves (who, what)
+	std::vector<std::string> last_moves;  // timed out or a slow move: the game's last moves (who, what)
+	std::string replay;  // timed out or a slow move: the game as a replay ({"setup", "responses"})
 };
 
 // The search threads training uses: every core but one (Windows stays responsive, the computer
