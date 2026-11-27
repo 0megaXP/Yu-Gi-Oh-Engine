@@ -44,6 +44,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
+      - name: Pack ml-data's small uploads (a release holds at most 1000 assets)
+        run: tools/ml/compact_release.sh || echo "packing failed; the run goes on"
       - name: Fetch rules core, scripts and card data
         run: tools/bootstrap.sh
       - name: Build

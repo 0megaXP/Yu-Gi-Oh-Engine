@@ -1,0 +1,21 @@
+name: Compact ml-data
+
+# Packs the ml-data release's small uploads into archives (a release holds at most 1000
+# assets): tools/ml/compact_release.sh. The Learn run does the same at its start; this one is
+# for doing it in between.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pack the small uploads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/ml/compact_release.sh
