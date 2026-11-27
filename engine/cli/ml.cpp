@@ -43,6 +43,8 @@
 //     gives their log-loss with the rule prior alone, the starting policy and the trained one.
 #include <algorithm>
 #include <filesystem>
+#include <ctime>
+#include <unistd.h>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -251,6 +253,24 @@ struct Pos {
 	uint32_t turn;
 };
 
+// The nightly self-play and arena: a move past 120 s (YGOE_MOVE_SECONDS) is cancelled, and a
+// move that still doesn't return after that (stuck: in the rules core, or a loop that doesn't
+// stop on the cancel) is written as a replay to $YGOE_STUCK_DIR (default "stuck"), which the
+// workflow uploads (ci-stuck-*); the process's own time limit then ends it.
+static void ci_watchdog(PlayConfig& pc) {
+	const char* e = std::getenv("YGOE_MOVE_SECONDS");
+	pc.move_limit = e ? std::atof(e) : 120.0;
+	pc.on_stuck = [](const std::string& replay) {
+		const char* d = std::getenv("YGOE_STUCK_DIR");
+		const std::filesystem::path dir = d && *d ? d : "stuck";
+		std::error_code ec;
+		std::filesystem::create_directories(dir, ec);
+		const auto f = dir / ("stuck-" + std::to_string(std::time(nullptr)) + "-" + std::to_string(::getpid()) + ".json");
+		std::ofstream(f) << replay << "\n";
+		std::fprintf(stderr, "stuck: a move didn't return after being cancelled; the game is in %s\n", f.string().c_str());
+	};
+}
+
 // Writes a game's positions; z from player 0's result.
 int write_positions(std::ofstream& out, const std::vector<Pos>& pos, const Game& g, const std::string& game, const char* src) {
 	int n = 0;
@@ -285,6 +305,7 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 	pc.max_seconds = 900;  // a game the bots keep repeating something in is cut, not waited for
 	pc.iterations = std::stoi(get("iterations", "300"));
 	pc.max_turns = std::stoi(get("turns", "14"));
+	ci_watchdog(pc);
 	pc.explore = std::stod(get("explore", "0"));
 	pc.explore_moves = std::stoi(get("explore-moves", "2"));
 	const bool bo3 = get("bo3", "0") != "0";
@@ -543,6 +564,7 @@ int run_arena(const std::vector<std::string>& decks_paths, const CardDB& db, Scr
 	pc.max_seconds = 900;  // a game the bots keep repeating something in is cut, not waited for
 	pc.iterations = std::stoi(get("iterations", "300"));
 	pc.max_turns = std::stoi(get("turns", "14"));
+	ci_watchdog(pc);
 	const uint64_t seed = std::stoull(get("seed", "1"));
 	double points = 0;
 	int played = 0;

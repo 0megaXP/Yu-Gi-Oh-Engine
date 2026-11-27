@@ -138,7 +138,8 @@ what they stop and their measured value.
    against far less than one run's noise). A new value network is also tested at half strength
    (its correction halved, `"scale"` in the file), as a part of its own: one that predicts who
    wins better can still make the search's choices between moves noisier. If both are kept, the
-   one with the better pairs is; once one is kept, the other stops. The
+   one with the better pairs is; once one is kept, the other stops. A network still being tested
+   from an earlier run gets its half-strength copy too, once ("half_tested" in its file). The
    commit message carries the reports.
 
 Real games come from the app: it follows each finished YGO Omega replay in the real rules core
@@ -179,6 +180,11 @@ time shown never stops. A game with a cancelled move or cut at its time limit is
 doesn't return after being cancelled (stuck in the rules core) is written there by the watchdog
 ("stuck": true), and the app shows that the session needs restarting. The app uploads these as
 `local-slow-*.jsonl.gz`, which the nightly run leaves alone: they are there to be replayed.
+
+The nightly self-play and arena games have the same watchdog: a move past 120 seconds is
+cancelled; one that still doesn't return is written as a replay and uploaded to `ml-data` as
+`ci-stuck-<run>-<job>-*.json`, and each arena process has 150 minutes, so a stuck game ends only
+its own process's games instead of the whole shard (and the run) running into the job's limit.
 
 ## A deck's own learning (the app, Windows)
 

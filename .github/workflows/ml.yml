@@ -222,6 +222,8 @@ jobs:
           [ -s app/starts.jsonl ] && extra="$extra --starts app/starts.jsonl --start-share 0.25"
           echo "iterations $it; libraries: $(ls libs | wc -l); options:$extra"
           mkdir -p out
+          # a move that doesn't return even after being cancelled: the game as a replay in stuck/
+          export YGOE_STUCK_DIR=stuck
           # one process per core; each stops after its time (a cut game's positions are not written)
           for core in 1 2 3 4; do
             seed=$(( ${{ github.run_id }} % 100000 * 100 + ${{ matrix.shard }} * 10 + core ))
@@ -234,6 +236,13 @@ jobs:
           wait || true
           wc -l out/*.jsonl | tail -1
           wc -l out/*.pjsonl | tail -1
+          # the stuck games (replays: ygoe-cli simreplay) go to ml-data as ci-stuck-*, to be fixed
+          for f in stuck/*.json; do
+            [ -f "$f" ] || continue
+            n="ci-stuck-${{ github.run_id }}-selfplay${{ matrix.shard }}-$(basename "$f")"
+            cp "$f" "$n"
+            GH_TOKEN=${{ github.token }} gh release upload ml-data "$n" --clobber || true
+          done
           head -n 1 out/log-${{ matrix.shard }}-1.txt
       - uses: actions/upload-artifact@v6
         with:
@@ -413,12 +422,18 @@ jobs:
           json.dump(carried, open("candidate/pending.json", "w"))
           # a new value network is also tested at half strength (its correction halved: one that
           # predicts who wins better can still make the search's choices between moves noisier)
+          # (the one still being tested too, once: "half_tested" in its file says its half-strength
+          # copy was made)
           half = "value_net_half" in carried
-          if net_better and "value_net" not in carried and not half:
+          if (net_better or "value_net" in carried) and not half and os.path.exists("candidate/value_net.json"):
               n = json.load(open("candidate/value_net.json"))
-              n["scale"] = float(n.get("scale", 1.0)) * 0.5
-              json.dump(n, open("candidate/value_net_half.json", "w"), separators=(",", ":"))
-              half = True
+              if not n.get("half_tested"):
+                  n["half_tested"] = True
+                  json.dump(n, open("candidate/value_net.json", "w"), separators=(",", ":"))
+                  h = dict(n)
+                  h["scale"] = float(n.get("scale", 1.0)) * 0.5
+                  json.dump(h, open("candidate/value_net_half.json", "w"), separators=(",", ":"))
+                  half = True
           net_better = net_better or "value_net" in carried
           pol_better = pol_better or "policy" in carried
           ne_better = ne_better or "nonengine_timing" in carried
@@ -513,14 +528,22 @@ jobs:
           extra=""
           [ -f app/app-policy.json ] && extra="--phone-policy app/app-policy.json"
           mkdir -p arena
+          export YGOE_STUCK_DIR=stuck
+          # each process at most 150 minutes: a stuck game ends only its own process's games
           for k in 1 2 3 4; do
             seed=$(( (${{ matrix.shard }} - 1) * 4 + k ))
-            build/ygoe-cli arena $decks --games 10 --net "$new_net" --vs "$old_net" --policy "$new_pol" --vs-policy "$old_pol" \
+            timeout 150m build/ygoe-cli arena $decks --games 10 --net "$new_net" --vs "$old_net" --policy "$new_pol" --vs-policy "$old_pol" \
               --ne-timing "$new_t" --vs-ne-timing "$old_t" \
               --libraries libs $extra --iterations "$ITERATIONS" --turns "$TURNS" --seed "$seed" \
               --out "arena/arena-$part-$seed.json" > "arena/arena-$part-$seed.txt" 2>&1 &
           done
-          wait
+          wait || true
+          for f in stuck/*.json; do
+            [ -f "$f" ] || continue
+            n="ci-stuck-${{ github.run_id }}-arena${{ matrix.shard }}-$(basename "$f")"
+            cp "$f" "$n"
+            GH_TOKEN=${{ github.token }} gh release upload ml-data "$n" --clobber || true
+          done
           tail -n 1 arena/arena-*.txt
       - uses: actions/upload-artifact@v6
         with:
