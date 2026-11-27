@@ -280,10 +280,18 @@ jobs:
           # app's uploads of the same games are newer and win)
           cp tools/ml/inputs/inputs-*.jsonl.gz inputs/ 2>/dev/null || true
           python3 tools/ml/replays.py inputs inputs app/inputs.jsonl
+          # the games followed before with the same upload and the same follower (the code
+          # following depends on, hashed: any change there follows everything again) come from the
+          # cache (follow-cache.jsonl.gz, kept by the train job); only the others are followed
+          key=$(git ls-tree -r HEAD engine/src tools/bootstrap.sh tools/patches data/passcode_map.tsv data/value_net.json | sha256sum | cut -c1-16)
+          gh release download ml-data --pattern 'follow-cache.jsonl.gz' 2>/dev/null || true
           if [ -s app/inputs.jsonl ]; then
+            python3 tools/ml/follow_cache.py split app/inputs.jsonl follow-cache.jsonl.gz "$key" app/todo.jsonl followed ${{ matrix.runner }}
+          fi
+          if [ -s app/todo.jsonl ]; then
             for k in 1 2 3 4; do
               s=$(( (${{ matrix.runner }} - 1) * 4 + k ))
-              build/ygoe-cli followall app/inputs.jsonl --shard $s/24 --out followed/pos-$s.jsonl --summary followed/sum-$s.jsonl &
+              build/ygoe-cli followall app/todo.jsonl --shard $s/24 --out followed/pos-$s.jsonl --summary followed/sum-$s.jsonl &
             done
             wait
           fi
@@ -347,6 +355,10 @@ jobs:
           # real games' positions (replays, each game once; they count 3 times in train.py): the
           # games followed here replace the positions the app made of them on the phone
           python3 tools/ml/replays.py merge app/replays.jsonl followed history/replays.jsonl app/follow_report.json
+          # the follow cache for the next run: every game followed tonight or taken from it
+          if python3 tools/ml/follow_cache.py update followed follow-cache.jsonl.gz; then
+            [ -s follow-cache.jsonl.gz ] && gh release upload ml-data follow-cache.jsonl.gz --clobber || true
+          fi
           # the end boards of the games followed tonight (one per game, "kind":"board"), with the
           # ones kept: the keep job commits them, the next run's libraries go second against them
           mkdir -p candidate

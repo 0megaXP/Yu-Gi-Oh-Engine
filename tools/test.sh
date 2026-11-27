@@ -169,6 +169,14 @@ build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk ex
 python3 tools/ml/nonengine.py values "$OUT/sp.gjsonl" --out "$OUT/ne_values.json" > /dev/null
 # the pipeline following the app's uploaded games (a real 2-turn YGO Omega game, followed to the end)
 build/ygoe-cli followall examples/follow_input.jsonl --out "$OUT/fa.jsonl" --summary "$OUT/fa_sum.jsonl" > /dev/null
+# the follow cache: a game followed with the same upload and follower comes from it, unchanged
+rm -rf "$OUT/fc1" "$OUT/fc2"
+python3 tools/ml/follow_cache.py split examples/follow_input.jsonl "$OUT/none.gz" K "$OUT/fc_todo.jsonl" "$OUT/fc1" 1 > /dev/null
+build/ygoe-cli followall "$OUT/fc_todo.jsonl" --out "$OUT/fc1/pos-1.jsonl" --summary "$OUT/fc1/sum-1.jsonl" > /dev/null
+python3 tools/ml/follow_cache.py update "$OUT/fc1" "$OUT/fc.jsonl.gz" > /dev/null
+python3 tools/ml/follow_cache.py split examples/follow_input.jsonl "$OUT/fc.jsonl.gz" K "$OUT/fc_todo2.jsonl" "$OUT/fc2" 1 | grep -q "1 games from earlier runs, 0 to follow"
+cmp <(cat "$OUT"/fc1/pos-1.jsonl "$OUT"/fc1/sum-1.jsonl | sort) <(sort "$OUT/fc2/cache-pos.jsonl")
+python3 tools/ml/follow_cache.py split examples/follow_input.jsonl "$OUT/fc.jsonl.gz" K2 "$OUT/fc_todo3.jsonl" "$OUT/fc3" 1 | grep -q "0 games from earlier runs, 1 to follow"
 python3 -c "
 import json,sys
 s=json.loads(open(sys.argv[1]).readline()); n=sum(1 for l in open(sys.argv[2]) if '\"f\":' in l)

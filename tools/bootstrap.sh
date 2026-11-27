@@ -44,7 +44,7 @@ for dir in "$ROOT"/tools/patches/*/; do
   git -C "$TP/$dep" checkout -q -- .
   for patch in "$dir"*.patch; do
     [ -f "$patch" ] || continue
-    git -C "$TP/$dep" apply "$patch"
+    git -C "$TP/$dep" apply --whitespace=nowarn "$patch"  # (0002 ends the file with the blank line 0003 builds on)
     echo "patch $dep/$(basename "$patch")"
   done
 done
