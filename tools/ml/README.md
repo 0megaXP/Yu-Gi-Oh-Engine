@@ -186,6 +186,16 @@ cancelled; one that still doesn't return is written as a replay and uploaded to 
 `ci-stuck-<run>-<job>-*.json`, and each arena process has 150 minutes, so a stuck game ends only
 its own process's games instead of the whole shard (and the run) running into the job's limit.
 
+The rules core has a budget for card scripts (tools/patches/ygopro-core/0005): about 300 million
+Lua instructions (1-2 seconds) each time the engine asks it to go on. A script past it is stopped
+like a script error, so the check it was making counts as failed, and the core logs its stack
+(`YGOE_LOG=1`). Toon Black Luster Soldier's summon check tried every combination and order of the
+monsters in the hand and on the field and ran for hours; normal checks need a tiny fraction.
+
+Self-play: 15% of the games start from a real end board (`--boards data/end_boards.jsonl
+--board-share 0.15`, the newest 3000 kept): the format deck that left it (the most cards in common,
+at least half of the board's) goes first, any format deck second, their hands drawn from their decks.
+
 ## A deck's own learning (the app, Windows)
 
 `engine/src/learn.h`: one deck learns on the person's computer, starting from what the nightly

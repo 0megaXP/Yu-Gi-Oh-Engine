@@ -222,6 +222,9 @@ jobs:
           extra=""
           [ -f app/app-policy.json ] && extra="$extra --phone-policy app/app-policy.json"
           [ -s app/starts.jsonl ] && extra="$extra --starts app/starts.jsonl --start-share 0.25"
+          # and 15% from real end boards (data/end_boards.jsonl): the format deck that left the
+          # board goes first, any format deck second
+          [ -s data/end_boards.jsonl ] && extra="$extra --boards data/end_boards.jsonl --board-share 0.15"
           echo "iterations $it; libraries: $(ls libs | wc -l); options:$extra"
           mkdir -p out
           # a move that doesn't return even after being cancelled: the game as a replay in stuck/

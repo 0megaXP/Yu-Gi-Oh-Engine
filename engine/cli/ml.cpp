@@ -5,6 +5,7 @@
 //            [--iterations 300] [--turns 14] [--net value_net.json|none]
 //            [--libraries DIR] [--pieces phone_pieces.json] [--policy policy.json|none] [--phone-policy p.json]
 //            [--explore 0.25] [--explore-moves 2] [--bo3 1] [--starts starts.jsonl] [--start-share 0.25]
+//            [--boards end_boards.jsonl] [--board-share 0.15]
 //            [--policy-out examples.jsonl] [--choice-explore 0.2]
 //     Bots play each other (random deck pairs from the list). With --bo3 a pairing is a match:
 //     game 1 with a coin flip for who goes first, then the loser chooses first or second (by the
@@ -338,6 +339,42 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 	if(opt.count("starts"))
 		starts = load_starts(opt.at("starts"));
 	const double start_share = starts.empty() ? 0.0 : std::stod(get("start-share", "0.25"));
+	// --boards end_boards.jsonl: real end boards (the start of turn 2 in the app's games, the cards
+	// nobody saw left out). A share of the games starts there: the player going first is the format
+	// deck the board's cards come from (the most cards in common, at least half of them), the one
+	// going second any format deck; the hands they hold are drawn from their decks.
+	struct BoardStart {
+		Scenario sc;
+		size_t first = 0;  // the format deck that left the board
+	};
+	std::vector<BoardStart> board_starts;
+	if(opt.count("boards")) {
+		for(auto& sc : load_end_boards(opt.at("boards"))) {
+			std::vector<uint32_t> seen;
+			for(const auto& c : sc.placed[1])
+				if(c.code != 4206964)  // (the stand-in for a face-down card nobody saw)
+					seen.push_back(db.script_id(c.code));
+			if(seen.size() < 2)
+				continue;
+			size_t best = SIZE_MAX, best_n = 0;
+			for(size_t i = 0; i < decks.size(); ++i) {
+				std::set<uint32_t> has;
+				for(auto* l : {&decks[i].main, &decks[i].extra})
+					for(auto c : *l)
+						has.insert(db.script_id(c));
+				size_t n = 0;
+				for(auto c : seen)
+					n += has.count(c);
+				if(n > best_n) {
+					best_n = n;
+					best = i;
+				}
+			}
+			if(best != SIZE_MAX && best_n * 2 >= seen.size())
+				board_starts.push_back({std::move(sc), best});
+		}
+	}
+	const double board_share = board_starts.empty() ? 0.0 : std::stod(get("board-share", "0.15"));
 	std::ofstream out(get("out", "positions.jsonl"), std::ios::app);
 	std::unique_ptr<std::ofstream> pol_out;
 	if(opt.count("policy-out"))
@@ -348,6 +385,8 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 	std::printf("%zu decks, %d with combo pieces; policy %s; %zu start positions\n", decks.size(),
 	            static_cast<int>(std::count_if(dk.guides.begin(), dk.guides.end(), [](auto& g) { return g != nullptr; })),
 	            policy ? "yes" : "no", starts.size());
+	if(opt.count("boards"))
+		std::printf("%zu real end boards to start from (%.0f%% of the games)\n", board_starts.size(), board_share * 100);
 	int written = 0, examples = 0;
 	auto t0 = std::chrono::steady_clock::now();
 	for(int gi = 0; gi < games; ++gi) {
@@ -487,6 +526,25 @@ int run_selfplay(const std::vector<std::string>& decks_paths, const CardDB& db, 
 			spc.start = &sc;
 			Bot b{net, policy, nullptr, timing};
 			one(sc.decks[0], sc.decks[1], b, b, sc.seed, spc, match_id, "start");
+			continue;
+		}
+		if(!board_starts.empty() && unit(rng) < board_share) {
+			// a real end board: the format deck that left it goes first, any format deck second
+			const BoardStart& bs = board_starts[rng() % board_starts.size()];
+			const size_t second = rng() % decks.size();
+			Scenario sc = bs.sc;
+			sc.decks[0] = decks[second];
+			sc.decks[1] = decks[bs.first];
+			for(int p = 0; p < 2; ++p) {
+				sc.hand[p].clear();
+				sc.hand_known[p] = false;
+			}
+			sc.seed = rng();
+			PlayConfig spc = pc;
+			spc.turn_offset = 1;
+			spc.start = &sc;
+			one(sc.decks[0], sc.decks[1], Bot{net, policy, dk.guides[second], timing}, Bot{net, policy, dk.guides[bs.first], timing},
+			    sc.seed, spc, match_id, "board");
 			continue;
 		}
 		const size_t a = rng() % decks.size(), bdx = rng() % decks.size();

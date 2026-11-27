@@ -1,0 +1,68 @@
+diff --git a/interpreter.cpp b/interpreter.cpp
+index a172686..de0395c 100644
+--- a/interpreter.cpp
++++ b/interpreter.cpp
+@@ -57,8 +57,26 @@ static bool check_lua_stack_unwinding(lua_State* L) {
+ 	return flag == 0xFFFFFFFF;
+ }
+ 
++// ygoe: counts down interpreter::script_budget every 100000 instructions; past it, the script
++// is stopped with an error (the rules core treats it like any script error: the check fails).
++static void ygoe_budget_hook(lua_State* L, lua_Debug*) {
++	duel* pd;
++	std::memcpy(&pd, lua_getextraspace(L), sizeof(duel*));
++	auto* lua = pd->lua;
++	if(!lua || (lua->script_budget -= 100000) > 0)
++		return;
++	if(!lua->budget_reported) {
++		lua->budget_reported = true;
++		luaL_traceback(L, L, "a card script ran too long and was stopped (its check counts as failed)", 1);
++		pd->handle_message(lua_tostring(L, -1), OCG_LOG_TYPE_ERROR);
++		lua_pop(L, 1);
++	}
++	luaL_error(L, "script ran too long");
++}
++
+ interpreter::interpreter(duel* pd, const OCG_DuelOptions& options, bool& valid_lua_lib): coroutines(256), deleted(pd) {
+ 	lua_state = luaL_newstate();
++	script_budget = kScriptBudget;
+ 	if(!check_lua_stack_unwinding(lua_state)) {
+ 		valid_lua_lib = false;
+ 		pd->handle_message("The lua library linked with this ocgcore does not support c++'s stack unwinding", OCG_LOG_TYPE_ERROR);
+@@ -69,6 +87,7 @@ interpreter::interpreter(duel* pd, const OCG_DuelOptions& options, bool& valid_l
+ 	no_action = 0;
+ 	call_depth = 0;
+ 	std::memcpy(lua_getextraspace(lua_state), &pd, sizeof(duel*));
++	lua_sethook(lua_state, ygoe_budget_hook, LUA_MASKCOUNT, 100000);  // ygoe (coroutines get it too)
+ 	// Open basic and used functionality
+ 	auto open_lib = [L=lua_state](const char* libname, lua_CFunction openf) {
+ 		ensure_luaL_stack(luaL_requiref, L, libname, openf, 1);
+diff --git a/interpreter.h b/interpreter.h
+index 495e5f2..c0a40fc 100644
+--- a/interpreter.h
++++ b/interpreter.h
+@@ -48,6 +48,11 @@ public:
+ 	
+ 	duel* pduel;
+ 	lua_State* lua_state;
++	// ygoe: the instructions card scripts may still run in this OCG_DuelProcess call (a script
++	// that tries every combination of a big group runs for hours: stopped, as a script error)
++	int64_t script_budget = 0;
++	bool budget_reported = false;
++	static constexpr int64_t kScriptBudget = 300000000LL;  // ~1-2 s of Lua: a normal check needs a tiny fraction
+ 	lua_State* current_state;
+ 	param_list params;
+ 	coroutine_map coroutines;
+diff --git a/ocgapi.cpp b/ocgapi.cpp
+index 86acbd6..845218b 100644
+--- a/ocgapi.cpp
++++ b/ocgapi.cpp
+@@ -113,6 +113,8 @@ void OCG_StartDuel(OCG_Duel ocg_duel) {
+ int OCG_DuelProcess(OCG_Duel ocg_duel) {
+ 	auto* pduel = static_cast<duel*>(ocg_duel);
+ 	pduel->buff.clear();
++	if(pduel->lua)
++		pduel->lua->script_budget = interpreter::kScriptBudget;  // ygoe: a new budget for each call
+ 	auto flag = OCG_DUEL_STATUS_END;
+ 	do {
+ 		flag = pduel->game_field->process();

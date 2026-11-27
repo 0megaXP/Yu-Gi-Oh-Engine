@@ -59,6 +59,16 @@ YGOE_GAME_SECONDS=5 build/ygoe-cli learn examples/decks/angelechy_luna_mardelpla
   --dir "$OUT/slow" --minutes 0.5 --iterations 40 --turns 12 > /dev/null 2>&1
 grep -q '"timed_out":true' "$OUT/slow/slow_games.jsonl"
 grep -q '"last_moves":\["turn' "$OUT/slow/slow_games.jsonl"
+echo "== a card script that would run for hours is stopped by the rules core's budget (Toon Black Luster Soldier)"
+YGOE_LOG=1 timeout 400 build/ygoe-cli simreplay examples/sim_stuck_toon_bls.json --at 34 --bot normal --iterations 60 \
+  > "$OUT/tbls.txt" 2> "$OUT/tbls.err"
+grep -q "> P0 chain:" "$OUT/tbls.txt"
+grep -q "a card script ran too long and was stopped" "$OUT/tbls.err"
+echo "== self-play from a real end board: the format deck that left it goes first"
+build/ygoe-cli selfplay examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
+  --games 1 --iterations 40 --turns 3 --boards examples/end_board_matching.jsonl --board-share 1 --out "$OUT/board_pos.jsonl" > "$OUT/board_sp.txt" 2>&1
+grep -q "^1 real end boards to start from" "$OUT/board_sp.txt"
+grep -q "^game 1-0: " "$OUT/board_sp.txt"
 echo "== training: a move past its limit is cancelled by the watchdog; the game is kept as a replay"
 YGOE_MOVE_SECONDS=0.3 build/ygoe-cli learn examples/decks/angelechy_luna_mardelplata_2026-11.ydk examples/decks/elfnote_koller_wien_2026-11.ydk \
   --dir "$OUT/slowmove" --minutes 0.4 --iterations 400 --turns 4 > /dev/null 2>&1
