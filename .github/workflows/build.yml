@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    paths-ignore:
+      - docs/run-issues.md  # (the run report's log of what went wrong: no build needed)
   workflow_dispatch:
 
 jobs:
